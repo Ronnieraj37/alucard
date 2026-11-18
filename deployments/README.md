@@ -7,12 +7,15 @@ Everything here is on **Ethereum Sepolia** (chain id 11155111). The JSON files n
 | Contract | Address |
 |---|---|
 | RuleHook (hook: pool table + limit orders) | [`0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0`](https://sepolia.etherscan.io/address/0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0) |
-| ConditionalOrders (LP positions with rules) | [`0xf2b46cb234E2A901cb8F48e3589B4fB2F2AFcA6f`](https://sepolia.etherscan.io/address/0xf2b46cb234E2A901cb8F48e3589B4fB2F2AFcA6f) |
+| ConditionalOrders (LP positions with rules) | [`0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63`](https://sepolia.etherscan.io/address/0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63) |
+| PriceFeeds (token list, Chainlink USD feeds) | [`0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e`](https://sepolia.etherscan.io/address/0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e) |
+| USDT mock feed ($1, no Chainlink feed on Sepolia) | [`0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4`](https://sepolia.etherscan.io/address/0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4) |
 | Uniswap v4 PoolManager | [`0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`](https://sepolia.etherscan.io/address/0xE03A1074c86CFeDd5C142C4F04F1a1536e203543) |
 | Uniswap v4 PositionManager | [`0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4`](https://sepolia.etherscan.io/address/0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4) |
 | Swap router (hookmate) | [`0xf13D190e9117920c703d79B5F33732e10049b115`](https://sepolia.etherscan.io/address/0xf13D190e9117920c703d79B5F33732e10049b115) |
 
-Deployed at block 12048765.
+Hook and pools deployed at block 12048765. ConditionalOrders and PriceFeeds redeployed on 2026-11-19
+(`script/sepolia/06_DeployOrders.s.sol`); the earlier ConditionalOrders `0xf2b46cb234E2A901cb8F48e3589B4fB2F2AFcA6f` is retired.
 
 ## Test tokens
 

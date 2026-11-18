@@ -15,5 +15,6 @@ out/
 .env
 
 # Node modules
-node_modules/.env.*
+node_modules/
+.env.*
 !.env.example

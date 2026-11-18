@@ -5,7 +5,7 @@
 | Frontend (`frontend/`) | Vercel, Hobby plan | free |
 | Backtest API (`frontend/api/backtest.py`) | the same Vercel project (Python function) | free |
 | Keeper bot (`frontend/scripts/keeper.ts`) | GitHub Actions schedule (`.github/workflows/keeper.yml`) | free (public repo; private: 2,000 min/month) |
-| Contracts | already on Sepolia (`deployments/README.md`) | Sepolia gas only |
+| Contracts | on Sepolia (`deployments/`): ConditionalOrders `0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63`, PriceFeeds `0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e` | Sepolia gas only |
 
 Keys live only in git-ignored files (`.env`, `frontend/.env.local`) or in the hosts' secret settings.
 
@@ -49,8 +49,10 @@ set -a; source .env; set +a
 PM=0xE03A1074c86CFeDd5C142C4F04F1a1536e203543
 forge verify-contract --chain sepolia --watch 0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0 src/RuleHook.sol:RuleHook \
   --constructor-args $(cast abi-encode "constructor(address)" $PM)
-forge verify-contract --chain sepolia --watch 0xf2b46cb234E2A901cb8F48e3589B4fB2F2AFcA6f src/ConditionalOrders.sol:ConditionalOrders \
-  --constructor-args $(cast abi-encode "constructor(address,address)" $PM 0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0)
+forge verify-contract --chain sepolia --watch 0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e src/PriceFeeds.sol:PriceFeeds \
+  --constructor-args $(cast abi-encode "constructor(address)" 0x02847D22C33f5F060Bd27e69F1a413AD44cab213)
+forge verify-contract --chain sepolia --watch 0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63 src/ConditionalOrders.sol:ConditionalOrders \
+  --constructor-args $(cast abi-encode "constructor(address,address,address)" $PM 0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0 0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e)
 ```
 
 ## Local development
@@ -121,7 +123,8 @@ Orders in the old ConditionalOrders keep working there; their owners can still c
    The script rewrites `deployments/sepolia-core.json` (`conditionalOrders`, `priceFeeds`, `usdtMockFeed`).
 3. `cd frontend && npm run sync`, commit, push.
 
-The frontend in the repo already uses the new ABI: do not push it to Vercel before step 3, or creating orders fails.
+Done on 2026-11-19 (ConditionalOrders `0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63`, PriceFeeds
+`0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e`, USDT mock feed `0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4`); the frontend is synced.
 
 Admin calls on `PriceFeeds` afterwards (owner only): `setFeed(token, aggregator, maxAge)` to list a token,
 `removeFeed(token)` to take one off (open orders keep running), `setMinOrderUsd(usd with 18 decimals)` for the
