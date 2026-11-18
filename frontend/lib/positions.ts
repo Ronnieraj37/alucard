@@ -6,6 +6,7 @@ import { positionManagerAbi } from "./abis-extra";
 import { conditionalOrdersAbi } from "./generated/abis";
 import { CORE, type Pool, POOLS, amountsFor, poolByIndex, priceAtTick, sqrtFromX96, tokenByAddress } from "./pools";
 import { type Advanced, type LaneId, type Rules, type Side, decodeRules, sideFor } from "./rules";
+import { getLogsSinceDeploy } from "./logs";
 
 export type RulePosition = {
   kind: "rules";
@@ -97,14 +98,12 @@ export async function loadRulePosition(client: Client, id: bigint): Promise<Rule
 
 /** Plain Uniswap positions in our pools that this wallet holds (found from NFT transfer logs since our deploy). */
 async function loadPlain(client: Client, owner: `0x${string}`): Promise<PlainPosition[]> {
-  const logs = await client.getLogs({
+  const logs = await getLogsSinceDeploy({
     address: CORE.positionManager,
     event: positionManagerAbi.find((x) => x.type === "event" && x.name === "Transfer")!,
     args: { to: owner },
-    fromBlock: BigInt(CORE.deployBlock),
-    toBlock: "latest",
   });
-  const ids = [...new Set(logs.map((l) => l.args.id!))];
+  const ids = [...new Set((logs as { args: { id: bigint } }[]).map((l) => l.args.id))];
   const out: PlainPosition[] = [];
   for (const id of ids) {
     const [holder, [key, info], liq] = await Promise.all([

@@ -10,6 +10,7 @@ import { QUOTER, quoterAbi } from "@/lib/abis-extra";
 import { conditionalOrdersAbi, routerAbi, ruleHookAbi } from "@/lib/generated/abis";
 import { CORE, POOLS, type Pool, type Token, TOKENS, fmt, priceAtTick, toRaw } from "@/lib/pools";
 import { useTokenBalance, useTx } from "@/lib/tx";
+import { getLogsSinceDeploy } from "@/lib/logs";
 
 const poolsFor = (a: Token, b: Token) =>
   POOLS.filter((p) => (p.token0.address === a.address && p.token1.address === b.address) || (p.token0.address === b.address && p.token1.address === a.address));
@@ -336,12 +337,10 @@ function MyLimitOrders() {
     queryKey: ["limits", address],
     enabled: !!address && !!client,
     queryFn: async () => {
-      const logs = await client!.getLogs({
+      const logs = await getLogsSinceDeploy({
         address: CORE.ruleHook,
         event: ruleHookAbi.find((x) => x.type === "event" && x.name === "LimitPlaced")! as never,
         args: { owner: address } as never,
-        fromBlock: BigInt(CORE.deployBlock),
-        toBlock: "latest",
       });
       const byEpoch = new Map<bigint, bigint>();
       for (const l of logs as unknown as { args: { epochId: bigint; paid: bigint } }[]) byEpoch.set(l.args.epochId, (byEpoch.get(l.args.epochId) ?? 0n) + l.args.paid);

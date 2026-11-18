@@ -44,9 +44,12 @@ type Windows = {
   windowDays: number;
 };
 
+// "own": this pool, rebuilt from the chain (its tokens' Chainlink prices, arbitrage trades); the others are real mainnet
+// swaps recorded by lp_study.
 const HISTORY = [
-  { key: "eth_usdc_030", label: "ETH/USDC 0.30%", hint: "96k swaps" },
-  { key: "eth_usdc_005", label: "ETH/USDC 0.05%", hint: "1M swaps" },
+  { key: "own", label: "This pool", hint: "Six months of this pool's price from its tokens' Chainlink feeds on Sepolia, read from the chain" },
+  { key: "eth_usdc_030", label: "Mainnet ETH/USDC 0.30%", hint: "96k real swaps" },
+  { key: "eth_usdc_005", label: "Mainnet ETH/USDC 0.05%", hint: "1M real swaps" },
 ];
 const CHAINS = [
   { id: "unichain", label: "Unichain", cost: 0.01, hint: "~$0.01 a run" },
@@ -54,6 +57,8 @@ const CHAINS = [
 ];
 // recorded window: 2026-04-05 to 2026-10-03 (lp_study)
 const DATA_START = 1775347200;
+// our pools: the last 180 days, ending at the last full hour (so a repeated backtest within the hour is cached)
+const ownStart = () => Math.floor(Date.now() / 3_600_000) * 3600 - 180 * 86400;
 
 function encode(req: object) {
   const json = JSON.stringify(req);
@@ -76,9 +81,15 @@ export default function Backtest({
   onClose: () => void;
 }) {
   const client = usePublicClient();
-  const [history, setHistory] = useState(pool.key.fee <= 500 ? "eth_usdc_005" : "eth_usdc_030");
+  const [history, setHistory] = useState("own");
+  const own = history === "own";
+  const dataStart = own ? ownStart() : DATA_START;
   const [days, setDays] = useState(90);
   const [startMonth, setStartMonth] = useState(0); // months after the data start
+  // our pools: start on the most recent window (ending now); the recorded history: on its first one
+  useEffect(() => {
+    setStartMonth(own ? (days === 90 ? 3 : days === 30 ? 5 : 0) : 0);
+  }, [own, days]);
   const [allWindows, setAllWindows] = useState(false);
   const [deposit, setDeposit] = useState(10_000);
   const [chain, setChain] = useState(CHAINS[0]);
@@ -89,7 +100,7 @@ export default function Backtest({
   const ethLike = pool.base.symbol === "WETH" || pool.base.symbol === "ETH";
 
   const q = useQuery({
-    queryKey: ["backtest", history, days, startMonth, allWindows, deposit, chain.id, keeperMode, JSON.stringify(rules), JSON.stringify(range), JSON.stringify(advanced)],
+    queryKey: ["backtest", history, pool.index, dataStart, days, startMonth, allWindows, deposit, chain.id, keeperMode, JSON.stringify(rules), JSON.stringify(range), JSON.stringify(advanced)],
     staleTime: Infinity,
     queryFn: async () => {
       // Price triggers are sent relative to today's price of the pool they watch, so they apply to a past window.
@@ -118,9 +129,9 @@ export default function Backtest({
         lanes[id] = { ...L, trigger: t, trigger2: t2 };
       }
       const req = {
-        pool: history,
+        pool: own ? `sepolia:${pool.index}` : history,
         days,
-        start: DATA_START + startMonth * 30 * 86400,
+        start: dataStart + startMonth * 30 * 86400,
         depositUsd: deposit,
         range,
         rules: lanes,
@@ -145,8 +156,8 @@ export default function Backtest({
           <ArrowLeft className="h-4 w-4" /> Back to rules
         </button>
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">Backtest on real swap history</div>
-          <div className="text-[11px] text-[var(--muted)]">Every recorded swap is replayed against your position and its rules, the way the contract would run them.</div>
+          <div className="truncate text-sm font-semibold">Backtest</div>
+          <div className="text-[11px] text-[var(--muted)]">Every swap of the history is replayed against your position and its rules, the way the contract would run them.</div>
         </div>
       </div>
 
@@ -165,7 +176,6 @@ export default function Backtest({
                   else {
                     setAllWindows(false);
                     setDays(Number(v));
-                    if (Number(v) === 180) setStartMonth(0);
                   }
                 }}
                 items={[
@@ -181,7 +191,7 @@ export default function Backtest({
                 <select className="input !w-auto !py-1.5 text-[13px]" value={startMonth} onChange={(e) => setStartMonth(Number(e.target.value))}>
                   {Array.from({ length: days === 90 ? 4 : 6 }, (_, m) => (
                     <option key={m} value={m}>
-                      {new Date((DATA_START + m * 30 * 86400) * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                      {new Date((dataStart + m * 30 * 86400) * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
                     </option>
                   ))}
                 </select>
@@ -213,7 +223,17 @@ export default function Backtest({
             </Control>
           </div>
 
-          {!ethLike && (
+          {own && (
+            <div className="flex gap-2 rounded-[10px] bg-[var(--line2)] p-3 text-[12px] text-[var(--muted)]">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                {pool.base.symbol}/{pool.quote.symbol}&apos;s price is taken from every round of its tokens&apos; Chainlink feeds on Sepolia, read from the chain.
+                A testnet pool has almost no traders, so the swaps are the arbitrage trades that keep it on that price, with this pool&apos;s fee tier: fees
+                are a lower bound for a real pool.
+              </span>
+            </div>
+          )}
+          {!own && !ethLike && (
             <div className="flex gap-2 rounded-[10px] bg-[var(--amber-lt)] p-3 text-[12px] text-[var(--amber)]">
               <Info className="mt-0.5 h-4 w-4 shrink-0" />
               Your pool is {pool.base.symbol}/{pool.quote.symbol}; the recorded history is ETH/USDC. This shows how your rules behave on ETH’s real price path, with
@@ -225,7 +245,7 @@ export default function Backtest({
 
           {q.isLoading && (
             <div className="card flex items-center justify-center gap-2 p-16 text-[13px] text-[var(--muted)]">
-              <Loader2 className="h-4 w-4 animate-spin" /> Replaying swaps…
+              <Loader2 className="h-4 w-4 animate-spin" /> {own ? "Reading Chainlink history and replaying…" : "Replaying swaps…"}
             </div>
           )}
           {q.error && <div className="card p-4 text-[13px] text-[var(--rose)]">{(q.error as Error).message}</div>}

@@ -33,7 +33,7 @@ export const SECTIONS: DocSection[] = [
           items={[
             { icon: Sparkles, title: "Rules on your liquidity", text: "Take profit, stop loss, follow the price, compound fees. Optional, and editable later.", href: "#rules" },
             { icon: Target, title: "Limit orders", text: "Sell at a price you choose. Filled inside other people’s swaps.", href: "#limit-orders" },
-            { icon: FlaskConical, title: "Backtests", text: "Replay six months of real swaps against your rules before you commit.", href: "#backtest" },
+            { icon: FlaskConical, title: "Backtests", text: "Replay six months of your pool's price against your rules before you commit.", href: "#backtest" },
             { icon: Bot, title: "Anyone can run a rule", text: "No company in the middle. Whoever runs a rule gets its gas back from the position.", href: "#keepers" },
           ]}
         />
@@ -313,9 +313,20 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
     render: () => (
       <Section id="backtest" title="Backtesting" lead="See how your rules would have done on real history before you use them.">
         <p>
-          In the rule editor, press <Kbd>Backtest</Kbd>. Every recorded swap of Ethereum’s ETH/USDC pools (5 April to 3 October 2026: 96 thousand swaps in the
-          0.30% pool, 1 million in the 0.05% pool) is replayed against your position and rules, the way the contract would run them.
+          In the rule editor, press <Kbd>Backtest</Kbd>. Every swap of the history you pick is replayed against your position and rules, the way the contract
+          would run them. Two kinds of history:
         </p>
+        <ul>
+          <li>
+            <strong>This pool</strong> (the default): the last six months of your pool&apos;s price, from every round of its two tokens&apos; Chainlink feeds,
+            read from the chain when you press the button, with the pool&apos;s own fee tier. Works for every pool on the token list, new ones included. A
+            testnet pool has almost no traders, so the swaps are the arbitrage trades that keep it on the Chainlink price: fees are a lower bound.
+          </li>
+          <li>
+            <strong>Mainnet ETH/USDC</strong>: every real swap of Ethereum&apos;s ETH/USDC pools (5 April to 3 October 2026: 96 thousand swaps in the 0.30%
+            pool, 1 million in the 0.05% pool), with real traders and real fees. For other pairs, your range and triggers are scaled to ETH&apos;s price path.
+          </li>
+        </ul>
         <ul>
           <li>
             <strong>Compared with:</strong> the same position without rules, and simply holding the tokens.
@@ -329,7 +340,7 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
         </ul>
         <Callout kind="warn" title="What a backtest cannot tell you">
           The past does not predict the future. Your own conversions do not move later prices in the replay, and price manipulation and MEV are not modelled.
-          For pairs other than ETH/USDC, the test uses ETH’s price path with your range and triggers scaled to it.
+          On your own pool, ordinary traders are missing, so fees are understated; on mainnet ETH/USDC, other pairs use ETH’s price path.
         </Callout>
         <Dev>
           <p>
@@ -754,10 +765,10 @@ struct Share { uint128 liquidity; uint128 debt0; uint128 debt1; }`}</Code>
     keywords: "backtest api engine python vercel numpy request response",
     render: () => (
       <Section dev id="backtest-api" title="Backtest API" lead="A Vercel Python function in the same project as the app.">
-        <Code lang="http">{`GET /api/backtest?q=<base64url(JSON)>     # cacheable: the history never changes
+        <Code lang="http">{`GET /api/backtest?q=<base64url(JSON)>     # cached: a year for mainnet history, an hour for our pools
 POST /api/backtest  (JSON body)            # same, not cached`}</Code>
         <Code lang="json">{`{
-  "pool": "eth_usdc_030" | "eth_usdc_005",
+  "pool": "sepolia:<pool index>" | "eth_usdc_030" | "eth_usdc_005",
   "start": 1775347200, "days": 90,            // or "mode": "windows" (every 30-day window, weekly)
   "depositUsd": 10000,
   "range": { "loPct": -5, "hiPct": 5 } | { "full": true },
@@ -773,9 +784,21 @@ POST /api/backtest  (JSON body)            # same, not cached`}</Code>
         <Code lang="text">{`fee earned on a swap = fee_LP × overlap_fraction × L_position / (L_pool + L_position)
 overlap_fraction ∈ [0, 1]: share of the swap's input that traded inside your range`}</Code>
         <p>
+          Our pools (<code>sepolia:&lt;index&gt;</code>, <code>frontend/api/_chain.py</code>): the pool and its tokens come from{" "}
+          <code>api/_data/deployment.json</code> (written by <code>npm run sync</code>); each token&apos;s Chainlink feed from <code>PriceFeeds</code>; every
+          round of both feeds is read with <code>eth_call</code> through Multicall3, so free RPC plans work. The pair&apos;s price after each round is the
+          ratio of the two. An arbitrageur trades the pool to the edge of its fee band around that price; every unit of liquidity in range earns the same
+          fee per move:
+        </p>
+        <Code lang="text">{`pool price after a round = Chainlink × (1 − fee)  if Chainlink rose past the band
+                         = Chainlink / (1 − fee)  if it fell past it (no trade inside the band)
+fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
+Δ = change of √P (token1 in) or of 1/√P (token0 in)`}</Code>
+        <p>
           Data: <code>frontend/api/_data/*.npz</code>, exported by <code>lp_study/export_backtest.py</code>. Checks:{" "}
-          <code>lp_study/tests/test_rules_backtest.py</code> (23 tests: fees equal lp_sim’s replay to 1e-9, exits at the swap the contract implies, encoding
-          equal to the frontend’s for both token orders).
+          <code>lp_study/tests/test_rules_backtest.py</code> (46 tests: fees equal lp_sim’s replay to 1e-9, exits at the swap the contract implies, encoding
+          equal to the frontend’s for both token orders) and <code>frontend/api/test_chain_history.py</code> (our pools: the pool stays in its fee band,
+          fees match the trades and do not depend on the pool&apos;s size).
         </p>
       </Section>
     ),

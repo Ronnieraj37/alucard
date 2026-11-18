@@ -1,8 +1,10 @@
 """Vercel Python function: GET /api/backtest?q=<base64url JSON>  (POST with a JSON body works too).
 
-Request JSON: {pool, start?, days, depositUsd, range: {loPct, hiPct} | {full: true}, rules: {down, up},
+Request JSON: {pool ("eth_usdc_030" | "eth_usdc_005" | "sepolia:<pool index>"), start?, days, depositUsd, range: {loPct, hiPct} | {full: true}, rules: {down, up},
                keeperFeeBps, slippagePct, delaySec, keeperCostUsd, keeperMode, mode?: "single" | "windows"}
-The history never changes, so a GET answer is cached by Vercel's CDN: the same backtest is computed once.
+The recorded history never changes, so a GET answer is cached by Vercel's CDN: the same backtest is computed once.
+Our Sepolia pools ("sepolia:<index>") are built from the chain at request time (Chainlink rounds, see _chain.py) and
+cached for an hour.
 
 Local development:  python3 api/backtest.py   (serves on http://127.0.0.1:8787, Next.js dev proxies to it)
 """
@@ -30,12 +32,14 @@ def compute(req: dict) -> dict:
 
 
 class handler(BaseHTTPRequestHandler):
-    def _send(self, code: int, body: dict, cache: bool) -> None:
+    def _send(self, code: int, body: dict, cache: bool | str) -> None:
         data = json.dumps(body, separators=(",", ":")).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
-        if cache:
+        if cache == "short":
+            self.send_header("Cache-Control", "public, max-age=600, s-maxage=3600")
+        elif cache:
             self.send_header("Cache-Control", "public, max-age=3600, s-maxage=31536000, immutable")
         else:
             self.send_header("Cache-Control", "no-store")
@@ -45,7 +49,9 @@ class handler(BaseHTTPRequestHandler):
 
     def _run(self, req: dict, cache: bool) -> None:
         try:
-            self._send(200, compute(req), cache)
+            # our Sepolia pools read live Chainlink history, so their answers may only be cached for a while
+            live = str(req.get("pool", "")).startswith(_engine.CHAIN_PREFIX)
+            self._send(200, compute(req), "short" if cache and live else cache)
         except (ValueError, KeyError, TypeError) as exc:
             self._send(400, {"error": str(exc)}, False)
         except Exception as exc:  # noqa: BLE001

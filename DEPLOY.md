@@ -19,7 +19,9 @@ backtest needs it.
 1. vercel.com, New Project, import the GitHub repo.
 2. **Root Directory: `frontend`**. Framework preset: Next.js (detected).
 3. Environment variable (Production and Preview): `NEXT_PUBLIC_RPC_URL` = your Alchemy Sepolia URL
-   (`https://eth-sepolia.g.alchemy.com/v2/<key>`).
+   (`https://eth-sepolia.g.alchemy.com/v2/<key>`). Event logs (your positions, your limit orders) are read from a public
+   Sepolia node in 50,000-block chunks, because free Alchemy keys answer only 10 blocks per log query; set
+   `NEXT_PUBLIC_LOGS_RPC_URL` to use another node.
 4. Deploy. Vercel builds the Next.js app and, from the same folder, the Python function `api/backtest.py`
    (`requirements.txt` installs numpy; `vercel.json` bundles `api/_data` and allows 60 s per request).
 5. Check after the first deploy:
@@ -67,7 +69,12 @@ npm run dev           # terminal 2: app on localhost:3000 (forwards /api/backtes
 
 ## The backtest
 
-- **Data**: every swap of mainnet ETH/USDC 0.30% (96k) and 0.05% (1M), 2026-04-05 to 2026-10-03, exported from
+- **Our pools** (the default, "This pool"): built at request time from the chain: every round of the two tokens'
+  Chainlink feeds (via `PriceFeeds`, read with Multicall3 `eth_call`s), the pool's fee tier, and the arbitrage trades
+  that keep the pool on that price. `frontend/api/_chain.py`; the pool list is `api/_data/deployment.json`, written by
+  `npm run sync`. Optional Vercel variable `RPC_URL` (server-side); otherwise `NEXT_PUBLIC_RPC_URL`, then a public node.
+  Checks: `cd frontend && .venv/bin/python -I api/test_chain_history.py`.
+- **Mainnet data**: every swap of mainnet ETH/USDC 0.30% (96k) and 0.05% (1M), 2026-04-05 to 2026-10-03, exported from
   the separate `lp_study` research code by `export_backtest.py` into `frontend/api/_data/*.npz`.
 - **Engine**: `frontend/api/_engine.py` (numpy only) runs the rules the way `ConditionalOrders.sol` does: conditions,
   keeper delay, remove, keeper reserve, kept or paid-out fees, swap with slippage limit, re-add or follow, repeat,
@@ -76,8 +83,7 @@ npm run dev           # terminal 2: app on localhost:3000 (forwards /api/backtes
   lp_sim's replay to 1e-9, exits at the swap the contract implies, encoding equal to the frontend's for both token
   orders, repeats, value conserved, fee share never above the whole fee).
 - **Newer dates**: rerun `lp_study/fetch.py` for a new window, then `export_backtest.py`, commit, push.
-- **Caching**: requests are GETs, answered with a one-year CDN cache header; the history never changes, so a repeated
-  backtest costs nothing.
+- **Caching**: requests are GETs. Mainnet history never changes: a one-year CDN cache. Our pools: one hour.
 
 ## 4. Redeploying ConditionalOrders with the token list (Chainlink feeds)
 

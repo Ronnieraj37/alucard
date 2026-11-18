@@ -9,10 +9,10 @@ const core = read("deployments/sepolia-core.json");
 const tokens = read("deployments/sepolia-tokens.json");
 const pools = read("deployments/sepolia-pools.json");
 const faucet = read("deployments/sepolia-faucet.json").faucet;
-writeFileSync(
-  new URL("../lib/generated/deployment.json", import.meta.url),
-  JSON.stringify({ chainId: 11155111, core: { ...core, faucet }, tokens, pools }, null, 2),
-);
+const deployment = JSON.stringify({ chainId: 11155111, core: { ...core, faucet }, tokens, pools }, null, 2);
+writeFileSync(new URL("../lib/generated/deployment.json", import.meta.url), deployment);
+// the backtest API reads our pools from here (api/_data is bundled with the Python function)
+writeFileSync(new URL("../api/_data/deployment.json", import.meta.url), deployment + "\n");
 
 const abi = (name) => read(`out/${name}.sol/${name}.json`).abi;
 // The router has several overloads; keep only the single-pool exact-input swap.

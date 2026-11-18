@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -66,6 +67,12 @@ class Series:
     fee_raw: np.ndarray
     t0in: np.ndarray
     tick: np.ndarray  # tick after each swap
+    # USD price of the quote token at each swap (None: the quote is USD, as in the recorded mainnet pools)
+    quote_usd: np.ndarray | None = None
+    # fee in the input token per unit of liquidity the swap crosses (arbitrage-only history; None: share of fee_raw)
+    fee_per_l: np.ndarray | None = None
+    label: str = ""
+    source: str = "recorded"  # "recorded": real mainnet swaps; "chainlink": one of our pools, see chain_series
 
     @property
     def base_is0(self) -> bool:
@@ -100,6 +107,112 @@ def load(key: str) -> Series:
 
 POOL_LABELS = {"eth_usdc_030": "ETH/USDC 0.30% (Ethereum mainnet)", "eth_usdc_005": "ETH/USDC 0.05% (Ethereum mainnet)"}
 OTHER_POOL = {"eth_usdc_030": "eth_usdc_005", "eth_usdc_005": "eth_usdc_030"}
+CHAIN_PREFIX = "sepolia:"  # "sepolia:<pool index>": one of our pools, history from Chainlink (chain_series)
+_SYMBOL_DECIMALS = {"WETH": 18, "WBTC": 8, "USDC": 6, "USDT": 6, "DAI": 18, "LINK": 18, "ETH": 18}
+
+
+def arb_swaps(ts, t1per0, L: float, fee_pips: int) -> dict:
+    """The swaps that keep a pool on an outside price: after each new price an arbitrageur trades the pool to the edge
+    of its fee band (price x (1 - fee) or price / (1 - fee)), the cheapest trade that removes the profit. Liquidity L is
+    held constant. Returns the engine's swap fields; a price move that stays inside the band makes no swap."""
+    f = fee_pips / 1e6
+    band = math.sqrt(1.0 - f)
+    out = {k: [] for k in ("ts", "sp0", "sp1", "fee", "fee_per_l", "t0in")}
+    sp = math.sqrt(float(t1per0[0]))
+    for t, p in zip(ts[1:], t1per0[1:]):
+        se = math.sqrt(float(p))
+        if se * band > sp:  # outside price above the band: buy token0 (token1 in) up to price x (1 - fee)
+            tgt = se * band
+            per_l = tgt - sp
+            t0 = False
+        elif se / band < sp:  # below: sell token0 (token0 in) down to price / (1 - fee)
+            tgt = se / band
+            per_l = 1.0 / tgt - 1.0 / sp
+            t0 = True
+        else:
+            continue
+        out["ts"].append(float(t))
+        out["sp0"].append(sp)
+        out["sp1"].append(tgt)
+        out["fee_per_l"].append(per_l * f / (1.0 - f))
+        out["fee"].append(L * per_l * f / (1.0 - f))
+        out["t0in"].append(t0)
+        sp = tgt
+    return out
+
+
+def _ffill(src_ts: np.ndarray, src_v: np.ndarray, at: np.ndarray) -> np.ndarray:
+    i = np.searchsorted(src_ts, at, side="right") - 1
+    return src_v[np.clip(i, 0, len(src_v) - 1)]
+
+
+def chain_series(pool_index: int, since: float) -> Series:
+    """One of our Sepolia pools, from the chain only: the pair's price is its two tokens' Chainlink USD prices (every
+    round of the feeds, read through PriceFeeds, the contract's own token list), the pool's fee tier and tick spacing
+    are its own, and its liquidity today sets the price impact of your own swaps. The pool itself has almost no swaps
+    on a testnet, so the swaps are the arbitrage trades that would have kept it on the Chainlink price (arb_swaps):
+    fees are only those trades' fees, a lower bound for a pool that also has ordinary traders. Every unit of liquidity
+    in range earns the same fee per price move, so fees do not depend on how much the testnet pool holds."""
+    import _chain  # noqa: PLC0415  (only needed for these pools)
+
+    dep = _chain.deployment()
+    core = dep["core"]
+    pools = [(k, v) for k, v in dep["pools"].items() if int(v.get("poolIndex", -1)) == pool_index]
+    if not pools:
+        raise ValueError(f"unknown pool index {pool_index}")
+    name, pk = pools[0]
+    sym = {a.lower(): s for s, a in dep["tokens"].items()}
+    sym["0x0000000000000000000000000000000000000000"] = "ETH"
+    t0, t1 = pk["currency0"], pk["currency1"]
+    s0, s1 = sym.get(t0.lower(), t0), sym.get(t1.lower(), t1)
+
+    def usd_series(token: str):
+        agg, fdec, tdec = _chain.feed_of(core["priceFeeds"], token)
+        h = _chain.feed_history(agg, since)
+        if not h:
+            raise ValueError(f"no Chainlink price for {sym.get(token.lower(), token)}")
+        if len(h) == 1:  # a feed that never changed (the testnet USDT feed is a fixed $1): flat since `since`
+            h = [(int(min(since, h[0][0])), h[0][1]), (int(time.time()), h[0][1])]
+        return np.array([x[0] for x in h], dtype=np.float64), np.array([x[1] for x in h], dtype=np.float64) / 10**fdec, tdec
+
+    ts0, p0, dec0 = usd_series(t0)
+    ts1, p1, dec1 = usd_series(t1)
+    start = max(ts0[0], ts1[0])
+    ts = np.unique(np.concatenate([ts0, ts1]))
+    ts = ts[ts >= start]
+    u0, u1 = _ffill(ts0, p0, ts), _ffill(ts1, p1, ts)
+    t1per0 = u0 / u1 * 10.0 ** (dec1 - dec0)  # raw units, like the pool's price
+
+    L = float(_chain.pool_liquidity(core["conditionalOrders"], pool_index))
+    sw = arb_swaps(ts, t1per0, L, int(pk["fee"]))
+    if len(sw["ts"]) < 2:
+        raise ValueError("the Chainlink price of this pair has not moved enough to trade")
+    sts = np.array(sw["ts"])
+    sp1 = np.array(sw["sp1"])
+    s = Series(
+        key=f"{CHAIN_PREFIX}{pool_index}", dec0=dec0, dec1=dec1, fee=int(pk["fee"]) / 1e6, spacing=int(pk["tickSpacing"]),
+        token0=s0, token1=s1, ts=sts, sp0=np.array(sw["sp0"]), sp1=sp1, lpre=np.full(len(sts), L),
+        lpost=np.full(len(sts), L), fee_raw=np.array(sw["fee"]), t0in=np.array(sw["t0in"], dtype=bool),
+        fee_per_l=np.array(sw["fee_per_l"]),
+        tick=np.floor(2.0 * np.log(sp1) / LN).astype(np.int64),
+        source="chainlink",
+    )
+    base, quote = (s0, s1) if s.base_is0 else (s1, s0)
+    s.label = f"{base}/{quote} {int(pk['fee']) / 1e4:g}% (our Sepolia pool, Chainlink prices)"
+    q_ts, q_p = (ts1, p1) if s.base_is0 else (ts0, p0)
+    s.quote_usd = _ffill(q_ts, q_p, sts)
+    return s
+
+
+def series_for(req: dict, since: float | None = None) -> Series:
+    key = str(req.get("pool", "eth_usdc_030"))
+    if key.startswith(CHAIN_PREFIX):
+        days = float(req.get("days", 30))
+        start = float(req.get("start", 0)) or (time.time() - days * 86400)
+        return chain_series(int(key[len(CHAIN_PREFIX):]), since if since is not None else start - 86400)
+    if key not in POOL_LABELS:
+        raise ValueError(f"unknown pool {key}")
+    return load(key)
 
 
 # ---------------------------------------------------------------- Uniswap math (raw units, as in lp_study/univ3.py)
@@ -331,7 +444,14 @@ class Sim:
         price = float(s.price(sp))
         h0, h1 = a0 / 10**s.dec0, a1 / 10**s.dec1
         # value in quote units: the quote token is worth 1, the base token `price`
-        return h0 + h1 * price if not s.base_is0 else h0 * price + h1
+        v = h0 + h1 * price if not s.base_is0 else h0 * price + h1
+        # in USD at the quote's price at the start of the window (1 for USD quotes)
+        return v * self.quote_usd
+
+    @property
+    def quote_usd(self) -> float:
+        q = self.s.quote_usd
+        return 1.0 if q is None else float(q[self.i0])
 
     # ---- conditions
     def _ticks(self, pool: str | None) -> np.ndarray:
@@ -436,11 +556,14 @@ class Sim:
             start_in = (sp0 >= sa) & (sp0 <= sb)
             # The position's own liquidity is part of the pool, so it can never earn more than the whole fee. This also
             # bounds swaps that sweep through near-empty ticks, where the pool's liquidity reads close to zero.
-            share = st.L * frac / (np.where(start_in, s.lpre[sl], s.lpost[sl]) + st.L)
-            fee = s.fee_raw[sl]
+            if s.fee_per_l is not None:
+                # arbitrage-only history: every unit of liquidity in range earns the same fee per price move
+                earned = st.L * frac * s.fee_per_l[sl]
+            else:
+                earned = st.L * frac / (np.where(start_in, s.lpre[sl], s.lpost[sl]) + st.L) * s.fee_raw[sl]
             t0 = s.t0in[sl]
-            c0 = np.cumsum(np.where(t0, share * fee, 0.0))
-            c1 = np.cumsum(np.where(t0, 0.0, share * fee))
+            c0 = np.cumsum(np.where(t0, earned, 0.0))
+            c1 = np.cumsum(np.where(t0, 0.0, earned))
             # samples inside this stretch
             for idx in [x for x in self.samples_wanted if i < x <= k]:
                 r = idx - (i + 1)
@@ -693,13 +816,13 @@ def _reads_other(lane: dict) -> bool:
     return any((lane.get(k) or {}).get("kind") == "otherPool" for k in ("trigger", "trigger2"))
 
 
-def run(req: dict) -> dict:
-    key = req.get("pool", "eth_usdc_030")
-    if key not in POOL_LABELS:
-        raise ValueError(f"unknown pool {key}")
-    s = load(key)
+def run(req: dict, s: Series | None = None) -> dict:
+    s = s if s is not None else series_for(req)
     lanes = req.get("rules") or {}
-    other = load(OTHER_POOL[key]) if any(_reads_other(lanes.get(l) or {}) for l in ("down", "up")) else None
+    reads = any(_reads_other(lanes.get(l) or {}) for l in ("down", "up"))
+    if reads and s.source != "recorded":
+        raise ValueError("rules that watch another pool can be backtested on the recorded ETH/USDC history only")
+    other = load(OTHER_POOL[s.key]) if reads else None
     return run_series(s, other, req)
 
 
@@ -827,7 +950,9 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
     lo_p, hi_p = sorted((float(s.price(sa)), float(s.price(sb))))
     return {
         "pool": key,
-        "poolLabel": POOL_LABELS.get(key, key),
+        "poolLabel": s.label or POOL_LABELS.get(key, key),
+        "source": s.source,
+        "quoteUsd": sim.quote_usd,
         "ticks": [tl, tu],
         "sides": {n: side_fields(d) for n, d in st_sides.items()},
         "start": float(s.ts[i0]),
@@ -860,25 +985,34 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
             "keeperFeeBps": p.keeper_fee_bps,
             "slippagePct": p.slippage_steps / 10,
         },
-        "caveats": [
-            "Real swaps from the recorded window; past results do not predict future ones.",
+        "caveats": ([
+            "Prices: every round of the two tokens' Chainlink USD feeds on Sepolia, read from the chain.",
+            "Swaps: only the arbitrage trades that keep the pool on the Chainlink price (to the edge of its fee band). "
+            "Real pools also have ordinary traders, so fees here are a lower bound.",
+            "Your own swaps (Convert) use the pool's liquidity today for their price impact.",
+            "Values are in USD at the quote token's price at the start of the window.",
+        ] if s.source == "chainlink" else []) + [
+            "Real swaps from the recorded window; past results do not predict future ones." if s.source == "recorded"
+            else "Past results do not predict future ones.",
             "Your own swaps (Convert) do not move later prices in the replay, and they use the pool's liquidity at that moment.",
             "Fees assume your position is small next to the pool.",
             "A keeper runs each rule a fixed delay after its condition is met; price manipulation and MEV are not modelled.",
             "Trailing stops: the best price is updated at every swap (it assumes someone pokes each new best, as the keeper does).",
-            "Chainlink price levels are tested against this pool's recorded price: no Chainlink history is loaded, and the real feed updates less often.",
+            "Chainlink price levels are tested against this pool's recorded price: no Chainlink history is loaded, and the real feed updates less often."
+            if s.source == "recorded" else
+            "Chainlink price levels are tested against the pool's price, which stays within its fee band of Chainlink here.",
         ],
     }
 
 
 def run_windows(req: dict, window_days: int = 30, every_days: int = 7) -> dict:
     """The same rules over every window_days-long window starting every every_days."""
-    s = load(req.get("pool", "eth_usdc_030"))
+    s = series_for(req, since=time.time() - 200 * 86400)
     t0, t1 = float(s.ts[0]), float(s.ts[-1])
     out = []
     start = t0
     while start + window_days * 86400 <= t1:
-        r = run({**req, "start": start, "days": window_days})
+        r = run({**req, "start": start, "days": window_days}, s)
         out.append({"start": r["start"], "rules": r["rules"]["final"], "noRules": r["noRules"]["final"], "hold": r["hold"]["final"], "runs": r["rules"]["runs"]})
         start += every_days * 86400
     beat_plain = sum(1 for x in out if x["rules"] > x["noRules"])
