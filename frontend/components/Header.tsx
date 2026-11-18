@@ -27,6 +27,9 @@ export default function Header() {
   const tx = useTx();
   const wrongChain = isConnected && chainId !== sepolia.id;
 
+  // the landing page has its own navigation
+  if (path === "/") return null;
+
   // One transaction: the faucet contract mints every test token to the caller.
   const faucet = () =>
     tx.run(async () => {

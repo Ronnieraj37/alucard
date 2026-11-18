@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
-import { DM_Sans } from "next/font/google";
+import { Bodoni_Moda, DM_Sans, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { APP_NAME, TAGLINE } from "@/lib/brand";
 import { Providers } from "./providers";
 import Header from "@/components/Header";
 
 const sans = DM_Sans({ subsets: ["latin"], variable: "--font-sans" });
+const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
+const bodoni = Bodoni_Moda({ subsets: ["latin"], style: ["normal", "italic"], variable: "--font-bodoni" });
 
 export const metadata: Metadata = {
   title: `${APP_NAME}: ${TAGLINE}`,
@@ -14,7 +17,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={sans.variable}>
+    <html lang="en" className={`${sans.variable} ${geist.variable} ${geistMono.variable} ${bodoni.variable}`}>
       <body>
         <Providers>
           <Header />
