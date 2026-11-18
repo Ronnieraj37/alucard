@@ -8,6 +8,8 @@ import {Position} from "@uniswap/v4-core/src/libraries/Position.sol";
 import {console} from "forge-std/console.sol";
 import {RuleSetup} from "./utils/RuleSetup.sol";
 import {RuleHook} from "../src/RuleHook.sol";
+import {ConditionalOrders} from "../src/ConditionalOrders.sol";
+import {OrderState} from "../src/libraries/OrderState.sol";
 
 contract LimitOrdersTest is RuleSetup {
     using StateLibrary for IPoolManager;
@@ -174,6 +176,46 @@ contract LimitOrdersTest is RuleSetup {
         vm.prank(keeper);
         vm.expectRevert(RuleHook.NotCrossed.selector);
         hook.fillBucket(poolKey, 60, true);
+    }
+
+    function test_conditionalOrderSwapFillsBuckets() public {
+        // alice: buy bucket in [-240, -180]
+        uint256 bucket = _place(alice, -240, false, 0.01e18);
+
+        // bob: exit below -120 and sell everything into token1
+        OrderState.Side memory low;
+        low.checker = OrderState.CHECK_EDGE;
+        low.actions = OrderState.ACT_KEEP_FEES | OrderState.ACT_REMOVE | OrderState.ACT_SWAP;
+        low.removeBps = 10_000;
+        low.swapToToken1 = true;
+        OrderState.Side memory off;
+        ConditionalOrders.CreateParams memory p = ConditionalOrders.CreateParams({
+            key: poolKey,
+            tickLower: -120,
+            tickUpper: 120,
+            liquidity: 150e18,
+            amount0Max: type(uint128).max,
+            amount1Max: type(uint128).max,
+            swapPoolIndex: 0,
+            expiry: uint32(block.timestamp + 1 days),
+            maxKeeperFeeBps: 10,
+            maxSlippage: 100, // 1,000 ticks
+            lower: low,
+            upper: off
+        });
+        vm.prank(bob);
+        uint256 orderId = orders.createOrder(p);
+
+        _swap(true, 1.6e18); // price just below bob's range, above the bucket
+        int24 t = _tick();
+        assertLt(t, -120);
+        assertGt(t, -180);
+        assertFalse(_filled(bucket));
+
+        vm.prank(keeper);
+        orders.execute(orderId, false); // bob's instant swap pushes the price through the bucket
+        assertLt(_tick(), -240);
+        assertTrue(_filled(bucket));
     }
 
     /// Random sizes, a random wiggle inside the bucket, a random leaver: every payout succeeds, nobody is paid more

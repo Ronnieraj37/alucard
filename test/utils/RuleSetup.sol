@@ -17,9 +17,13 @@ import {EasyPosm} from "./libraries/EasyPosm.sol";
 import {BaseTest} from "./BaseTest.sol";
 
 import {RuleHook} from "../../src/RuleHook.sol";
+import {ConditionalOrders} from "../../src/ConditionalOrders.sol";
+import {PriceFeeds} from "../../src/PriceFeeds.sol";
+import {MockAggregator} from "../../src/testnet/MockAggregator.sol";
 
-/// @dev Deploys the hook and one pool (fee 0.3%, spacing 60, price 1) with 100e18 full-range liquidity from a normal
-/// LP. alice and bob get tokens and approve the hook.
+/// @dev Deploys the hook, the token list, the conditional-order contract and one pool (fee 0.3%, spacing 60, price 1)
+/// with 100e18 full-range liquidity from a normal LP. alice and bob get tokens and approve both contracts.
+/// Both pool tokens are listed at $1 and ETH at $2,000 (mock Chainlink feeds, 8 decimals, always fresh).
 abstract contract RuleSetup is BaseTest {
     using EasyPosm for IPositionManager;
     using PoolIdLibrary for PoolKey;
@@ -30,13 +34,19 @@ abstract contract RuleSetup is BaseTest {
     PoolKey poolKey;
     PoolId poolId;
     RuleHook hook;
+    ConditionalOrders orders;
+    PriceFeeds feeds;
+    MockAggregator feedEth;
+    MockAggregator feed0;
+    MockAggregator feed1;
+    uint32 constant MAX_AGE = 1 days;
 
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
     address keeper = makeAddr("keeper");
 
     function setUp() public virtual {
-        vm.warp(1_790_000_000); // Sep 2026
+        vm.warp(1_790_000_000); // Sep 2026; order times are stored relative to 2026-01-01
         deployArtifactsAndLabel();
         (currency0, currency1) = deployCurrencyPair();
 
@@ -45,6 +55,14 @@ abstract contract RuleSetup is BaseTest {
         );
         deployCodeTo("RuleHook.sol:RuleHook", abi.encode(poolManager), flags);
         hook = RuleHook(flags);
+        feeds = new PriceFeeds(address(this));
+        feedEth = new MockAggregator(8, 2000e8);
+        feed0 = new MockAggregator(8, 1e8);
+        feed1 = new MockAggregator(8, 1e8);
+        feeds.setFeed(address(0), address(feedEth), MAX_AGE);
+        feeds.setFeed(Currency.unwrap(currency0), address(feed0), MAX_AGE);
+        feeds.setFeed(Currency.unwrap(currency1), address(feed1), MAX_AGE);
+        orders = new ConditionalOrders(poolManager, hook, feeds);
 
         poolKey = PoolKey(currency0, currency1, 3000, 60, IHooks(hook));
         poolId = poolKey.toId();
@@ -74,6 +92,8 @@ abstract contract RuleSetup is BaseTest {
         vm.startPrank(who);
         t0.approve(address(hook), type(uint256).max);
         t1.approve(address(hook), type(uint256).max);
+        t0.approve(address(orders), type(uint256).max);
+        t1.approve(address(orders), type(uint256).max);
         vm.stopPrank();
     }
 

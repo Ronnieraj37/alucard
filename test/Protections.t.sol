@@ -17,6 +17,8 @@ import {IUniswapV4Router04} from "hookmate/interfaces/router/IUniswapV4Router04.
 import {EasyPosm} from "./utils/libraries/EasyPosm.sol";
 import {RuleSetup} from "./utils/RuleSetup.sol";
 import {RuleHook} from "../src/RuleHook.sol";
+import {ConditionalOrders} from "../src/ConditionalOrders.sol";
+import {OrderState} from "../src/libraries/OrderState.sol";
 
 /// @notice Anti-dust (minimum size, per-swap cap, backlog) on the ERC20 pool.
 contract AntiDustTest is RuleSetup {
@@ -181,5 +183,281 @@ contract AntiDustTest is RuleSetup {
         vm.prank(alice);
         (, uint256 got1) = hook.claimLimit(id, bob);
         assertEq(_bal(currency1, bob) - before, got1);
+    }
+}
+
+/// @dev An owner that is a contract and normally refuses ETH (like some multisigs).
+contract NoEthOwner {
+    bool public accept;
+
+    receive() external payable {
+        require(accept, "no ETH");
+    }
+
+    function create(ConditionalOrders o, ConditionalOrders.CreateParams calldata p) external payable returns (uint256 id) {
+        accept = true; // let the creation refund through
+        id = o.createOrder{value: msg.value}(p);
+        accept = false;
+    }
+
+    function approve(address token, address spender) external {
+        MockERC20(token).approve(spender, type(uint256).max);
+    }
+
+    function cancel(ConditionalOrders o, uint256 id) external {
+        o.cancel(id);
+    }
+
+    function withdraw(ConditionalOrders o, Currency c, address to) external returns (uint256) {
+        return o.withdraw(c, to);
+    }
+}
+
+/// @notice Payout credit and fill rewards. Uses a native-ETH pool.
+contract PayoutTest is RuleSetup {
+    using EasyPosm for IPositionManager;
+    using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
+
+    PoolKey ethKey;
+    PoolId ethId;
+    Currency constant ETH = Currency.wrap(address(0));
+    NoEthOwner dao;
+
+    receive() external payable {}
+
+    function setUp() public override {
+        super.setUp();
+        vm.fee(0.0005 gwei);
+        vm.txGasPrice(0.0015 gwei);
+        ethKey = PoolKey(ETH, currency1, 3000, 60, IHooks(hook));
+        ethId = ethKey.toId();
+        poolManager.initialize(ethKey, Constants.SQRT_PRICE_1_1);
+        vm.deal(address(this), 10_000 ether);
+        positionManager.mint(
+            ethKey,
+            TickMath.minUsableTick(60),
+            TickMath.maxUsableTick(60),
+            100e18,
+            200 ether,
+            type(uint256).max,
+            address(this),
+            block.timestamp,
+            Constants.ZERO_BYTES
+        );
+        dao = new NoEthOwner();
+        MockERC20(Currency.unwrap(currency1)).transfer(address(dao), 1_000e18);
+        dao.approve(Currency.unwrap(currency1), address(orders));
+        vm.deal(alice, 100 ether);
+    }
+
+    function _ethTick() internal view returns (int24 t) {
+        (, t,,) = poolManager.getSlot0(ethId);
+    }
+
+    function _swapEth(bool ethIn, uint256 amount) internal {
+        swapRouter.swapExactTokensForTokens{value: ethIn ? amount : 0}({
+            amountIn: amount,
+            amountOutMin: 0,
+            zeroForOne: ethIn,
+            poolKey: ethKey,
+            hookData: Constants.ZERO_BYTES,
+            receiver: address(this),
+            deadline: block.timestamp + 1
+        });
+    }
+
+    function _exitBelowParams(PoolKey memory key) internal view returns (ConditionalOrders.CreateParams memory p) {
+        OrderState.Side memory low;
+        low.checker = OrderState.CHECK_EDGE;
+        low.actions = OrderState.ACT_KEEP_FEES | OrderState.ACT_REMOVE;
+        low.removeBps = 10_000;
+        OrderState.Side memory off;
+        p = ConditionalOrders.CreateParams({
+            key: key,
+            tickLower: -600,
+            tickUpper: 600,
+            liquidity: 10e18,
+            amount0Max: type(uint128).max,
+            amount1Max: type(uint128).max,
+            swapPoolIndex: 0,
+            expiry: uint32(block.timestamp + 30 days),
+            maxKeeperFeeBps: 10,
+            maxSlippage: 0,
+            lower: low,
+            upper: off
+        });
+    }
+
+    /// The DAO's exit fires, the ETH cannot be sent to it, the order still completes and the ETH is held for it.
+    /// A timed exit, so the test can run as one transaction with a real gas price (Foundry's isolate mode uses
+    /// gas price 0, foundry-rs/foundry#7277) and still check that the keeper is paid.
+    /// forge-config: default.isolate = false
+    function test_executeWithOwnerThatRejectsEth_creditsAndWithdraws() public {
+        ConditionalOrders.CreateParams memory p = _exitBelowParams(ethKey);
+        OrderState.Side memory off;
+        p.lower = off;
+        p.upper.checker = OrderState.CHECK_TIME;
+        p.upper.value = 60; // minutes
+        p.upper.actions = OrderState.ACT_KEEP_FEES | OrderState.ACT_REMOVE;
+        p.upper.removeBps = 10_000;
+        uint256 id = dao.create{value: 1 ether}(orders, p);
+        uint256 daoEth = address(dao).balance; // the creation refund
+        vm.warp(block.timestamp + 61 minutes);
+
+        uint256 keeperBefore = keeper.balance;
+        vm.prank(keeper, keeper);
+        orders.execute(id, true); // does not revert
+        assertGt(keeper.balance, keeperBefore, "keeper still paid");
+
+        uint256 held = orders.owed(address(dao), ETH);
+        assertGt(held, 0.2 ether, "the DAO's ETH is held, not lost");
+        assertEq(address(orders).balance, held, "contract holds exactly what it owes");
+        assertEq(address(dao).balance, daoEth, "nothing reached the DAO");
+
+        address treasury = makeAddr("treasury");
+        assertEq(dao.withdraw(orders, ETH, treasury), held);
+        assertEq(treasury.balance, held);
+        assertEq(orders.owed(address(dao), ETH), 0);
+        vm.expectRevert(ConditionalOrders.NothingOwed.selector);
+        dao.withdraw(orders, ETH, treasury);
+    }
+
+    function test_cancelWithOwnerThatRejectsEth_neverStuck() public {
+        uint256 id = dao.create{value: 1 ether}(orders, _exitBelowParams(ethKey));
+        uint256 t1Before = _bal(currency1, address(dao));
+        dao.cancel(orders, id);
+        assertGt(_bal(currency1, address(dao)), t1Before, "token1 delivered directly");
+        assertGt(orders.owed(address(dao), ETH), 0, "ETH held for withdrawal");
+    }
+
+    /// An owner later blacklisted by a token: the payout in that token is held, the rest still goes out.
+    function test_blacklistedOwner_tokenHeld_withdrawElsewhere() public {
+        vm.prank(alice);
+        uint256 id = orders.createOrder(_exitBelowParams(poolKey));
+        address token1 = Currency.unwrap(currency1);
+        vm.mockCallRevert(token1, abi.encodeWithSelector(bytes4(0xa9059cbb), alice), "blacklisted");
+
+        uint256 a0 = _bal(currency0, alice);
+        vm.prank(alice);
+        orders.cancel(id);
+        assertGt(_bal(currency0, alice), a0, "token0 still delivered");
+        uint256 held = orders.owed(alice, currency1);
+        assertGt(held, 0, "token1 held");
+
+        uint256 b1 = _bal(currency1, bob);
+        vm.prank(alice);
+        orders.withdraw(currency1, bob);
+        assertEq(_bal(currency1, bob) - b1, held);
+        vm.clearMockedCalls();
+    }
+
+    /// fillBucket in a native-ETH pool pays the caller its gas, from the bucket's proceeds, at most 1% of them.
+    /// forge-config: default.isolate = false
+    function test_fillRewardPaidFromProceeds() public {
+        // a sell-ETH bucket too small for swaps (below 0.01% of the pool's liquidity)
+        vm.prank(alice);
+        uint256 small = hook.placeLimit{value: 1e13}(ethKey, 60, true, 1e13);
+        _swapEth(false, 5e18);
+        assertGe(_ethTick(), 120);
+        assertFalse(hook.isFilled(small));
+
+        uint256 before = _bal(currency1, keeper);
+        vm.prank(keeper);
+        uint256 reward = hook.fillBucket(ethKey, 60, true);
+        assertGt(reward, 0);
+        assertEq(_bal(currency1, keeper) - before, reward);
+
+        // reward <= 1% of what the bucket produced; alice gets the rest
+        vm.prank(alice);
+        (, uint256 got1) = hook.claimLimit(small, alice);
+        assertLe(reward * 100, got1 + reward + 1);
+        console.log("fill reward (token1):", reward);
+        console.log("alice receives (token1):", got1);
+    }
+
+    /// forge-config: default.isolate = false
+    function test_fillRewardInEth_forBuyBucket() public {
+        vm.prank(alice);
+        uint256 small = hook.placeLimit(ethKey, -120, false, 1e13); // sell token1 for ETH
+        _swapEth(true, 5e18);
+        assertLt(_ethTick(), -120);
+        assertFalse(hook.isFilled(small));
+
+        uint256 before = keeper.balance;
+        vm.prank(keeper);
+        uint256 reward = hook.fillBucket(ethKey, -120, false);
+        assertGt(reward, 0);
+        assertEq(keeper.balance - before, reward);
+
+        vm.prank(alice);
+        (uint256 got0,) = hook.claimLimit(small, alice);
+        assertLe(reward * 100, got0 + reward + 1, "reward at most 1% of the proceeds");
+    }
+}
+
+/// @dev Flash-loan style attacker: push the price and call execute in one transaction.
+contract PushAndExecute {
+    function attack(IUniswapV4Router04 router, PoolKey calldata key, ConditionalOrders orders, uint256 id) external {
+        MockERC20(Currency.unwrap(key.currency0)).approve(address(router), type(uint256).max);
+        router.swapExactTokensForTokens({
+            amountIn: 30e18,
+            amountOutMin: 0,
+            zeroForOne: true,
+            poolKey: key,
+            hookData: "",
+            receiver: address(this),
+            deadline: block.timestamp + 1
+        });
+        orders.execute(id, false);
+    }
+}
+
+/// @notice Fix 1: no execute after a swap in the same transaction (runs in isolate mode: one call = one transaction).
+contract SameTxGuardTest is RuleSetup {
+    function _stopLossOrder() internal returns (uint256 id) {
+        OrderState.Side memory low;
+        low.checker = OrderState.CHECK_EDGE;
+        low.actions = OrderState.ACT_KEEP_FEES | OrderState.ACT_REMOVE | OrderState.ACT_SWAP;
+        low.removeBps = 10_000;
+        low.swapToToken1 = true;
+        OrderState.Side memory off;
+        vm.prank(bob);
+        id = orders.createOrder(
+            ConditionalOrders.CreateParams({
+                key: poolKey,
+                tickLower: -600,
+                tickUpper: 600,
+                liquidity: 10e18,
+                amount0Max: type(uint128).max,
+                amount1Max: type(uint128).max,
+                swapPoolIndex: 0,
+                expiry: uint32(block.timestamp + 1 days),
+                maxKeeperFeeBps: 10,
+                maxSlippage: 10,
+                lower: low,
+                upper: off
+            })
+        );
+    }
+
+    function test_pushThenExecuteInOneTransactionReverts() public {
+        uint256 id = _stopLossOrder();
+        PushAndExecute attacker = new PushAndExecute();
+        MockERC20(Currency.unwrap(currency0)).transfer(address(attacker), 30e18);
+
+        vm.expectRevert(); // SwappedThisTx, wrapped by the PoolManager's unlock
+        attacker.attack(swapRouter, poolKey, orders, id);
+        assertGt(orders.orderLiquidity(id), 0, "order untouched");
+    }
+
+    function test_executeInALaterTransactionWorks() public {
+        uint256 id = _stopLossOrder();
+        _swap(true, 30e18); // transaction 1: the price really falls
+        assertLt(_tick(), -600);
+        assertFalse(hook.swappedThisTx(poolId), "flag cleared at the end of the transaction");
+        vm.prank(keeper);
+        orders.execute(id, false); // transaction 2
+        assertEq(orders.orderLiquidity(id), 0);
     }
 }
