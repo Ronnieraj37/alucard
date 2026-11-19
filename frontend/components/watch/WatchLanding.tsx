@@ -109,21 +109,22 @@ export function Dial({
       <text x="300" y="188" textAnchor="middle" className="mv-engrave mv-engrave-sm">WETH / USDC · AUTOMATIC</text>
 
       {/* subdials */}
-      {subs.slice(0, 2).map((sd, k) => ({ x: k === 0 ? 205 : 395, ...sd })).map((s) => (
+      {/* subdials and the status window live in the wedge between 5 and 7 o'clock, where the hand never goes */}
+      {subs.slice(0, 2).map((sd, k) => ({ x: k === 0 ? 254 : 346, ...sd })).map((s) => (
         <g key={s.label}>
-          <circle cx={s.x} cy="330" r="50" fill="none" stroke="var(--hair)" />
+          <circle cx={s.x} cy="452" r="40" fill="#fbfbfc" stroke="var(--hair)" />
           {Array.from({ length: 24 }, (_, k) => {
             const a = (k / 24) * Math.PI * 2;
-            return <line key={k} x1={s.x + rc(a) * 44} y1={330 + rs(a) * 44} x2={s.x + rc(a) * 49} y2={330 + rs(a) * 49} stroke="var(--hair)" />;
+            return <line key={k} x1={s.x + rc(a) * 35} y1={452 + rs(a) * 35} x2={s.x + rc(a) * 39} y2={452 + rs(a) * 39} stroke="var(--hair)" />;
           })}
-          <text x={s.x} y="330" textAnchor="middle" className="w-dialnum" fill="var(--ink)" fontSize="18">{s.value}</text>
-          <text x={s.x} y="350" textAnchor="middle" className="mv-engrave mv-engrave-sm">{s.label}</text>
+          <text x={s.x} y="454" textAnchor="middle" className="w-dialnum" fill="var(--ink)" fontSize="15">{s.value}</text>
+          <text x={s.x} y="470" textAnchor="middle" className="mv-engrave" style={{ fontSize: 6.5, letterSpacing: "0.2em" }}>{s.label}</text>
         </g>
       ))}
       {/* status window */}
-      {label && <text x="300" y="412" textAnchor="middle" className="mv-engrave mv-engrave-sm">{label}</text>}
-      <rect x="220" y="420" width="160" height="34" rx="4" fill="#fff" stroke="var(--ink2)" />
-      <text x="300" y="443" textAnchor="middle" className="w-dialnum" fontSize="14" letterSpacing="0.08em" fill={status.startsWith("RAN") ? "var(--ruby)" : "var(--ink)"}>{status}</text>
+      <rect x="226" y="508" width="148" height="30" rx="4" fill="#fff" stroke="var(--ink2)" />
+      <text x="300" y="528" textAnchor="middle" className="w-dialnum" fontSize="13" letterSpacing="0.08em" fill={status.startsWith("RAN") ? "var(--ruby)" : "var(--ink)"}>{status}</text>
+      {label && <text x="300" y="552" textAnchor="middle" className="mv-engrave mv-engrave-sm">{label}</text>}
 
       {/* the set point: a long ruby hand */}
       {setPoint !== undefined && (
@@ -176,8 +177,8 @@ export function Dial({
 
       {/* the hand: the price */}
       <Rot deg={angOf(price)}>
-        <path d="M296,318 L298,64 L300,52 L302,64 L304,318 Z" fill="var(--ink)" />
-        <circle cx="300" cy="96" r="5" fill="#fbfbfc" stroke="var(--ink)" strokeWidth="1.5" />
+        <path d="M296,318 L298,124 L300,112 L302,124 L304,318 Z" fill="var(--ink)" />
+        <circle cx="300" cy="150" r="5" fill="#fbfbfc" stroke="var(--ink)" strokeWidth="1.5" />
       </Rot>
       <circle cx="300" cy="300" r="11" fill="var(--ink)" />
       <circle cx="300" cy="300" r="4" fill="var(--ruby)" />
