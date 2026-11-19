@@ -28,7 +28,7 @@ export default function Header() {
   const wrongChain = isConnected && chainId !== sepolia.id;
 
   // the landing page has its own navigation
-  if (path === "/" || path.startsWith("/design")) return null;
+  if (path === "/") return null;
 
   // One transaction: the faucet contract mints every test token to the caller.
   const faucet = () =>
@@ -37,18 +37,23 @@ export default function Header() {
     }, "Added 100 tWETH, 5 tWBTC, 500k tUSDC/tUSDT/tDAI, 20k tLINK");
 
   return (
-    <header className="sticky top-0 z-30 bg-[var(--paper)]/90 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-[var(--paper)]/90 backdrop-blur-sm">
       <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-3 px-4 sm:gap-6">
-        <Link href="/swap" className="flex items-center gap-2 font-semibold">
-          <div className="grid h-8 w-8 place-items-center rounded-[10px] bg-[var(--accent)] text-[16px] font-bold text-white">A</div>
-          <span className="hidden text-[17px] tracking-tight sm:inline">{APP_NAME}</span>
+        <Link href="/" className="flex items-center gap-2.5">
+          <svg viewBox="0 0 64 64" className="h-7 w-7" aria-hidden="true">
+            <circle cx="32" cy="32" r="30" fill="#fbfbfc" stroke="#1b1d22" strokeWidth="3" />
+            <circle cx="32" cy="32" r="17" fill="#d7c39a" stroke="#9a7a45" strokeWidth="2" />
+            <circle cx="32" cy="32" r="11" fill="#a3122a" />
+            <circle cx="28.5" cy="28.5" r="3.5" fill="#ff9aa9" opacity="0.8" />
+          </svg>
+          <span className="display hidden text-[20px] tracking-[-0.02em] sm:inline">{APP_NAME}</span>
         </Link>
         <nav className="flex gap-1">
           {NAV.map((n) => (
             <Link
               key={n.href}
               href={n.href}
-              className={`rounded-full px-2 py-1.5 text-[15px] font-medium sm:px-3 ${path.startsWith(n.href) ? "text-[var(--ink)]" : "text-[var(--muted)] hover:text-[var(--ink)]"}`}
+              className={`relative px-2 py-1.5 text-[15px] sm:px-3 ${path.startsWith(n.href) ? "text-[var(--ink)] after:absolute after:inset-x-3 after:-bottom-[17px] after:h-[2px] after:bg-[var(--ruby)]" : "text-[var(--ink2)] hover:text-[var(--ink)]"}`}
             >
               {n.label}
             </Link>
@@ -60,7 +65,7 @@ export default function Header() {
             {!tx.state.busy && tx.state.message && <span className="text-xs text-[var(--sage)]">{tx.state.message}</span>}
             {tx.state.error && <span className="max-w-[240px] truncate text-xs text-[var(--rose)]">{tx.state.error}</span>}
           </span>
-          <span className="hidden rounded-full bg-[var(--amber-lt)] px-2 py-1 text-[11px] font-semibold text-[var(--amber)] md:inline">Sepolia</span>
+          <span className="engraved hidden text-[10px] text-[var(--muted)] md:inline">Sepolia</span>
           {isConnected && !wrongChain && (
             <button className="btn btn-light !rounded-full" disabled={tx.state.busy} onClick={faucet} title="Mint free test tokens: one transaction">
               <Droplets className="h-4 w-4" /> <span className="hidden sm:inline">Faucet</span>

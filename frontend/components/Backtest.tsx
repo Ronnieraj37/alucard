@@ -9,9 +9,9 @@ import { CORE, type Pool, fmt, poolByIndex, priceAtTick } from "@/lib/pools";
 import { type Advanced, type LaneId, type Rules, describeLane, laneTitle } from "@/lib/rules";
 
 // Series colors: validated with the dataviz palette checker (contrast, chroma, color-blind separation).
-const C_RULES = "#0a9a8b";
-const C_PLAIN = "#6d5bd0";
-const C_HOLD = "#b5651d";
+const C_RULES = "#1b1d22"; // graphite: the position with its rules
+const C_PLAIN = "#9a9ea7"; // pencil: the same position without rules
+const C_HOLD = "#9a7a45"; // gilt: just holding the tokens
 
 export type BacktestRange = { loPct: number; hiPct: number } | { full: true };
 
@@ -360,7 +360,7 @@ function SingleResult({ r }: { r: Single }) {
         </div>
         <LineChart
           t={r.series.t}
-          series={[{ name: "ETH price", color: "#0b1f2a", values: r.series.price }]}
+          series={[{ name: "ETH price", color: "#1b1d22", values: r.series.price }]}
           band={{ lo: r.series.lo, hi: r.series.hi }}
           markers={r.events.map((e) => e.t)}
           format={(n) => fmt(n)}

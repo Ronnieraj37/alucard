@@ -1,39 +1,69 @@
 @import "tailwindcss";
 
 :root {
-  /* Alucard palette: deep navy ink, teal accent, soft blue-grey paper */
-  --ink: #0b1f2a;
-  --ink2: #163242;
-  --muted: #5f707a;
-  --muted2: #93a2aa;
-  --line: #dde5e8;
-  --line2: #edf2f4;
-  --paper: #f4f7f8;
-  --white: #ffffff;
-  --accent: #0e8a7e;
-  --accent-ink: #0a6c63;
-  --accent-lt: #e2f3f0;
-  --sage: #15803d;
-  --sage-lt: #ecfdf3;
-  --rose: #dc2626;
-  --rose-lt: #fef2f2;
-  --amber: #c26a06;
-  --amber-lt: #fff7e8;
-  --blue: #2563eb;
-  --blue-lt: #eff6ff;
-  --r: 8px;
-  --r-lg: 12px;
+  /* The Watchmaker's Catalogue (DESIGN.md): graphite on cool paper, one ruby red. Variable names are the app's own. */
+  --ink: #1b1d22;
+  --ink2: #474b54;
+  --muted: #6c707a;
+  --muted2: #9a9ea7;
+  --line: #c6cad1;
+  --line2: #eceef1;
+  --paper: #f3f4f5;
+  --white: #fbfbfc;
+  --accent: #1b1d22; /* primary actions are graphite */
+  --accent-ink: #a3122a; /* and turn ruby on hover */
+  --accent-lt: #e9ebee;
+  --ruby: #a3122a;
+  --gilt: #9a7a45;
+  --steel: #e2e5e9;
+  --steel2: #b8bec7;
+  --sage: #2f6b4f;
+  --sage-lt: #e6f0ea;
+  --rose: #a3122a;
+  --rose-lt: #f6e7ea;
+  --amber: #8a6420;
+  --amber-lt: #f4eee2;
+  --blue: #2c4f8f;
+  --blue-lt: #e7ecf5;
+  --r: 6px;
+  --r-lg: 8px;
 }
 
 body {
   background: var(--paper);
   color: var(--ink);
-  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
+  font-family: var(--font-geist), system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
+::selection {
+  background: var(--ruby);
+  color: #fff;
+}
+:focus-visible {
+  outline: 2px solid var(--ruby);
+  outline-offset: 2px;
+}
+html {
+  scrollbar-color: var(--steel2) var(--paper);
+}
 
+/* headings take the display face */
+h1, h2, h3, .display {
+  font-family: var(--font-archivo), "Helvetica Neue", Arial, sans-serif;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+/* engraved small capitals: part names and legends */
+.engraved {
+  font-family: var(--font-marcellus), Georgia, serif;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+
+/* a plate: enamel with a hairline, no shadow (the paper is flat) */
 .card {
   background: var(--white);
   border: 1px solid var(--line);
@@ -44,50 +74,56 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  border-radius: var(--r);
-  padding: 8px 14px;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 9px 18px;
   font-weight: 600;
-  font-size: 13px;
-  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  font-size: 14px;
+  transition: background 0.2s, box-shadow 0.2s, color 0.2s, opacity 0.15s, transform 0.15s cubic-bezier(0.22, 1, 0.36, 1);
   cursor: pointer;
 }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-dark { background: var(--accent); color: white; }
-.btn-dark:hover:not(:disabled) { background: var(--accent-ink); }
-.btn-dark:disabled { background: var(--muted2); }
-.btn-light { background: var(--white); border: 1px solid var(--line); color: var(--ink); }
-.btn-light:hover:not(:disabled) { border-color: var(--accent); }
-.btn-danger { background: var(--white); border: 1px solid var(--line); color: var(--rose); }
-.btn-danger:hover:not(:disabled) { border-color: var(--rose); }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-dark { background: var(--ink); color: #fff; box-shadow: 0 6px 16px -8px rgba(27, 29, 34, 0.55); }
+.btn-dark:hover:not(:disabled) { background: var(--ruby); }
+.btn-dark:disabled { background: var(--muted2); box-shadow: none; }
+.btn-light { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.btn-light:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--ink); }
+.btn-danger { background: transparent; color: var(--ruby); box-shadow: inset 0 0 0 1px var(--line); }
+.btn-danger:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--ruby); }
 
 .chip {
-  border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 4px 10px;
+  padding: 4px 11px;
   font-size: 12px;
   font-weight: 500;
-  background: var(--white);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
   cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
-.chip[data-on="true"] { background: var(--accent); color: white; border-color: var(--accent); }
+.chip:hover { box-shadow: inset 0 0 0 1px var(--ink); }
+.chip[data-on="true"] { background: var(--ink); color: #fff; box-shadow: none; }
 
 .input {
   width: 100%;
-  border: 1px solid var(--line);
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--line);
   border-radius: var(--r);
   padding: 8px 10px;
-  background: var(--white);
+  background: #fff;
   outline: none;
   font-size: 14px;
+  transition: box-shadow 0.15s;
 }
-.input:focus { border-color: var(--accent); }
+.input:focus { box-shadow: inset 0 0 0 1.5px var(--ink); }
 
 .label {
+  font-family: var(--font-marcellus), Georgia, serif;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 400;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.18em;
   color: var(--muted);
 }
 
@@ -95,20 +131,20 @@ body {
 
 /* ---------------------------------------------------------------- docs typography */
 .doc { color: var(--ink); font-size: 15px; line-height: 1.7; }
-.doc h2 { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.25; margin: 0 0 6px; }
-.doc h3 { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; margin: 28px 0 8px; }
-.doc p { margin: 10px 0; color: #24343d; }
-.doc ul, .doc ol { margin: 10px 0; padding-left: 22px; color: #24343d; }
+.doc h2 { font-size: 30px; font-weight: 500; letter-spacing: -0.03em; font-family: var(--font-archivo), Arial, sans-serif; line-height: 1.25; margin: 0 0 6px; }
+.doc h3 { font-size: 19px; font-weight: 500; letter-spacing: -0.02em; font-family: var(--font-archivo), Arial, sans-serif; margin: 28px 0 8px; }
+.doc p { margin: 10px 0; color: var(--ink2); }
+.doc ul, .doc ol { margin: 10px 0; padding-left: 22px; color: var(--ink2); }
 .doc ul { list-style: disc; }
 .doc ol { list-style: decimal; }
 .doc li { margin: 4px 0; padding-left: 2px; }
 .doc li::marker { color: var(--muted2); }
-.doc a { color: var(--accent-ink); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent); text-underline-offset: 3px; }
-.doc a:hover { text-decoration-color: var(--accent); }
-.doc code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; background: var(--line2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; color: var(--ink); }
+.doc a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; }
+.doc a:hover { text-decoration-color: var(--ruby); }
+.doc code { font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 0.86em; background: var(--line2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; color: var(--ink); }
 .doc strong { font-weight: 650; color: var(--ink); }
 .doc table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
-.doc th { text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.doc th { text-align: left; font-weight: 400; font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; font-family: var(--font-marcellus), Georgia, serif; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .doc td { padding: 8px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; }
 .doc td code { white-space: nowrap; }
 .doc .lead { font-size: 17px; color: var(--muted); margin-top: 4px; }

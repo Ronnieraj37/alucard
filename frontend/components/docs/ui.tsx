@@ -63,7 +63,7 @@ export function Callout({ kind = "note", title, children }: { kind?: "note" | "t
 export function Code({ children, lang }: { children: string; lang?: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="group relative my-4 overflow-hidden rounded-[12px] bg-[#0b1f2a]">
+    <div className="group relative my-4 overflow-hidden rounded-[8px] bg-[#1b1d22]">
       {lang && <div className="border-b border-white/10 px-4 py-1.5 text-[11px] font-medium uppercase tracking-wider text-white/40">{lang}</div>}
       <button
         aria-label="Copy"
@@ -76,7 +76,7 @@ export function Code({ children, lang }: { children: string; lang?: string }) {
       >
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
       </button>
-      <pre className="overflow-x-auto px-4 py-3 text-[12.5px] leading-relaxed text-[#d7e7ec]">
+      <pre className="overflow-x-auto px-4 py-3 text-[12.5px] leading-relaxed text-[#e9ebee]">
         <code style={{ background: "none", border: 0, padding: 0, color: "inherit", fontSize: "inherit" }}>{children}</code>
       </pre>
     </div>
