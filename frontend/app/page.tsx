@@ -1,6 +1,6 @@
-import Landing from "@/components/landing/Landing";
-import "@/components/landing/landing.css";
+import WatchLanding from "@/components/watch/WatchLanding";
+import "@/components/watch/watch.css";
 
 export default function Home() {
-  return <Landing />;
+  return <WatchLanding />;
 }
