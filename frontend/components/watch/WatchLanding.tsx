@@ -3,6 +3,15 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, useInView, useMotionValueEvent, useReducedMotion, useScroll, useSpring, useTransform } from "framer-motion";
+
+/** Rotates its children about the dial centre with a spring, as an SVG attribute (exact pivot at any size). */
+function Rot({ deg, stiffness = 120, damping = 18, children }: { deg: number; stiffness?: number; damping?: number; children: React.ReactNode }) {
+  const mv = useSpring(deg, { stiffness, damping });
+  const [v, setV] = useState(deg);
+  useEffect(() => mv.set(deg), [deg, mv]);
+  useMotionValueEvent(mv, "change", setV);
+  return <g transform={`rotate(${v.toFixed(3)} 300 300)`}>{children}</g>;
+}
 import { ArrowRight, Minus, Plus } from "lucide-react";
 import Movement from "./Movement";
 import story from "@/lib/story.json";
@@ -34,10 +43,10 @@ const arc = (a0: number, a1: number, r: number) => {
 function Marker({ price, tone, label, inner = false }: { price: number; tone: string; label: string; inner?: boolean }) {
   const a = angOf(price);
   return (
-    <motion.g animate={{ rotate: a }} initial={false} transition={{ type: "spring", stiffness: 90, damping: 16 }} style={{ transformBox: "view-box", transformOrigin: "300px 300px" }}>
+    <Rot deg={a} stiffness={90} damping={16}>
       <path d={inner ? "M300,96 l-8,-15 h16 Z" : "M300,48 l-9,-16 h18 Z"} fill={tone} />
       <title>{label}</title>
-    </motion.g>
+    </Rot>
   );
 }
 
@@ -46,29 +55,33 @@ export function Dial({
   stop,
   take,
   status,
-  runs,
-  fees,
+  label,
+  subs = [],
   showStop = true,
   showTake = true,
-  subdials = true,
+  setPoint,
+  crown,
 }: {
   price: number;
   stop?: number;
   take?: number;
   status: string;
-  runs: number;
-  fees: number;
+  label?: string;
+  subs?: { label: string; value: string }[];
   showStop?: boolean;
   showTake?: boolean;
-  subdials?: boolean;
+  /** a ruby hand at this price: the value the crown sets */
+  setPoint?: number;
+  crown?: { step: (d: number) => void; turn: number; label: string };
 }) {
+  const drag = useRef<{ y: number; acc: number } | null>(null);
   const ticks = useMemo(() => {
     const out: { a: number; major: boolean; p: number }[] = [];
     for (let p = LO; p <= HI; p += 50) out.push({ a: angOf(p), major: p % 200 === 0, p });
     return out;
   }, []);
   return (
-    <svg viewBox="0 0 600 600" className="mv" role="img" aria-label={`Price ${usd(price)}; ${status}`}>
+    <svg viewBox={crown ? "0 0 650 600" : "0 0 600 600"} className="mv" role="img" aria-label={`Price ${usd(price)}; ${status}`}>
       <circle cx="300" cy="300" r="296" className="mv-case" />
       <circle cx="300" cy="300" r="276" fill="#fbfbfc" stroke="var(--hair)" />
       <path d={arc(DIAL_START, DIAL_START + DIAL_SWEEP, 250)} fill="none" stroke="var(--ink)" strokeWidth="1" />
@@ -80,7 +93,7 @@ export function Dial({
           <g key={t.p}>
             <line x1={x0} y1={y0} x2={x1} y2={y1} stroke="var(--ink)" strokeWidth={t.major ? 2 : 1} />
             {t.major && (
-              <text x={tx} y={ty + 5} textAnchor="middle" className="w-measure" fill="var(--ink2)" fontSize="15">
+              <text x={tx} y={ty + 5} textAnchor="middle" className="w-dialnum" fill="var(--ink2)" fontSize="16">
                 {t.p.toLocaleString("en-US")}
               </text>
             )}
@@ -96,29 +109,76 @@ export function Dial({
       <text x="300" y="188" textAnchor="middle" className="mv-engrave mv-engrave-sm">WETH / USDC · AUTOMATIC</text>
 
       {/* subdials */}
-      {(subdials ? [
-        { x: 205, label: "RUNS", value: String(runs) },
-        { x: 395, label: "FEES", value: usd(fees) },
-      ] : []).map((s) => (
+      {subs.slice(0, 2).map((sd, k) => ({ x: k === 0 ? 205 : 395, ...sd })).map((s) => (
         <g key={s.label}>
           <circle cx={s.x} cy="330" r="50" fill="none" stroke="var(--hair)" />
           {Array.from({ length: 24 }, (_, k) => {
             const a = (k / 24) * Math.PI * 2;
             return <line key={k} x1={s.x + rc(a) * 44} y1={330 + rs(a) * 44} x2={s.x + rc(a) * 49} y2={330 + rs(a) * 49} stroke="var(--hair)" />;
           })}
-          <text x={s.x} y="328" textAnchor="middle" className="w-measure" fill="var(--ink)" fontSize="19">{s.value}</text>
+          <text x={s.x} y="330" textAnchor="middle" className="w-dialnum" fill="var(--ink)" fontSize="18">{s.value}</text>
           <text x={s.x} y="350" textAnchor="middle" className="mv-engrave mv-engrave-sm">{s.label}</text>
         </g>
       ))}
       {/* status window */}
-      <rect x="236" y="420" width="128" height="34" rx="4" fill="#fff" stroke="var(--ink2)" />
-      <text x="300" y="442" textAnchor="middle" className="w-measure" fontSize="14" fill={status.startsWith("RAN") ? "var(--ruby)" : "var(--ink)"}>{status}</text>
+      {label && <text x="300" y="412" textAnchor="middle" className="mv-engrave mv-engrave-sm">{label}</text>}
+      <rect x="220" y="420" width="160" height="34" rx="4" fill="#fff" stroke="var(--ink2)" />
+      <text x="300" y="443" textAnchor="middle" className="w-dialnum" fontSize="14" letterSpacing="0.08em" fill={status.startsWith("RAN") ? "var(--ruby)" : "var(--ink)"}>{status}</text>
+
+      {/* the set point: a long ruby hand */}
+      {setPoint !== undefined && (
+        <Rot deg={angOf(setPoint)} stiffness={140} damping={16}>
+          <line x1="300" y1="330" x2="300" y2="58" stroke="var(--ruby)" strokeWidth="2" />
+          <circle cx="300" cy="74" r="6" fill="none" stroke="var(--ruby)" strokeWidth="2" />
+        </Rot>
+      )}
+
+      {/* the crown at 3 o'clock: drag it up or down, or focus it and use the arrow keys */}
+      {crown && (
+        <g
+          role="slider"
+          tabIndex={0}
+          aria-label={crown.label}
+          aria-valuenow={crown.turn}
+          className="cursor-ns-resize outline-none focus-visible:[&>rect]:stroke-[var(--ruby)]"
+          onKeyDown={(e) => {
+            if (e.key === "ArrowUp" || e.key === "ArrowRight") { e.preventDefault(); crown.step(1); }
+            if (e.key === "ArrowDown" || e.key === "ArrowLeft") { e.preventDefault(); crown.step(-1); }
+          }}
+          onPointerDown={(e) => {
+            (e.currentTarget as Element).setPointerCapture(e.pointerId);
+            drag.current = { y: e.clientY, acc: 0 };
+          }}
+          onPointerMove={(e) => {
+            if (!drag.current) return;
+            const d = Math.trunc((drag.current.y - e.clientY) / 8);
+            if (d !== drag.current.acc) {
+              crown.step(d - drag.current.acc);
+              drag.current.acc = d;
+            }
+          }}
+          onPointerUp={() => (drag.current = null)}
+          style={{ touchAction: "none" }}
+        >
+          <rect x="596" y="292" width="14" height="16" fill="var(--steel2)" stroke="var(--ink2)" />
+          <rect x="608" y="270" width="28" height="60" rx="5" fill="var(--steel)" stroke="var(--ink)" strokeWidth="1.5" />
+          <clipPath id="crown-clip">
+            <rect x="608" y="270" width="28" height="60" rx="5" />
+          </clipPath>
+          <g clipPath="url(#crown-clip)">
+            {Array.from({ length: 14 }, (_, k) => (
+              <line key={k} x1="608" x2="636" y1={268 + ((k * 5 + crown.turn * 2.5) % 70)} y2={268 + ((k * 5 + crown.turn * 2.5) % 70)} stroke="var(--ink2)" strokeWidth="1.2" opacity="0.7" />
+            ))}
+          </g>
+          <rect x="596" y="250" width="54" height="100" fill="transparent" />
+        </g>
+      )}
 
       {/* the hand: the price */}
-      <motion.g animate={{ rotate: angOf(price) }} initial={false} transition={{ type: "spring", stiffness: 120, damping: 18 }} style={{ transformBox: "view-box", transformOrigin: "300px 300px" }}>
+      <Rot deg={angOf(price)}>
         <path d="M296,318 L298,64 L300,52 L302,64 L304,318 Z" fill="var(--ink)" />
         <circle cx="300" cy="96" r="5" fill="#fbfbfc" stroke="var(--ink)" strokeWidth="1.5" />
-      </motion.g>
+      </Rot>
       <circle cx="300" cy="300" r="11" fill="var(--ink)" />
       <circle cx="300" cy="300" r="4" fill="var(--ruby)" />
     </svg>
@@ -150,7 +210,7 @@ function Nav() {
 
 function Hero() {
   return (
-    <section className="mx-auto grid max-w-6xl items-center gap-12 px-5 py-12 lg:min-h-[calc(100svh-4rem)] lg:grid-cols-[1fr_560px] lg:py-10">
+    <section className="mx-auto grid max-w-6xl items-center gap-6 px-5 py-8 lg:min-h-[calc(100svh-4rem)] lg:gap-12 lg:grid-cols-[1fr_560px] lg:py-10">
       <div className="max-lg:order-2">
         <h1 className="w-display text-[clamp(3rem,6.2vw,5.6rem)]">Wind it once. It keeps working.</h1>
         <p className="mt-7 max-w-[34rem] text-[19px] leading-relaxed text-[var(--ink2)]">
@@ -164,7 +224,7 @@ function Hero() {
           <a href="#replay" className="w-btn w-btn-line">Watch a rule run</a>
         </div>
       </div>
-      <motion.div initial={{ opacity: 0, scale: 0.96, rotate: -6 }} animate={{ opacity: 1, scale: 1, rotate: 0 }} transition={{ duration: 1.4, ease: EASE }} className="mx-auto w-full max-w-[300px] sm:max-w-[420px] lg:max-w-[560px] max-lg:order-1">
+      <motion.div initial={{ opacity: 0, scale: 0.96, rotate: -6 }} animate={{ opacity: 1, scale: 1, rotate: 0 }} transition={{ duration: 1.4, ease: EASE }} className="mx-auto w-full max-w-[250px] sm:max-w-[420px] lg:max-w-[560px] max-lg:order-1">
         <Movement />
       </motion.div>
     </section>
@@ -226,7 +286,17 @@ function Replay() {
         <div className="mx-auto w-full max-w-[520px] [perspective:1800px]">
           <motion.div style={calm ? undefined : { rotateY: turn }} className="relative max-lg:mx-auto max-lg:max-w-[340px] [transform-style:preserve-3d]">
             <div className="[backface-visibility:hidden]">
-              <Dial price={story.price[k]} stop={stop} take={undefined} showTake={false} status={ran ? `RAN · ${day(story.events[0].t)}` : "ARMED"} runs={ran ? 1 : 0} fees={0} />
+              <Dial
+                price={story.price[k]}
+                stop={stop}
+                showTake={false}
+                label="BACKTEST"
+                status={ran ? `RAN · ${day(story.events[0].t).toUpperCase()}` : "ARMED"}
+                subs={[
+                  { label: "WITH RULE", value: usd(story.rules[k]) },
+                  { label: "WITHOUT", value: usd(story.noRules[k]) },
+                ]}
+              />
             </div>
             <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)]">
               <Movement />
@@ -236,8 +306,9 @@ function Replay() {
         <div>
           <h2 className="w-display text-[clamp(2.4rem,4.4vw,3.8rem)]">Ninety days, one rule, no one watching.</h2>
           <p className="mt-6 max-w-lg text-[18px] text-[var(--ink2)]">
-            One rule on our live WETH/USDC pool: if WETH falls 5% from its highest price, withdraw everything and convert it to USDC. The ruby mark follows the
-            high; the hand is the real Chainlink price, {day(story.start)} to {day(story.end)}.
+            A backtest of one rule on a $10,000 position in our Sepolia WETH/USDC pool, priced from every Chainlink round, {day(story.start)} to {day(story.end)}: if WETH
+            falls 5% from its highest price, withdraw everything and convert it to USDC. The hand is the price, the gilt arc is the position&apos;s range, the ruby
+            mark follows the high, and the two small dials show the position with and without the rule.
           </p>
           <div className="mt-9">
             <input
@@ -257,24 +328,16 @@ function Replay() {
               <span>WETH {usd(story.price[k])}</span>
             </div>
           </div>
-          <dl className="mt-8 grid grid-cols-3 border-y border-[var(--hair)]">
-            {[
-              ["With the rule", story.rules[k], true],
-              ["Without it", story.noRules[k], false],
-              ["Just holding", story.hold[k], false],
-            ].map(([label, v, strong]) => (
-              <div key={label as string} className="border-r border-[var(--hair)] py-4 pr-4 last:border-r-0 [&:not(:first-child)]:pl-4">
-                <dt className="text-[13px] text-[var(--ink3)]">{label as string}</dt>
-                <dd className={`w-display mt-1 text-[clamp(1.5rem,2.6vw,2.1rem)] ${strong ? "text-[var(--ink)]" : "text-[var(--ink3)]"}`}>{usd(v as number)}</dd>
-              </div>
-            ))}
-          </dl>
+          <p className="mt-6 text-[16px] text-[var(--ink2)]">
+            On {day(story.t[k])}: with the rule <b className="font-semibold text-[var(--ink)]">{usd(story.rules[k])}</b>, without it {usd(story.noRules[k])}, holding the two tokens instead {usd(story.hold[k])}.
+          </p>
           <p className="mt-5 max-w-lg text-[14px] text-[var(--ink3)]">
             {ran
               ? k >= n - 10
-                ? `The rule ran on ${day(story.events[0].t)}. ETH climbed for weeks afterwards, when staying in looked better, then fell to ${usd(story.endPrice)}. A rule trades upside for protection; the backtest shows you both before you choose.`
-                : `The rule ran on ${day(story.events[0].t)}: withdrawn and converted to USDC, on-chain. Keep scrolling: ETH did not go straight down.`
+                ? `In the backtest the rule ran on ${day(story.events[0].t)}. ETH climbed for weeks afterwards, when staying in looked better, then fell to ${usd(story.endPrice)}. A rule trades upside for protection; the backtest shows you both before you choose.`
+                : `In the backtest the rule ran on ${day(story.events[0].t)}: withdrawn and converted to USDC. Keep going: ETH did not go straight down.`
               : "Armed. Nothing to watch, nothing to sign."}
+            {" "}Backtests use arbitrage-only fees, a lower bound.
           </p>
         </div>
       </div>
@@ -302,50 +365,6 @@ const THEN: { id: Then; label: string; says: string; field: string }[] = [
   { id: "collect", label: "Collect the fees only", says: "collect the fees", field: "REMOVE · removeBps 0" },
 ];
 
-function Crown({ value, set, min, max, step, unit }: { value: number; set: (v: number) => void; min: number; max: number; step: number; unit: string }) {
-  const clamp = (v: number) => Math.min(max, Math.max(min, v));
-  const drag = useRef<{ y: number; v: number } | null>(null);
-  const fmt = unit === "$" ? usd(value) : `${value}${unit === "%" ? "%" : " h"}`;
-  return (
-    <div className="flex items-center gap-3">
-      <button aria-label="Less" onClick={() => set(clamp(value - step))} className="grid h-10 w-10 place-items-center rounded-full shadow-[inset_0_0_0_1px_var(--hair)] hover:shadow-[inset_0_0_0_1px_var(--ink)]">
-        <Minus className="h-4 w-4" />
-      </button>
-      <div
-        role="slider"
-        tabIndex={0}
-        aria-valuemin={min}
-        aria-valuemax={max}
-        aria-valuenow={value}
-        aria-label="Turn the crown"
-        onKeyDown={(e) => {
-          if (e.key === "ArrowUp" || e.key === "ArrowRight") set(clamp(value + step));
-          if (e.key === "ArrowDown" || e.key === "ArrowLeft") set(clamp(value - step));
-        }}
-        onPointerDown={(e) => {
-          (e.target as HTMLElement).setPointerCapture(e.pointerId);
-          drag.current = { y: e.clientY, v: value };
-        }}
-        onPointerMove={(e) => {
-          if (!drag.current) return;
-          const d = Math.round((drag.current.y - e.clientY) / 6);
-          set(clamp(drag.current.v + d * step));
-        }}
-        onPointerUp={() => (drag.current = null)}
-        className="relative h-14 w-9 cursor-ns-resize touch-none rounded-[8px] bg-[linear-gradient(90deg,#c9ced5,#f2f3f5_45%,#aeb4bd)] shadow-[0_2px_6px_rgba(27,29,34,0.25)]"
-      >
-        {Array.from({ length: 9 }, (_, k) => (
-          <span key={k} className="absolute inset-x-1 h-px bg-[rgba(27,29,34,0.35)]" style={{ top: `${10 + k * 10}%` }} />
-        ))}
-      </div>
-      <button aria-label="More" onClick={() => set(clamp(value + step))} className="grid h-10 w-10 place-items-center rounded-full shadow-[inset_0_0_0_1px_var(--hair)] hover:shadow-[inset_0_0_0_1px_var(--ink)]">
-        <Plus className="h-4 w-4" />
-      </button>
-      <span className="w-display ml-2 text-[30px]">{fmt}</span>
-    </div>
-  );
-}
-
 function Configure() {
   const [when, setWhen] = useState<When>("trail");
   const [val, setVal] = useState(5);
@@ -360,8 +379,12 @@ function Configure() {
     setVal(WHEN.find((x) => x.id === id)!.def);
   };
 
-  const now = story.price[story.price.length - 1];
-  const markerPrice = when === "trail" ? Math.max(...story.price) * (1 - val / 100) : when === "leave" ? story.range.lo * (1 - val / 100) : when === "timer" ? undefined : val;
+  // the hand shows a reference price the rule is measured from, so the set point is never already past it
+  const peak = Math.max(...story.price);
+  const ref = when === "trail" ? peak : story.entryPrice;
+  const setPoint = when === "trail" ? peak * (1 - val / 100) : when === "leave" ? story.range.lo * (1 - val / 100) : when === "timer" ? undefined : val;
+  const step = (d: number) => setVal((v) => Math.min(w.max, Math.max(w.min, v + d * w.step)));
+  const valText = w.unit === "$" ? usd(val) : w.unit === "%" ? `${val}%` : `${val} h`;
   const phrase: Record<When, string> = {
     trail: `WETH falls ${val}% from its highest price`,
     below: `WETH falls below ${usd(val)}`,
@@ -378,8 +401,8 @@ function Configure() {
         <div>
           <h2 className="w-display text-[clamp(2.4rem,4.4vw,3.8rem)]">Choose your complications.</h2>
           <p className="mt-6 max-w-xl text-[18px] text-[var(--ink2)]">
-            A watchmaker adds complications to a movement; you add rules to a position. Pick when, pick what happens, then turn the crown. Any condition, any
-            action, joined with and/or in the app, with repeats and limits.
+            A watchmaker adds complications to a movement; you add rules to a position. Pick when, pick what happens, then turn the crown on the dial. Any
+            condition, any action, joined with and/or in the app, with repeats and limits. The hand shows the price the rule is measured from.
           </p>
 
           <div className="mt-12 grid gap-10 md:grid-cols-2">
@@ -413,15 +436,29 @@ function Configure() {
             </fieldset>
           </div>
 
-          <div className="mt-12">
-            <div className="w-engraved mb-4">Turn the crown</div>
-            <Crown value={val} set={setVal} min={w.min} max={w.max} step={w.step} unit={w.unit} />
-          </div>
+
         </div>
 
         <div className="lg:sticky lg:top-24 lg:self-start">
-          <Dial price={now} stop={markerPrice} showStop={markerPrice !== undefined} showTake={false} status={repeat ? `UP TO ${maxRuns} RUNS` : "RUNS ONCE"} runs={0} fees={0} subdials={false} />
-          <p className="mt-6 text-[19px] leading-relaxed text-[var(--ink)]" aria-live="polite">
+          <Dial
+            price={ref}
+            showStop={false}
+            showTake={false}
+            setPoint={setPoint}
+            status={repeat ? `UP TO ${maxRuns} RUNS` : "RUNS ONCE"}
+            crown={{ step, turn: val / w.step, label: `Set the value: ${valText}` }}
+          />
+          <div className="mt-4 flex items-center gap-3">
+            <button aria-label="Less" onClick={() => step(-1)} className="grid h-9 w-9 place-items-center rounded-full shadow-[inset_0_0_0_1px_var(--hair)] hover:shadow-[inset_0_0_0_1px_var(--ink)]">
+              <Minus className="h-4 w-4" />
+            </button>
+            <span className="w-display min-w-[5ch] text-center text-[28px]">{when === "timer" ? valText : valText}</span>
+            <button aria-label="More" onClick={() => step(1)} className="grid h-9 w-9 place-items-center rounded-full shadow-[inset_0_0_0_1px_var(--hair)] hover:shadow-[inset_0_0_0_1px_var(--ink)]">
+              <Plus className="h-4 w-4" />
+            </button>
+            <span className="text-[14px] text-[var(--ink3)]">Turn the crown, or use − and +</span>
+          </div>
+          <p className="mt-5 text-[19px] leading-relaxed text-[var(--ink)]" aria-live="polite">
             {sentence}
           </p>
           <button onClick={() => setReveal(!reveal)} className="w-link mt-3 text-[14px] text-[var(--ink2)]">
@@ -466,14 +503,21 @@ function Sealed() {
             <text className="mv-ring-text" style={{ fontSize: 13 }}>
               <textPath href="#seal-ring">FUNDS STAY IN UNISWAP · LIMITS ENFORCED ON-CHAIN · ANYONE CAN WIND IT · NO ONE CAN OPEN IT ·</textPath>
             </text>
+            {[230, 200, 120].map((r) => (
+              <circle key={r} cx="300" cy="300" r={r} fill="none" stroke="var(--hair)" />
+            ))}
+            {Array.from({ length: 72 }, (_, k) => {
+              const a = (k / 72) * Math.PI * 2;
+              return <line key={k} x1={300 + rc(a) * 200} y1={300 + rs(a) * 200} x2={300 + rc(a) * 230} y2={300 + rs(a) * 230} stroke="var(--hair)" opacity="0.7" />;
+            })}
+            <text x="300" y="282" textAnchor="middle" className="mv-engrave" style={{ fontSize: 22 }}>ALUCARD</text>
+            <text x="300" y="312" textAnchor="middle" className="mv-engrave mv-engrave-sm">A UNISWAP V4 HOOK</text>
+            <text x="300" y="332" textAnchor="middle" className="mv-engrave mv-engrave-sm">SEALED ON ETHEREUM SEPOLIA</text>
             {Array.from({ length: 6 }, (_, k) => {
               const a = (k / 6) * Math.PI * 2;
               return <rect key={k} x={300 + rc(a) * 246 - 9} y={300 + rs(a) * 246 - 5} width="18" height="10" rx="2" fill="var(--steel2)" transform={`rotate(${(k / 6) * 360 + 90} ${300 + rc(a) * 246} ${300 + rs(a) * 246})`} />;
             })}
           </svg>
-          <div className="absolute inset-[16%] overflow-hidden rounded-full shadow-[inset_0_0_0_1px_var(--ink2)]">
-            <Movement />
-          </div>
         </div>
         <div>
           <h2 className="w-display text-[clamp(2.4rem,4.4vw,3.8rem)]">A sealed case.</h2>
@@ -512,10 +556,10 @@ function Certificate() {
           <table className="mt-2 w-full text-left text-[16px]">
             <tbody>
               {rows.map(([what, n, result]) => (
-                <tr key={what} className="border-b border-[var(--hair)]">
-                  <td className="py-4 pr-4 text-[var(--ink2)]">{what}</td>
-                  <td className="w-display py-4 pr-4 text-right text-[26px]">{n}</td>
-                  <td className="py-4 text-right text-[14px] text-[var(--ruby)]">{result}</td>
+                <tr key={what} className="grid grid-cols-[1fr_auto] border-b border-[var(--hair)] py-4 md:table-row md:py-0">
+                  <td className="col-span-2 pb-1 text-[var(--ink2)] md:py-4 md:pr-4">{what}</td>
+                  <td className="w-display text-[26px] md:py-4 md:pr-4 md:text-right">{n}</td>
+                  <td className="self-center text-right text-[14px] text-[var(--ruby)] md:py-4">{result}</td>
                 </tr>
               ))}
             </tbody>

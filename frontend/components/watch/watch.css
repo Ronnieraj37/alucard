@@ -110,9 +110,9 @@ html:has(.w-page) {
   stroke-width: 1;
 }
 .mv-perlage {
-  fill: none;
-  stroke: rgba(27, 29, 34, 0.06);
-  stroke-width: 1;
+  fill: rgba(255, 255, 255, 0.18);
+  stroke: rgba(27, 29, 34, 0.05);
+  stroke-width: 0.8;
 }
 .mv-ring-text {
   font-family: var(--font-marcellus), Georgia, serif;
@@ -206,10 +206,31 @@ html:has(.w-page) {
   opacity: 0.9;
 }
 .mv-rotor-body {
-  fill: rgba(226, 229, 233, 0.55);
+  fill: var(--steel);
   stroke: var(--ink2);
   stroke-width: 1.2;
 }
+.mv-rotor-arm {
+  stroke: var(--ink2);
+  stroke-width: 1;
+  opacity: 0.35;
+}
+.mv-bevel {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 7;
+  opacity: 0.85;
+}
+.mv-fork {
+  fill: none;
+  stroke: var(--ink2);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.mv-pallet-stone {
+  fill: var(--ruby);
+}
+
 .mv-rotor-text {
   font-family: var(--font-archivo), Arial, sans-serif;
   font-weight: 600;
@@ -229,23 +250,23 @@ html:has(.w-page) {
   }
 }
 .mv-tick {
-  animation-timing-function: steps(30);
+  animation-timing-function: steps(150);
 }
 .mv-balance {
-  animation: mv-balance 0.75s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+  animation: mv-balance 0.3s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
   transform-box: fill-box;
   transform-origin: center;
 }
 @keyframes mv-balance {
   from {
-    transform: rotate(-150deg);
+    transform: rotate(-110deg);
   }
   to {
-    transform: rotate(150deg);
+    transform: rotate(110deg);
   }
 }
 .mv-breathe {
-  animation: mv-breathe 0.75s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+  animation: mv-breathe 0.3s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
   transform-box: fill-box;
   transform-origin: center;
 }
@@ -317,4 +338,10 @@ html:has(.w-page) {
 }
 .w-radio[type="checkbox"] {
   border-radius: 4px;
+}
+
+.w-dialnum {
+  font-family: var(--font-archivo), Arial, sans-serif;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums lining-nums;
 }

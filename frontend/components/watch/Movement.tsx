@@ -10,6 +10,17 @@ type Wheel = { x: number; y: number; teeth: number; r: number; period: number; d
 
 const C = 300; // centre of a 600 x 600 drawing
 
+// an Archimedean spiral: the hairspring, 7 turns from the collet to the stud
+const SPIRAL = (() => {
+  const pts: string[] = [];
+  for (let k = 0; k <= 7 * 48; k++) {
+    const a = (k / 48) * Math.PI * 2;
+    const r = 7 + (k / (7 * 48)) * 36;
+    pts.push(`${(Math.round(Math.cos(a) * r * 100) / 100).toFixed(2)},${(Math.round(Math.sin(a) * r * 100) / 100).toFixed(2)}`);
+  }
+  return `M${pts.join("L")}`;
+})();
+
 function gearPath(teeth: number, r: number) {
   const depth = Math.max(5, r * 0.07);
   const rIn = r - depth;
@@ -90,6 +101,7 @@ function Bridge({ id, d, label, lx, ly, la = 0 }: { id: string; d: string; label
           <rect key={k} x={-40 + k * 26} y="-40" width="13" height="700" className="mv-stripe" transform="rotate(-28 300 300)" />
         ))}
       </g>
+      <path d={d} clipPath={`url(#clip-${id})`} className="mv-bevel" />
       <path d={d} className="mv-bridge-edge" />
       <text x={lx} y={ly} transform={`rotate(${la} ${lx} ${ly})`} className="mv-engrave">
         {label}
@@ -119,11 +131,11 @@ export default function Movement({ className = "" }: { className?: string }) {
       {/* case and main plate with perlage */}
       <circle cx={C} cy={C} r="296" className="mv-case" />
       <circle cx={C} cy={C} r="276" fill="url(#mv-plate)" className="mv-plate" />
-      {Array.from({ length: 140 }, (_, k) => {
+      {Array.from({ length: 420 }, (_, k) => {
         const a = k * 2.399963;
-        const rr = 34 * Math.sqrt(k + 1);
-        if (rr > 262) return null;
-        return <circle key={k} cx={C + rc(a) * rr} cy={C + rs(a) * rr} r="13" className="mv-perlage" />;
+        const rr = 13 * Math.sqrt(k + 1);
+        if (rr > 266) return null;
+        return <circle key={k} cx={C + rc(a) * rr} cy={C + rs(a) * rr} r="11" className="mv-perlage" />;
       })}
       <text className="mv-ring-text">
         <textPath href="#mv-ring" startOffset="2%">
@@ -146,24 +158,35 @@ export default function Movement({ className = "" }: { className?: string }) {
       </g>
 
       {/* bridges, engraved with the parts of a rule */}
-      <Bridge id="barrel" d="M110,150 C140,95 250,90 300,135 L320,190 C300,250 250,290 190,300 C140,300 100,260 100,215 Z" label="WHEN" lx={150} ly={178} la={-14} />
-      <Bridge id="train" d="M330,190 C380,170 450,190 470,250 L470,360 C450,395 410,400 385,385 L330,300 Z" label="THEN" lx={398} ly={292} la={78} />
-      <Bridge id="limits" d="M160,330 C200,320 250,345 268,385 L262,430 C240,452 190,452 165,430 C145,405 145,355 160,330 Z" label="LIMITS" lx={180} ly={392} la={-8} />
-      <Screw x={128} y={170} a={35} />
-      <Screw x={290} y={150} a={-10} />
-      <Screw x={455} y={232} a={70} />
-      <Screw x={452} y={350} a={15} />
-      <Screw x={180} y={345} a={-40} />
-      <Screw x={250} y={425} a={10} />
+      <Bridge id="barrel" d="M108,176 C120,150 150,148 172,168 L240,198 C262,206 266,232 246,244 L176,262 C150,268 118,240 108,206 Z" label="WHEN" lx={150} ly={232} la={14} />
+      <Bridge id="train" d="M372,214 C390,200 414,206 422,226 L452,330 C460,356 444,376 422,378 C404,380 392,366 390,352 L364,250 C360,234 362,222 372,214 Z" label="THEN" lx={428} ly={268} la={74} />
+      <Bridge id="limits" d="M150,380 C160,360 196,356 224,372 L262,396 C276,408 270,428 252,432 L190,436 C164,438 144,410 150,380 Z" label="LIMITS" lx={168} ly={418} la={4} />
+      <Screw x={124} y={190} a={35} />
+      <Screw x={244} y={226} a={-10} />
+      <Screw x={384} y={224} a={70} />
+      <Screw x={436} y={356} a={15} />
+      <Screw x={168} y={392} a={-40} />
+      <Screw x={260} y={410} a={10} />
       <Jewel x={205} y={215} r={6.5} />
       <Jewel x={392} y={245} />
       <Jewel x={418} y={345} />
       <Jewel x={300} y={300} r={7} />
       <Jewel x={212} y={395} r={4.5} />
 
+      {/* pallet fork: the escapement that lets the train advance one tooth per beat */}
+      <g transform="translate(338 452)">
+        <g>
+          <animateTransform attributeName="transform" type="rotate" values="-7;7;-7" dur="0.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />
+          <path d="M-40,8 L0,0 L34,-14 M0,0 L-6,-22 M0,0 L10,18" className="mv-fork" />
+          <rect x="28" y="-20" width="7" height="12" rx="1.5" className="mv-pallet-stone" transform="rotate(-24 31 -14)" />
+          <rect x="4" y="13" width="7" height="12" rx="1.5" className="mv-pallet-stone" transform="rotate(20 7 19)" />
+        </g>
+        <Jewel r={3.6} />
+      </g>
+
       {/* balance wheel and hairspring under its cock */}
       <g transform="translate(300 470)">
-        <path d={Array.from({ length: 9 }, (_, k) => `M0,0 m${-(6 + k * 3.6)},0 a${6 + k * 3.6},${6 + k * 3.6} 0 1,0 ${2 * (6 + k * 3.6)},0`).join(" ")} className="mv-hairspring mv-breathe" />
+        <path d={SPIRAL} className="mv-hairspring mv-breathe" />
         <g className="mv-balance">
           <circle r="54" className="mv-balance-rim" />
           {[0, 1, 2].map((k) => {
@@ -180,16 +203,16 @@ export default function Movement({ className = "" }: { className?: string }) {
         <Jewel r={6} />
       </g>
 
-      {/* the rotor: winds itself from movement */}
-      <g className="mv-rotor-wrap">
-        <g className="mv-rotor">
-          <path d={`M${C - 250},${C} A250,250 0 0,1 ${C + 250},${C} L${C + 160},${C} A160,160 0 0,0 ${C - 160},${C} Z`} className="mv-rotor-body" />
-          <text x={C} y={C - 196} textAnchor="middle" className="mv-rotor-text">ALUCARD</text>
-          <text x={C} y={C - 178} textAnchor="middle" className="mv-engrave mv-engrave-sm">RULES FOR UNISWAP V4 POSITIONS</text>
-        </g>
-        <circle cx={C} cy={C} r="16" className="mv-hub" />
-        <Jewel x={C} y={C} r={6} />
+      {/* the rotor: a skeleton weight on the rim that winds the movement as it swings */}
+      <g className="mv-rotor">
+        <path d={`M${C - 258},${C} A258,258 0 0,1 ${C + 258},${C} L${C + 236},${C} A236,236 0 0,0 ${C - 236},${C} Z`} className="mv-rotor-body" />
+        {[-60, 0, 60].map((d) => {
+          const a = ((d - 90) * Math.PI) / 180;
+          return <line key={d} x1={C + rc(a) * 236} y1={C + rs(a) * 236} x2={C + rc(a) * 24} y2={C + rs(a) * 24} className="mv-rotor-arm" />;
+        })}
       </g>
+      <circle cx={C} cy={C} r="16" className="mv-hub" />
+      <Jewel x={C} y={C} r={6} />
     </svg>
   );
 }
