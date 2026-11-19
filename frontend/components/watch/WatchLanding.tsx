@@ -118,7 +118,7 @@ export function Dial({
             return <line key={k} x1={s.x + rc(a) * 35} y1={452 + rs(a) * 35} x2={s.x + rc(a) * 39} y2={452 + rs(a) * 39} stroke="var(--hair)" />;
           })}
           <text x={s.x} y="454" textAnchor="middle" className="w-dialnum" fill="var(--ink)" fontSize="15">{s.value}</text>
-          <text x={s.x} y="470" textAnchor="middle" className="mv-engrave" style={{ fontSize: 6.5, letterSpacing: "0.2em" }}>{s.label}</text>
+          <text x={s.x} y="472" textAnchor="middle" className="mv-engrave" style={{ fontSize: 8, letterSpacing: "0.14em", fill: "var(--ink2)" }}>{s.label}</text>
         </g>
       ))}
       {/* status window */}
