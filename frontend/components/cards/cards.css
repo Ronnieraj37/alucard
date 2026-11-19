@@ -1,0 +1,161 @@
+/* Rule cards: shared by the landing page and the app. */
+.ac-card {
+  aspect-ratio: 5 / 7;
+  perspective: 1200px;
+  font-family: var(--font-geist), system-ui, sans-serif;
+  color: #17181c;
+  user-select: none;
+}
+.ac-inner {
+  position: relative;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ac-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow: hidden;
+}
+.ac-front {
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(23, 24, 28, 0.09), 0 1px 1px rgba(23, 24, 28, 0.06), 0 8px 24px -10px rgba(23, 24, 28, 0.28);
+}
+.ac-back,
+.ac-back-deck {
+  transform: rotateY(180deg);
+}
+.ac-back {
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(23, 24, 28, 0.09), 0 8px 24px -10px rgba(23, 24, 28, 0.28);
+  padding: 14px;
+}
+.ac-index {
+  position: absolute;
+  top: 10px;
+  left: 11px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+  color: var(--suit);
+}
+.ac-index b {
+  font-size: 22px;
+}
+.ac-index i {
+  font-style: normal;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  margin-top: 4px;
+}
+.ac-index-flip {
+  top: auto;
+  left: auto;
+  right: 11px;
+  bottom: 10px;
+  transform: rotate(180deg);
+}
+.ac-body {
+  position: absolute;
+  inset: 0;
+  padding: 18% 14% 14% 22%;
+  display: flex;
+  flex-direction: column;
+}
+.ac-pip {
+  font-size: 54px;
+  line-height: 1;
+  color: var(--suit);
+  margin-bottom: 8px;
+}
+.ac-title {
+  font-family: var(--font-bodoni), Didot, serif;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+.ac-line {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #4a4c55;
+}
+.ac-line span {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--suit);
+}
+.ac-sm .ac-pip {
+  font-size: 36px;
+}
+.ac-sm .ac-title {
+  font-size: 16px;
+}
+.ac-sm .ac-line {
+  font-size: 10.5px;
+}
+.ac-lg .ac-pip {
+  font-size: 64px;
+}
+.ac-lg .ac-title {
+  font-size: 26px;
+}
+.ac-lg .ac-line {
+  font-size: 13px;
+}
+
+/* the deck's back */
+.ac-deck {
+  position: absolute;
+  inset: 0;
+  container-type: inline-size;
+  background: #7d1426;
+  padding: 9px;
+  box-shadow: 0 0 0 1px rgba(23, 24, 28, 0.2), 0 8px 24px -10px rgba(23, 24, 28, 0.35);
+}
+.ac-deck-frame {
+  height: 100%;
+  border-radius: 8px;
+  border: 1.5px solid rgba(255, 226, 214, 0.55);
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 226, 214, 0.09) 0 1px, transparent 1px 9px),
+    repeating-linear-gradient(-45deg, rgba(255, 226, 214, 0.09) 0 1px, transparent 1px 9px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  color: #ffe2d6;
+}
+.ac-deck-word {
+  font-family: var(--font-bodoni), Didot, serif;
+  font-size: 10.5cqw;
+  letter-spacing: 0.22em;
+  font-weight: 600;
+}
+.ac-deck-mirror {
+  transform: scaleX(-1);
+  opacity: 0.85;
+}
+.ac-deck-pips {
+  font-size: 13cqw;
+  letter-spacing: 0.2em;
+  opacity: 0.8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ac-inner {
+    transition: none;
+  }
+}

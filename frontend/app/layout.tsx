@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bodoni_Moda, DM_Sans, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "@/components/cards/cards.css";
 import { APP_NAME, TAGLINE } from "@/lib/brand";
 import { Providers } from "./providers";
 import Header from "@/components/Header";

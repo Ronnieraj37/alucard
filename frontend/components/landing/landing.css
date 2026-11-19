@@ -1,123 +1,55 @@
-/* Alucard landing: a night watch. Deep night ground, moonlight text, crimson for the moment a rule acts,
-   gold for your range. Scoped to .night so the app screens keep their own styles. */
-.night {
-  --n-void: #05060d;
-  --n-deep: #0b0d1c;
-  --n-panel: rgba(14, 16, 34, 0.72);
-  --n-line: rgba(232, 228, 218, 0.12);
-  --n-line2: rgba(232, 228, 218, 0.22);
-  --n-moon: #efe9dc;
-  --n-dim: #b4b2bd;
-  --n-faint: #7c7c8f;
-  --n-crimson: #ff4a5f;
-  --n-crimson-deep: #b3122e;
-  --n-gold: #f0c27b;
-  --n-sea: #6fd6c0;
-  color: var(--n-moon);
-  background: var(--n-void);
+/* The landing page: a light table the cards are played on. */
+.table-page {
+  background: #eef0f2;
+  color: #17181c;
   font-family: var(--font-geist), system-ui, sans-serif;
   font-size: 16px;
   font-variant-numeric: tabular-nums;
 }
-
-.night .n-display {
-  font-family: var(--font-bodoni), "Bodoni 72", Didot, serif;
-  font-weight: 500;
+.table-page .t-display {
+  font-family: var(--font-bodoni), Didot, serif;
+  font-weight: 600;
   letter-spacing: -0.02em;
 }
-.night .n-mono {
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+.table-page .t-kicker {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #7d1426;
 }
-.night .n-moonlit {
-  color: #ff8a96;
-}
-
-.night .n-panel {
-  background: var(--n-panel);
-  border: 1px solid var(--n-line);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-.night .n-btn {
+.table-page .t-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 50px;
-  padding: 0 1.5rem;
-  border-radius: 999px;
+  gap: 8px;
+  height: 50px;
+  padding: 0 1.4rem;
+  border-radius: 12px;
   font-weight: 600;
   font-size: 15px;
-  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), background 0.2s, border-color 0.2s, box-shadow 0.2s;
+  transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1), background 0.2s, box-shadow 0.2s;
 }
-.night .n-btn:active {
+.table-page .t-btn:active {
   transform: scale(0.97);
 }
-.night .n-btn-primary {
-  background: var(--n-moon);
-  color: #120c14;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4), 0 10px 40px -10px rgba(255, 74, 95, 0.55);
-}
-.night .n-btn-primary:hover {
-  background: #fff;
-  box-shadow: 0 0 0 1px #fff, 0 14px 50px -10px rgba(255, 74, 95, 0.75);
-}
-.night .n-btn-ghost {
-  border: 1px solid var(--n-line2);
-  color: var(--n-moon);
-}
-.night .n-btn-ghost:hover {
-  border-color: var(--n-moon);
-  background: rgba(239, 233, 220, 0.06);
-}
-
-.night .n-rise {
-  animation: n-rise 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes n-rise {
-  from {
-    opacity: 0;
-    transform: translateY(26px);
-    filter: blur(10px);
-  }
-}
-
-.night .n-spot {
-  position: relative;
-  overflow: hidden;
-}
-.night .n-spot::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(380px circle at var(--mx, 50%) var(--my, 50%), rgba(255, 74, 95, 0.12), transparent 45%);
-  opacity: 0;
-  transition: opacity 0.3s;
-  pointer-events: none;
-}
-.night .n-spot:hover::after {
-  opacity: 1;
-}
-
-.night .n-pulse {
-  animation: n-pulse 2.4s ease-in-out infinite;
-}
-@keyframes n-pulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.night ::selection {
-  background: var(--n-crimson);
+.table-page .t-btn-dark {
+  background: #17181c;
   color: #fff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.15) inset, 0 6px 18px -8px rgba(23, 24, 28, 0.6);
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .night .n-rise,
-  .night .n-pulse {
-    animation: none;
-  }
+.table-page .t-btn-dark:hover {
+  background: #7d1426;
+}
+.table-page .t-btn-light {
+  background: #fff;
+  color: #17181c;
+  box-shadow: 0 0 0 1px rgba(23, 24, 28, 0.12);
+}
+.table-page .t-btn-light:hover {
+  box-shadow: 0 0 0 1px rgba(23, 24, 28, 0.35);
+}
+.table-page ::selection {
+  background: #7d1426;
+  color: #fff;
 }
