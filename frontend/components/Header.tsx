@@ -27,8 +27,8 @@ export default function Header() {
   const tx = useTx();
   const wrongChain = isConnected && chainId !== sepolia.id;
 
-  // the landing page has its own navigation
-  if (path === "/") return null;
+  // the landing page and the pitch deck have their own navigation
+  if (path === "/" || path.startsWith("/slides")) return null;
 
   // One transaction: the faucet contract mints every test token to the caller.
   const faucet = () =>
