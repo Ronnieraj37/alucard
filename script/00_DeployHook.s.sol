@@ -9,22 +9,28 @@ import {BaseScript} from "./base/BaseScript.sol";
 import {RuleHook} from "../src/RuleHook.sol";
 import {ConditionalOrders} from "../src/ConditionalOrders.sol";
 import {PriceFeeds} from "../src/PriceFeeds.sol";
+import {Rules} from "../src/Rules.sol";
 
-/// @notice Mines the hook address, deploys RuleHook, then deploys ConditionalOrders pointing at it.
+/// @notice Deploys the token list, mines the hook address and deploys RuleHook, then Rules and ConditionalOrders.
 contract DeployHookScript is BaseScript {
     function run() public {
         // hook contracts must have specific flags encoded in the address
         uint160 flags = uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
 
+        vm.startBroadcast();
+        // the deployer owns the token list and must list tokens (PriceFeeds.setFeed) before orders can be created
+        PriceFeeds feeds = new PriceFeeds(msg.sender);
+        vm.stopBroadcast();
+
         // Mine a salt that will produce a hook address with the correct flags
-        bytes memory constructorArgs = abi.encode(poolManager);
+        bytes memory constructorArgs = abi.encode(poolManager, feeds);
         (address hookAddress, bytes32 salt) =
             HookMiner.find(CREATE2_FACTORY, flags, type(RuleHook).creationCode, constructorArgs);
 
         vm.startBroadcast();
-        RuleHook hook = new RuleHook{salt: salt}(poolManager);
-        // the deployer owns the token list and must list tokens (PriceFeeds.setFeed) before orders can be created
-        new ConditionalOrders(poolManager, hook, new PriceFeeds(msg.sender));
+        RuleHook hook = new RuleHook{salt: salt}(poolManager, feeds);
+        Rules rules = new Rules(poolManager, hook, feeds);
+        new ConditionalOrders(poolManager, hook, feeds, rules);
         vm.stopBroadcast();
 
         require(address(hook) == hookAddress, "DeployHookScript: Hook Address Mismatch");

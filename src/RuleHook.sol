@@ -19,17 +19,26 @@ import {TickBitmap} from "@uniswap/v4-core/src/libraries/TickBitmap.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 
-/// @title RuleHook: pool table + limit orders filled inside the swap
-/// @notice Limit orders at the same price share one position (a "bucket"): a range one tick spacing wide, holding one
+import {PriceFeeds} from "./PriceFeeds.sol";
+
+/// @title RuleHook: pool table, average-price oracle, and limit orders filled inside the swap
+/// @notice Oracle: before the first swap of each block the hook adds the price that held since the last update to a
+/// running sum (tick x seconds), and keeps a snapshot of that sum about once a minute (64 of them, an hour or more).
+/// `averageTick` turns two points of the sum into the average price over a window. Orders trigger on that average,
+/// never on the price of the moment, so a swap (or a bundle of them) cannot fire someone's rule: a price pushed
+/// within a block counts for zero seconds, and one held to the next block counts for one block out of the window.
+///
+/// Limit orders at the same price share one position (a "bucket"): a range one tick spacing wide, holding one
 /// token. When a swap moves the price fully across a bucket, `afterSwap` removes the whole bucket in one call and keeps
 /// the proceeds as ERC-6909 claims inside the PoolManager. Each user then claims their share. Every bucket a swap
 /// fully crosses is filled in that swap (like Uniswap crosses every initialized tick); the cost is per bucket, not
 /// per user.
 ///
-/// Anti-dust: a bucket is filled inside swaps only if it holds at least MIN_FILL_BPS (0.01%) of the pool's active
-/// liquidity, and one swap fills at most MAX_FILLS_PER_SWAP buckets. Crossed buckets over that cap are kept in a
-/// backlog that the next swaps finish first. Anyone can fill a crossed bucket with `fillBucket` (small ones, or ones
-/// waiting in the backlog) and is paid its gas cost out of the bucket's proceeds (native-ETH pools; capped at 1%).
+/// Swappers are not paid for these fills, so their cost is kept small: a bucket is filled inside swaps only if it
+/// holds at least MIN_FILL_BPS (0.1%) of the pool's active liquidity, and one swap fills at most MAX_FILLS_PER_SWAP
+/// buckets (~70k gas each). Crossed buckets over that cap are kept in a backlog that the next swaps finish first.
+/// Anyone can fill a crossed bucket with `fillBucket` (small ones, or ones waiting in the backlog) and is paid its
+/// gas cost out of the bucket's proceeds, in the token the bucket received, at Chainlink prices (capped at 1%).
 ///
 /// Fees: the shared position earns fees while the price trades inside the bucket. Fees collected when someone joins
 /// or leaves belong to the holders at that moment, tracked with a fee-per-liquidity counter (like Uniswap's
@@ -59,16 +68,41 @@ contract RuleHook is BaseHook, IUnlockCallback {
     uint256 internal constant BPS = 10_000;
 
     /// @notice A bucket is filled inside swaps only if its liquidity is at least this share of the pool's active
-    /// liquidity (1 = 0.01%). Smaller buckets still work; they are filled with `fillBucket`.
-    uint256 public constant MIN_FILL_BPS = 1;
-    /// @notice Most buckets one swap fills (~69k gas each, so ~3.5M gas). The rest wait in the backlog.
-    uint256 public constant MAX_FILLS_PER_SWAP = 50;
+    /// liquidity (10 = 0.1%). Smaller buckets still work; they are filled with `fillBucket`.
+    uint256 public constant MIN_FILL_BPS = 10;
+    /// @notice Most buckets one swap fills (~70k gas each, so ~350k gas). The rest wait in the backlog.
+    uint256 public constant MAX_FILLS_PER_SWAP = 5;
 
     /// @dev fillBucket reward = measured gas x capped gas price x 110% + overhead, at most 1% of the bucket's proceeds.
     uint256 public constant FILL_GAS_OVERHEAD = 50_000;
     uint256 public constant FILL_PREMIUM_BPS = 11_000;
     uint256 public constant MAX_PRIORITY_FEE_WEI = 0.01 gwei;
     uint256 public constant MAX_FILL_REWARD_BPS = 100;
+
+    /// @notice Snapshots kept per pool, and the least time between two of them.
+    uint256 public constant SNAPSHOTS = 64;
+    uint32 public constant SNAPSHOT_EVERY = 60;
+
+    /// @notice Token prices, used to pay `fillBucket` callers.
+    PriceFeeds public immutable feeds;
+
+    // ---------------------------------------------------------------- oracle
+    /// @dev The running sum of tick x seconds, as of `time` (the first swap of the latest block with a swap), and
+    /// where the newest snapshot is. One slot per pool.
+    struct Oracle {
+        uint32 time;
+        int56 sum;
+        uint8 newest; // index of the newest snapshot
+        uint8 count; // snapshots written so far, up to SNAPSHOTS (0 = not a pool of this hook)
+    }
+
+    struct Snapshot {
+        uint32 time;
+        int56 sum;
+    }
+
+    mapping(PoolId poolId => Oracle) public oracles;
+    mapping(PoolId poolId => Snapshot[SNAPSHOTS]) internal _snapshots;
 
     // ---------------------------------------------------------------- pool table (index 0 = none)
     // 24-bit index: room for 16.7M pools (550 tokens x 4 fee tiers is ~604k possible pairs/pools).
@@ -107,8 +141,7 @@ contract RuleHook is BaseHook, IUnlockCallback {
     mapping(uint256 epochId => Epoch) public epochs;
     mapping(uint256 epochId => mapping(address owner => Share)) public shares;
     /// @notice The epoch currently collecting orders for a bucket (0 = none).
-    mapping(PoolId poolId => mapping(int24 tickLower => mapping(bool sellToken0 => uint256 epochId))) public
-        openEpoch;
+    mapping(PoolId poolId => mapping(int24 tickLower => mapping(bool sellToken0 => uint256 epochId))) public openEpoch;
     /// @dev One bitmap per pool and direction; a bit is set for each bucket eligible for in-swap fills.
     mapping(PoolId poolId => mapping(bool sellToken0 => mapping(int16 => uint256))) internal _bitmap;
 
@@ -126,10 +159,6 @@ contract RuleHook is BaseHook, IUnlockCallback {
 
     mapping(PoolId poolId => Backlog) public backlog;
 
-    /// @dev Transient flag "this pool was swapped in this transaction", at slot keccak(poolId, SWAPPED_TAG).
-    /// ConditionalOrders refuses to execute after a same-transaction swap, which blocks flash-loan price pushes.
-    bytes32 internal constant SWAPPED_TAG = keccak256("RuleHook.swappedThisTx");
-
     /// @dev Tick before the current swap, written in beforeSwap.
     int24 transient _tickBefore;
 
@@ -142,14 +171,21 @@ contract RuleHook is BaseHook, IUnlockCallback {
 
     event PoolRegistered(uint24 indexed index, PoolId indexed poolId);
     event LimitPlaced(
-        uint256 indexed epochId, address indexed owner, int24 tickLower, bool sellToken0, uint128 liquidity, uint256 paid
+        uint256 indexed epochId,
+        address indexed owner,
+        int24 tickLower,
+        bool sellToken0,
+        uint128 liquidity,
+        uint256 paid
     );
     event LimitCancelled(uint256 indexed epochId, address indexed owner, uint128 liquidity);
     event BucketFilled(uint256 indexed epochId, uint256 amount0, uint256 amount1);
     event LimitClaimed(uint256 indexed epochId, address indexed owner, uint256 amount0, uint256 amount1);
     event FillRewarded(uint256 indexed epochId, address indexed filler, uint256 amount);
 
-    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
+    constructor(IPoolManager _poolManager, PriceFeeds _feeds) BaseHook(_poolManager) {
+        feeds = _feeds;
+    }
 
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
@@ -174,6 +210,9 @@ contract RuleHook is BaseHook, IUnlockCallback {
 
     function _afterInitialize(address, PoolKey calldata key, uint160, int24) internal override returns (bytes4) {
         _register(key);
+        PoolId id = key.toId();
+        oracles[id] = Oracle({time: uint32(block.timestamp), sum: 0, newest: 0, count: 1});
+        _snapshots[id][0] = Snapshot({time: uint32(block.timestamp), sum: 0});
         return this.afterInitialize.selector;
     }
 
@@ -185,10 +224,7 @@ contract RuleHook is BaseHook, IUnlockCallback {
         PoolId id = key.toId();
         (, int24 tick,,) = poolManager.getSlot0(id);
         _tickBefore = tick;
-        bytes32 slot = _swappedSlot(id);
-        assembly ("memory-safe") {
-            tstore(slot, 1)
-        }
+        _observe(id, tick);
         return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
@@ -212,18 +248,6 @@ contract RuleHook is BaseHook, IUnlockCallback {
         return _register(key);
     }
 
-    /// @notice True if the pool was swapped earlier in the current transaction.
-    function swappedThisTx(PoolId id) external view returns (bool swapped) {
-        bytes32 slot = _swappedSlot(id);
-        assembly ("memory-safe") {
-            swapped := tload(slot)
-        }
-    }
-
-    function _swappedSlot(PoolId id) internal pure returns (bytes32) {
-        return keccak256(abi.encode(id, SWAPPED_TAG));
-    }
-
     function poolKeyAt(uint24 index) external view returns (PoolKey memory) {
         return _pools[index];
     }
@@ -236,6 +260,47 @@ contract RuleHook is BaseHook, IUnlockCallback {
         _pools[index] = key;
         poolIndexOf[id] = index;
         emit PoolRegistered(index, id);
+    }
+
+    // ---------------------------------------------------------------- oracle
+
+    /// @dev Called before every swap with the price before it. Only the first swap of a block writes: by then the
+    /// price `tick` has held since the last write (every swap in that block happened at the same second).
+    function _observe(PoolId id, int24 tick) internal {
+        Oracle memory o = oracles[id];
+        uint32 time = uint32(block.timestamp);
+        if (o.time == time) return;
+        o.sum += int56(tick) * int56(uint56(time - o.time));
+        o.time = time;
+        if (time - _snapshots[id][o.newest].time >= SNAPSHOT_EVERY) {
+            o.newest = uint8((uint256(o.newest) + 1) % SNAPSHOTS);
+            _snapshots[id][o.newest] = Snapshot({time: time, sum: o.sum});
+            if (o.count < SNAPSHOTS) ++o.count;
+        }
+        oracles[id] = o;
+    }
+
+    /// @notice Average tick of a pool of this hook over at least the last `window` seconds: from the newest snapshot
+    /// that old (up to SNAPSHOT_EVERY older, more if nobody swapped) until now. The price of the current block
+    /// counts for zero seconds. `ok` is false when the pool has no history that old yet.
+    function averageTick(PoolId id, uint32 window) external view returns (bool ok, int24 tick) {
+        Oracle memory o = oracles[id];
+        if (window == 0) window = 1;
+        (, int24 spot,,) = poolManager.getSlot0(id);
+        uint32 time = uint32(block.timestamp);
+        int56 sumNow = o.sum + int56(spot) * int56(uint56(time - o.time));
+        uint256 i = o.newest;
+        for (uint256 k; k < o.count; ++k) {
+            Snapshot memory s = _snapshots[id][i];
+            if (time - s.time >= window) {
+                int56 span = int56(uint56(time - s.time));
+                int56 avg = (sumNow - s.sum) / span;
+                if (sumNow < s.sum && (sumNow - s.sum) % span != 0) --avg; // round towards negative infinity
+                return (true, int24(avg));
+            }
+            i = i == 0 ? SNAPSHOTS - 1 : i - 1;
+        }
+        return (false, 0);
     }
 
     // ---------------------------------------------------------------- limit orders: user entry points
@@ -254,8 +319,7 @@ contract RuleHook is BaseHook, IUnlockCallback {
         uint24 poolIndex = poolIndexOf[id];
         if (poolIndex == 0) revert UnknownPool();
         int24 s = key.tickSpacing;
-        if (tickLower % s != 0 || tickLower < TickMath.minUsableTick(s) || tickLower + s > TickMath.maxUsableTick(s))
-        {
+        if (tickLower % s != 0 || tickLower < TickMath.minUsableTick(s) || tickLower + s > TickMath.maxUsableTick(s)) {
             revert BadTick();
         }
         Currency payCurrency = sellToken0 ? key.currency0 : key.currency1;
@@ -284,9 +348,8 @@ contract RuleHook is BaseHook, IUnlockCallback {
             fresh.sellToken0 = sellToken0;
         }
 
-        uint256 paid = abi.decode(
-            poolManager.unlock(abi.encode(Op.Place, abi.encode(epochId, liquidity, msg.sender))), (uint256)
-        );
+        uint256 paid =
+            abi.decode(poolManager.unlock(abi.encode(Op.Place, abi.encode(epochId, liquidity, msg.sender))), (uint256));
         if (paid > amount) revert TooMuchIn();
 
         Epoch storage e = epochs[epochId];
@@ -350,7 +413,7 @@ contract RuleHook is BaseHook, IUnlockCallback {
     }
 
     /// @notice Fill a bucket the price has fully crossed but no swap filled (too small, or waiting in the backlog).
-    /// The caller is paid its gas cost from the bucket's proceeds (native-ETH pools only, at most 1% of them).
+    /// The caller is paid its gas cost from the bucket's proceeds (at most 1% of them).
     function fillBucket(PoolKey calldata key, int24 tickLower, bool sellToken0) external returns (uint256 reward) {
         if (address(key.hooks) != address(this)) revert PoolNotAllowed();
         PoolId id = key.toId();
@@ -429,30 +492,24 @@ contract RuleHook is BaseHook, IUnlockCallback {
         return "";
     }
 
-    /// @dev Pay the filler its gas cost out of the bucket's proceeds, before anyone can claim them. Only in pools
-    /// where one token is native ETH: other tokens cannot be priced in gas without an outside price.
+    /// @dev Pay the filler its gas cost out of the bucket's proceeds, before anyone can claim them: in the token the
+    /// bucket received, at Chainlink prices, at most MAX_FILL_REWARD_BPS of it. Nothing if that token has no price.
     function _payFillReward(PoolKey memory key, uint256 epochId, address filler, uint256 gasStart)
         internal
         returns (uint256 reward)
     {
-        if (!key.currency0.isAddressZero()) return 0;
         Epoch storage e = epochs[epochId];
-        uint256 cost = fillGasCost(gasStart - gasleft());
-        if (e.sellToken0) {
-            // proceeds are token1: convert the ETH cost at the pool price
-            (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
-            cost = FullMath.mulDiv(FullMath.mulDiv(cost, sqrtPriceX96, 1 << 96), sqrtPriceX96, 1 << 96);
-            uint256 cap = (uint256(e.proceeds1) * MAX_FILL_REWARD_BPS) / BPS;
-            reward = cost < cap ? cost : cap;
-            e.proceeds1 -= uint128(reward);
-            _payFromClaims(key.currency1, filler, reward);
-        } else {
-            uint256 cap = (uint256(e.proceeds0) * MAX_FILL_REWARD_BPS) / BPS;
-            reward = cost < cap ? cost : cap;
-            e.proceeds0 -= uint128(reward);
-            _payFromClaims(key.currency0, filler, reward);
-        }
-        if (reward > 0) emit FillRewarded(epochId, filler, reward);
+        Currency paid = e.sellToken0 ? key.currency1 : key.currency0; // a sell-token0 bucket received token1
+        uint256 proceeds = e.sellToken0 ? e.proceeds1 : e.proceeds0;
+        (bool ok, uint256 cost) = feeds.quote(Currency.unwrap(paid), fillGasCost(gasStart - gasleft()));
+        if (!ok) return 0;
+        uint256 cap = (proceeds * MAX_FILL_REWARD_BPS) / BPS;
+        reward = cost < cap ? cost : cap;
+        if (reward == 0) return 0;
+        if (e.sellToken0) e.proceeds1 -= uint128(reward);
+        else e.proceeds0 -= uint128(reward);
+        _payFromClaims(paid, filler, reward);
+        emit FillRewarded(epochId, filler, reward);
     }
 
     function _placeInPool(uint256 epochId, uint128 liquidity, address payer) internal returns (uint256 paid) {
@@ -627,8 +684,9 @@ contract RuleHook is BaseHook, IUnlockCallback {
 
     /// @dev Bucket large enough to be filled inside swaps: at least MIN_FILL_BPS of the pool's active liquidity.
     function _bigEnough(PoolId id, uint128 bucketLiquidity) internal view returns (bool) {
-        return bucketLiquidity > 0
-            && uint256(bucketLiquidity) * BPS >= uint256(poolManager.getLiquidity(id)) * MIN_FILL_BPS;
+        return
+            bucketLiquidity > 0
+                && uint256(bucketLiquidity) * BPS >= uint256(poolManager.getLiquidity(id)) * MIN_FILL_BPS;
     }
 
     /// @dev Keep fees collected at a join or leave as ERC-6909 claims, owed to the `holders` liquidity that earned

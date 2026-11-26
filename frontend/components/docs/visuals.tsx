@@ -89,7 +89,7 @@ export function Architecture() {
         {arrow("M460 110 C 500 110, 510 165, 538 172", "modifyLiquidity · swap", 500, 130)}
         {arrow("M460 268 C 500 268, 510 200, 538 192", "swap", 505, 250)}
         {arrow("M620 150 L620 78", "before/afterSwap", 668, 118)}
-        {arrow("M540 48 C 500 48, 480 70, 462 85", "pool table, swappedThisTx", 492, 34)}
+        {arrow("M540 48 C 500 48, 480 70, 462 85", "pool table, average price", 492, 34)}
       </svg>
       <figcaption className="mt-1 text-[12px] text-[var(--muted)]">
         Liquidity never leaves Uniswap: ConditionalOrders owns the positions in the PoolManager, and RuleHook only runs inside swaps of the pools that use it.
@@ -104,17 +104,17 @@ type F = { name: string; from: number; bits: number; color: string; desc: string
 
 const SIDE: F[] = [
   { name: "edge", from: 0, bits: 24, color: "#0a9a8b", desc: "int24. The position's boundary: tickLower in the lower side's slot, tickUpper in the upper side's. Moves when the order re-ranges." },
-  { name: "checker", from: 24, bits: 6, color: "#0b1f2a", desc: "Condition A: 0 off, 1 EDGE (price leaves the range), 2 TICK (a price level), 3 TIME (a timer), 4 TRAIL (trailing stop), 5 ORACLE (the pair's Chainlink price reaches a level). 6 bits leave room for 58 more." },
-  { name: "value", from: 30, bits: 24, color: "#6d5bd0", desc: "int24, condition A's number. EDGE: ticks past the edge. TICK and ORACLE: the trigger tick. TIME: minutes. TRAIL: ticks back from the best price seen." },
+  { name: "checker", from: 24, bits: 6, color: "#0b1f2a", desc: "Condition A: 0 off, 1 EDGE (price leaves the range), 2 TICK (a price level), 3 TIME (a timer), 4 TRAIL (trailing stop), 5 ORACLE (the pair's Chainlink price reaches a level), 6 FEES (fees earned), 7 APR (fee rate below). 6 bits leave room for 56 more." },
+  { name: "value", from: 30, bits: 24, color: "#6d5bd0", desc: "int24, condition A's number. EDGE: ticks past the edge. TICK and ORACLE: the trigger tick. TIME: minutes. TRAIL: ticks back from the best price seen. FEES: bps of the position. APR: bps a year." },
   { name: "checkPool", from: 54, bits: 24, color: "#b5651d", desc: "uint24 pool condition A reads (TICK, TRAIL). 0 = the order's own pool." },
   { name: "checker2", from: 78, bits: 6, color: "#334155", desc: "Condition B, same kinds as A. 0 = no condition B." },
   { name: "value2", from: 84, bits: 24, color: "#8b7be0", desc: "int24, condition B's number." },
   { name: "checkPool2", from: 108, bits: 24, color: "#d08a4a", desc: "uint24 pool condition B reads." },
   { name: "combine", from: 132, bits: 2, color: "#0f766e", desc: "0 = A only, 1 = A and B, 2 = A or B." },
-  { name: "holdMinutes", from: 134, bits: 16, color: "#9333ea", desc: "The condition must be true when the side is armed (poke) and still true this many minutes later. It may run from hold to 2 x hold after arming." },
-  { name: "lastRun", from: 150, bits: 24, color: "#a16207", desc: "Last run, minutes since 2026-01-01 (rounded up, valid until 2057). Timers count from here." },
-  { name: "memo", from: 174, bits: 24, color: "#be185d", desc: "With a hold: when it was armed (minutes since 2026-01-01, 0 = not armed). Otherwise: the best tick a trailing stop has seen (int24)." },
-  { name: "actions", from: 198, bits: 8, color: "#2563eb", desc: "Bit 0 keep fees in the order, bit 1 remove, bit 2 swap, bit 3 add. Run in that order. Bits 4-7 spare." },
+  { name: "holdMinutes", from: 134, bits: 16, color: "#9333ea", desc: "Pool price conditions read the average over this many minutes (1-60; 0 = the 2-minute minimum)." },
+  { name: "lastRun", from: 150, bits: 24, color: "#a16207", desc: "Last run (or when the order started or entered this leg), minutes since 2026-01-01 (rounded up, valid until 2057). Timers count from here; a side runs at most once a minute after it." },
+  { name: "best", from: 174, bits: 24, color: "#be185d", desc: "int24, the best average tick a trailing stop has seen. Moved by poke." },
+  { name: "actions", from: 198, bits: 8, color: "#2563eb", desc: "Bit 0 keep fees in the order, bit 1 remove, bit 2 swap, bit 3 add, bit 4 move to the other leg (plan B). Run in that order. Bits 5-7 spare." },
   { name: "removeBps", from: 206, bits: 14, color: "#15803d", desc: "How much liquidity to remove, 0-10,000 (= 0-100%)." },
   { name: "swapToToken1", from: 220, bits: 1, color: "#c026d3", desc: "Swap direction: true sells token0 for token1." },
   { name: "addMode", from: 221, bits: 3, color: "#0891b2", desc: "0 = add back to the same range, 1 = one-sided range next to the price (follow the price)." },
@@ -176,7 +176,7 @@ export function BitMap({ which }: { which: "side" | "slot0" }) {
 // ---------------------------------------------------------------- decoder
 
 const BASE_TIME = 1767225600; // 2026-01-01, OrderState.BASE_TIME
-const CHECKERS = ["off", "EDGE · leaves range", "TICK · price level", "TIME · timer", "TRAIL · trailing stop", "ORACLE · Chainlink price level"];
+const CHECKERS = ["off", "EDGE · leaves range", "TICK · price level", "TIME · timer", "TRAIL · trailing stop", "ORACLE · Chainlink price level", "FEES · fees earned (bps)", "APR · fee rate below (bps a year)"];
 
 function bits(w: bigint, from: number, n: number) {
   return (w >> BigInt(from)) & ((1n << BigInt(n)) - 1n);
@@ -198,7 +198,7 @@ function decodeSide(h: bigint) {
   const checker2 = Number(bits(h, 78, 6));
   const combine = Number(bits(h, 132, 2));
   const hold = Number(bits(h, 134, 16));
-  const memo = bits(h, 174, 24);
+  const best = bits(h, 174, 24);
   const actions = Number(bits(h, 198, 8));
   const shape = Number(bits(h, 232, 22));
   const rows: [string, string][] = [
@@ -207,10 +207,10 @@ function decodeSide(h: bigint) {
   ];
   if (combine) rows.push(["combine", combine === 1 ? "1 · and" : "2 · or"], ["condition B", condText(checker2, s24(bits(h, 84, 24)), Number(bits(h, 108, 24)))]);
   rows.push(
-    ["holdMinutes", hold ? `${hold} min` : "0 · no hold"],
+    ["holdMinutes", hold ? `${hold} min average` : "0 · 2 min average"],
     ["lastRun", when(Number(bits(h, 150, 24)))],
-    ["memo", hold ? `armed ${when(Number(memo))}` : checker === 4 || checker2 === 4 ? `best tick ${s24(memo)}` : String(memo)],
-    ["actions", `${actions} · ${["keep fees", "remove", "swap", "add"].filter((_, i) => actions & (1 << i)).join(" + ") || "none"}`],
+    ["best", checker === 4 || checker2 === 4 ? `best tick ${s24(best)}` : String(best)],
+    ["actions", `${actions} · ${["keep fees", "remove", "swap", "add", "move to plan B"].filter((_, i) => actions & (1 << i)).join(" + ") || "none"}`],
     ["removeBps", `${Number(bits(h, 206, 14))} (${Number(bits(h, 206, 14)) / 100}%)`],
     ["swapToToken1", bits(h, 220, 1) ? "true" : "false"],
     ["addMode", Number(bits(h, 221, 3)) === 1 ? "1 · one-sided (follow)" : "0 · same range"],
@@ -240,7 +240,7 @@ export function Decoder() {
   const load = async () => {
     if (!client) return;
     try {
-      const [order] = await client.readContract({ address: CORE.conditionalOrders, abi: conditionalOrdersAbi, functionName: "getOrder", args: [BigInt(orderId)] });
+      const order = await client.readContract({ address: CORE.conditionalOrders, abi: conditionalOrdersAbi, functionName: "getOrder", args: [BigInt(orderId)] });
       if (order.owner === "0x0000000000000000000000000000000000000000") {
         setNote(`Order #${orderId} is closed or does not exist.`);
         return;

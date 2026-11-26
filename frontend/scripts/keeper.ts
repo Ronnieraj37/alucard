@@ -1,48 +1,53 @@
-// Keeper bot: finds every rule whose condition is met and executes it.
-// Sides that do not swap go together in one executeMany transaction (each owner pays less gas that way). A side that
-// converts moves the pool's price, and the contract refuses later orders of that pool in the same transaction, so
-// those go one transaction each.
-// It is paid back its gas from the positions it runs, in ETH or in the pool's tokens (see ConditionalOrders._settle).
-// It also pokes sides that remember something between runs: it arms holds whose condition has become true and moves
-// trailing stops to a new best price. Pokes are not paid, but they cost very little and keep the rules working.
+// Keeper bot: finds every rule whose condition is met and runs them, all in executeMany transactions (each owner pays
+// less gas that way; an order that cannot run any more is skipped by the contract, the rest still run).
+// It is paid back its gas from the positions it runs, in ETH or in the pool's tokens (see Rules.keeperPay).
+// It also pokes trailing stops: it moves their remembered best price to the current average. Pokes are not paid, but
+// they cost very little and keep the rules working.
 //
 //   KEEPER_PRIVATE_KEY=0x... RPC_URL=https://... npx tsx scripts/keeper.ts
 //   DRY_RUN=1 ...   lists what it would run, sends nothing
 //
 // Runs once and exits, so a scheduler (GitHub Actions cron) can call it every few minutes.
-import { createPublicClient, createWalletClient, http, type Hex } from "viem";
+import { createPublicClient, createWalletClient, http, parseEventLogs, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { withHeadroom } from "../lib/gas";
 import { sepolia } from "viem/chains";
-import { conditionalOrdersAbi } from "../lib/generated/abis";
+import { conditionalOrdersAbi, rulesAbi } from "../lib/generated/abis";
 import deployment from "../lib/generated/deployment.json";
+import { CHECK, decodeSide } from "../lib/side";
 
 const ORDERS = deployment.core.conditionalOrders as `0x${string}`;
+const RULES = (deployment.core as { rules: string }).rules as `0x${string}`;
 const RPC = process.env.RPC_URL ?? process.env.SEPOLIA_RPC ?? "https://ethereum-sepolia-rpc.publicnode.com";
 const KEY = process.env.KEEPER_PRIVATE_KEY ?? process.env.PRIVATE_KEY;
 const DRY = !!process.env.DRY_RUN;
+const BATCH = 30;
 
-async function main() {
-  const client = createPublicClient({ chain: sepolia, transport: http(RPC) });
+export async function keep(rpc = RPC, key = KEY, dry = DRY, log = console.log) {
+  const client = createPublicClient({ chain: sepolia, transport: http(rpc) });
   const c = { address: ORDERS, abi: conditionalOrdersAbi } as const;
+  const r = { address: RULES, abi: rulesAbi } as const;
 
   const next = await client.readContract({ ...c, functionName: "nextOrderId" });
-  const now = BigInt(Math.floor(Date.now() / 1000));
-  const ready: { id: bigint; upper: boolean; swaps: boolean }[] = [];
+  const ready: { id: bigint; upper: boolean }[] = [];
   const pokes: { id: bigint; upper: boolean }[] = [];
   for (let id = 1n; id < next; id++) {
-    const [order, st] = await client.readContract({ ...c, functionName: "getOrder", args: [id] });
-    if (order.owner === "0x0000000000000000000000000000000000000000" || BigInt(order.expiry) < now) continue;
+    const order = await client.readContract({ ...c, functionName: "getOrder", args: [id] });
+    if (order.owner === "0x0000000000000000000000000000000000000000") continue;
     const [lower, upper] = await Promise.all([
-      client.readContract({ ...c, functionName: "canExecute", args: [id, false] }),
-      client.readContract({ ...c, functionName: "canExecute", args: [id, true] }),
+      client.readContract({ ...r, functionName: "canExecute", args: [ORDERS, id, false] }),
+      client.readContract({ ...r, functionName: "canExecute", args: [ORDERS, id, true] }),
     ]);
-    const ACT_SWAP = 4;
-    if (lower) ready.push({ id, upper: false, swaps: (st.lower.actions & ACT_SWAP) !== 0 });
-    if (upper) ready.push({ id, upper: true, swaps: (st.upper.actions & ACT_SWAP) !== 0 });
-    // A side with a hold or a trailing stop may need a poke. Only a poke that would change something succeeds.
-    for (const [isUpper, sd, isReady] of [[false, st.lower, lower], [true, st.upper, upper]] as const) {
-      const trails = sd.checker === 4 || (sd.combine !== 0 && sd.checker2 === 4);
-      if (isReady || (!sd.holdMinutes && !trails)) continue;
+    if (lower) ready.push({ id, upper: false });
+    if (upper) ready.push({ id, upper: true });
+    // A trailing side may need a poke. Only a poke that would change something succeeds.
+    for (const [isUpper, word, isReady] of [
+      [false, order.lowerState, lower],
+      [true, order.upperState, upper],
+    ] as const) {
+      const sd = decodeSide(word);
+      const trails = sd.checker === CHECK.TRAIL || (sd.combine !== 0 && sd.checker2 === CHECK.TRAIL);
+      if (isReady || !trails) continue;
       const ok = await client
         .simulateContract({ ...c, functionName: "poke", args: [id, isUpper] })
         .then(() => true)
@@ -50,65 +55,57 @@ async function main() {
       if (ok) pokes.push({ id, upper: isUpper });
     }
   }
-  console.log(`${Number(next) - 1} orders checked, ${ready.length} ready, ${pokes.length} to poke`);
-  if ((!ready.length && !pokes.length) || DRY) return;
-  if (!KEY) {
-    console.log("No KEEPER_PRIVATE_KEY set: nothing sent.");
-    return;
+  log(`${Number(next) - 1} orders checked, ${ready.length} ready, ${pokes.length} to poke`);
+  if ((!ready.length && !pokes.length) || dry) return { ready, pokes, sent: 0 };
+  if (!key) {
+    log("No KEEPER_PRIVATE_KEY set: nothing sent.");
+    return { ready, pokes, sent: 0 };
   }
 
-  const account = privateKeyToAccount((KEY.startsWith("0x") ? KEY : `0x${KEY}`) as Hex);
-  const wallet = createWalletClient({ account, chain: sepolia, transport: http(RPC) });
-  for (const r of pokes) {
-    const label = `poke #${r.id} ${r.upper ? "upper" : "lower"}`;
+  const account = privateKeyToAccount((key.startsWith("0x") ? key : `0x${key}`) as Hex);
+  const wallet = createWalletClient({ account, chain: sepolia, transport: http(rpc) });
+  let sent = 0;
+  for (const p of pokes) {
+    const label = `poke #${p.id} ${p.upper ? "upper" : "lower"}`;
     try {
-      const { request } = await client.simulateContract({ ...c, account, functionName: "poke", args: [r.id, r.upper] });
+      const { request } = await client.simulateContract({ ...c, account, functionName: "poke", args: [p.id, p.upper] });
       const hash = await wallet.writeContract(request);
       const receipt = await client.waitForTransactionReceipt({ hash });
-      console.log(`${label}: ${receipt.status} ${hash}`);
+      log(`${label}: ${receipt.status} ${hash}`);
     } catch (e) {
-      console.log(`${label}: skipped (${(e as Error).message.split("\n")[0]})`);
+      log(`${label}: skipped (${(e as Error).message.split("\n")[0]})`);
     }
   }
-  // everything that does not swap, 40 sides per transaction
-  const plain = ready.filter((r) => !r.swaps);
-  const single = ready.filter((r) => r.swaps);
-  if (plain.length === 1) single.push(plain.pop()!);
-  for (let i = 0; i < plain.length; i += 40) {
-    const batch = plain.slice(i, i + 40);
-    const args = [batch.map((r) => r.id), batch.map((r) => r.upper)] as const;
-    const label = `batch of ${batch.length} (${batch.map((r) => `#${r.id}${r.upper ? "u" : "l"}`).join(" ")})`;
+  for (let i = 0; i < ready.length; i += BATCH) {
+    const batch = ready.slice(i, i + BATCH);
+    const args = [batch.map((x) => x.id), batch.map((x) => x.upper)] as const;
+    const label = `batch of ${batch.length} (${batch.map((x) => `#${x.id}${x.upper ? "u" : "l"}`).join(" ")})`;
     try {
+      // re-checked on the latest block: another keeper may have run some, or the price moved back
       const { request, result } = await client.simulateContract({ ...c, account, functionName: "executeMany", args });
       if (result === 0n) {
-        console.log(`${label}: nothing would run`);
+        log(`${label}: nothing would run`);
         continue;
       }
       // the contract reverts a batch that is given too little gas, so this estimate covers every order in it
       const gas = await client.estimateContractGas({ ...c, account, functionName: "executeMany", args });
-      const hash = await wallet.writeContract({ ...request, gas: (gas * 15n) / 10n });
+      const hash = await wallet.writeContract({ ...request, gas: withHeadroom(gas) });
       const receipt = await client.waitForTransactionReceipt({ hash });
-      console.log(`${label}: ${receipt.status}, ${result} would run, ${hash}`);
+      // what really ran (the simulation ran a block earlier): one event per order that ran
+      const events = parseEventLogs({ abi: conditionalOrdersAbi, logs: receipt.logs, eventName: ["OrderExecuted", "OrderMoved", "OrderClosed"] });
+      const ran = new Set(events.filter((e) => e.address.toLowerCase() === ORDERS.toLowerCase()).map((e) => String((e.args as { orderId: bigint }).orderId))).size;
+      sent += ran;
+      log(`${label}: ${receipt.status}, ${ran} ran, ${hash}`);
     } catch (e) {
-      console.log(`${label}: skipped (${(e as Error).message.split("\n")[0]})`);
+      log(`${label}: skipped (${(e as Error).message.split("\n")[0]})`);
     }
   }
-  for (const r of single) {
-    const label = `#${r.id} ${r.upper ? "upper" : "lower"}`;
-    try {
-      // Re-check on the latest block: another keeper may have run it, or the price moved back.
-      const { request } = await client.simulateContract({ ...c, account, functionName: "execute", args: [r.id, r.upper] });
-      const gas = await client.estimateContractGas({ ...c, account, functionName: "execute", args: [r.id, r.upper] });
-      const hash = await wallet.writeContract({ ...request, gas: (gas * 12n) / 10n });
-      const receipt = await client.waitForTransactionReceipt({ hash });
-      console.log(`${label}: ${receipt.status} ${hash}`);
-    } catch (e) {
-      console.log(`${label}: skipped (${(e as Error).message.split("\n")[0]})`);
-    }
-  }
+  return { ready, pokes, sent };
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+if (process.argv[1]?.endsWith("keeper.ts")) {
+  keep().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

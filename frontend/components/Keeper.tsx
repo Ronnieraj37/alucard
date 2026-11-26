@@ -7,8 +7,8 @@ import { useAccount, usePublicClient } from "wagmi";
 import { Empty, TxLine } from "@/components/ui";
 import { conditionalOrdersAbi } from "@/lib/generated/abis";
 import { CORE } from "@/lib/pools";
-import { loadRulePosition } from "@/lib/positions";
-import { type LaneId, describeLane, sideFor } from "@/lib/rules";
+import { liveLanes, liveSide, loadRulePosition } from "@/lib/positions";
+import { type LaneId, describeLane, describeWhen } from "@/lib/rules";
 import { useTx } from "@/lib/tx";
 
 /** Anyone can run a rule once its condition is met, and is paid a gas refund from that position. */
@@ -29,8 +29,11 @@ export default function Keeper() {
         const p = await loadRulePosition(client!, id);
         if (!p) continue;
         open++;
+        const lanes = liveLanes(p);
         for (const lane of ["down", "up"] as LaneId[]) {
-          const item = { id, upper: sideFor(p.pool, lane, p.rules[lane]) === "upper", text: describeLane(p.pool, lane, p.rules[lane]) ?? "", label: p.pool.label };
+          const L = lanes[lane];
+          const text = p.liveIsHome ? describeLane(p.pool, lane, L, p.rules.plan) ?? "" : L.trigger ? `Plan B: ${describeWhen(p.pool, lane, L)}, come back` : "";
+          const item = { id, upper: liveSide(p, lane), text, label: p.pool.label };
           if (p.ready[lane]) ready.push(item);
           else if (p.memo[lane]?.pokeable) pokes.push(item);
         }
@@ -39,16 +42,24 @@ export default function Keeper() {
     },
   });
 
-  // One transaction per rule: running right after a swap in the same transaction is refused on purpose.
+  // All ready rules in one transaction: each pays its own gas, the cost of the transaction itself is shared.
   const runAll = () =>
     tx.run(async () => {
-      for (const r of q.data?.ready ?? []) {
-        await tx.send(`Run #${r.id}`, { address: CORE.conditionalOrders, abi: conditionalOrdersAbi as Abi, functionName: "execute", args: [r.id, r.upper] });
+      const ready = q.data?.ready ?? [];
+      if (ready.length === 1) {
+        await tx.send(`Run #${ready[0].id}`, { address: CORE.conditionalOrders, abi: conditionalOrdersAbi as Abi, functionName: "execute", args: [ready[0].id, ready[0].upper] });
+      } else if (ready.length > 1) {
+        await tx.send(`Run ${ready.length} rules`, {
+          address: CORE.conditionalOrders,
+          abi: conditionalOrdersAbi as Abi,
+          functionName: "executeMany",
+          args: [ready.map((r) => r.id), ready.map((r) => r.upper)],
+        });
       }
       q.refetch();
     }, "All ready rules ran. Your gas refund arrived in your wallet.");
 
-  // Pokes arm holds and move trailing highs. They are not paid; they keep other people's rules up to date.
+  // Pokes move trailing stops' best price. They are not paid; they keep other people's rules up to date.
   const pokeAll = () =>
     tx.run(async () => {
       for (const r of q.data?.pokes ?? []) {
@@ -94,7 +105,7 @@ export default function Keeper() {
         <div className="card flex flex-col gap-2 p-3 text-[13px]">
           <div className="font-semibold">To update ({q.data.pokes.length})</div>
           <div className="text-[var(--muted)]">
-            Rules with a hold need arming, and trailing stops need their best price moved. Updating moves no tokens and is not paid.
+            Trailing stops remember the best average price; someone has to move it as the price moves. Updating moves no tokens and is not paid.
           </div>
           {q.data.pokes.map((r) => (
             <div key={`p-${r.id}-${r.upper}`} className="text-[var(--muted)]">

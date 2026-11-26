@@ -1,5 +1,6 @@
 "use client";
 
+import { withHeadroom } from "@/lib/gas";
 import { useCallback, useState } from "react";
 import { type Abi, BaseError, ContractFunctionRevertedError, maxUint256 } from "viem";
 import { useAccount, useBalance, usePublicClient, useReadContract, useWriteContract } from "wagmi";
@@ -18,13 +19,17 @@ export function useTx() {
   const send = useCallback(
     async (label: string, req: { address: `0x${string}`; abi: Abi; functionName: string; args?: readonly unknown[]; value?: bigint }) => {
       setState((s) => ({ ...s, busy: true, message: `${label}: confirm in your wallet…`, error: null }));
-      const hash = await writeContractAsync(req as never);
+      // Our pools' hook writes a price snapshot in the first swap of each minute, and a rule's run can take another
+      // path once the price moves. An estimate made a moment before the block can fall short: add room. Only the gas
+      // used is paid. A failing estimate is thrown here, with the contract's reason, before the wallet opens.
+      const estimate = await client!.estimateContractGas({ ...(req as object), account: address } as never);
+      const hash = await writeContractAsync({ ...req, gas: withHeadroom(estimate) } as never);
       setState((s) => ({ ...s, message: `${label}: waiting for the block…`, hash }));
       const receipt = await client!.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") throw new Error(`${label} failed on-chain`);
       return receipt;
     },
-    [client, writeContractAsync],
+    [address, client, writeContractAsync],
   );
 
   /** Approve `spender` for `amount` of `token` if the allowance is not enough already. */
@@ -77,17 +82,23 @@ export function explain(e: unknown): string {
 }
 
 const HUMAN_ERRORS: Record<string, string> = {
-  ConditionNotMet: "Its condition is not met right now.",
-  SwappedThisTx: "The pool was swapped in this same transaction. Try again in a new transaction.",
-  WouldRefire: "This run would leave the order ready to fire again at once, so it was refused.",
-  InvalidSide: "One of the rules is not allowed. Check the warnings on the canvas.",
-  InvalidOrder: "The order settings are not valid (expiry, fee or both sides empty).",
+  ConditionNotMet: "Its condition is not met right now (rules read the average price, so a move needs a couple of minutes to count).",
+  TooSoon: "This rule ran (or started) less than a minute or two ago. A side runs at most once a minute: try again shortly.",
+  NoPrice: "This pool does not have enough price history yet for that average (a new pool, or a long averaging time). Try a shorter time, or again later.",
+  NothingToEnter: "The move to the other leg could not swap within your slippage limit (the price is far from its average). It will work once the average catches up.",
+  NothingToPoke: "Nothing to update: the remembered price is already the best one.",
+  SideOff: "This side has no rule.",
+  InvalidSide: "One of the rules is not allowed. Check the warnings in the editor.",
+  InvalidLeg: "Plan B is not allowed as set: the parking pool must share a token with this pool, and the move must sell into it.",
+  InvalidOrder: "The order settings are not valid (expiry, fee, both sides empty, or plan B without a way in and out).",
+  UnknownPool: "That pool is not an Alucard pool, so rules cannot read its price.",
   TooMuchIn: "The price moved while you were confirming. Refresh and try again.",
   NotOwner: "Only the owner can do this.",
   Expired: "This order has expired. Anyone can now cancel it, which returns the tokens to the owner.",
   UnknownOrder: "This order no longer exists.",
   TokenNotAllowed: "Rules are only available for tokens on the list (tokens with a Chainlink price). One of this pool's tokens is not on it.",
   OrderTooSmall: "This position is below the smallest size a rule can be attached to. Add more, or try again when the Chainlink price has updated.",
+  BatchOutOfGas: "The batch ran out of gas. Send it with more gas, or fewer rules at once.",
 };
 
 /** Balance of a token (native ETH or ERC20) for the connected wallet. */

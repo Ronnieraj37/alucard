@@ -74,6 +74,8 @@ function PositionRow({ p }: { p: RulePosition | PlainPosition }) {
   const full = p.tickLower === minUsable(p.pool.key.tickSpacing) && p.tickUpper === maxUsable(p.pool.key.tickSpacing);
   const [lo, hi] = priceRange(p.pool, p.tickLower, p.tickUpper);
   const inRange = p.tick >= p.tickLower && p.tick < p.tickUpper;
+  const away = p.kind === "rules" && p.status !== "home";
+  const tokens = p.kind === "rules" ? p.livePool : p.pool;
   const ruleCount = p.kind === "rules" ? (p.rules.down.trigger ? 1 : 0) + (p.rules.up.trigger ? 1 : 0) : 0;
   const ready = p.kind === "rules" && (p.ready.down || p.ready.up);
   const body = (
@@ -85,9 +87,9 @@ function PositionRow({ p }: { p: RulePosition | PlainPosition }) {
             {p.pool.base.symbol} / {p.pool.quote.symbol}
           </span>
           <span className="rounded bg-[var(--line2)] px-1.5 py-0.5 text-[11px] font-semibold">{p.pool.key.fee / 10_000}%</span>
-          <span className={`flex items-center gap-1 text-[11px] font-semibold ${inRange ? "text-[var(--sage)]" : "text-[var(--amber)]"}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${inRange ? "bg-[var(--sage)]" : "bg-[var(--amber)]"}`} />
-            {inRange ? "In range" : "Out of range"}
+          <span className={`flex items-center gap-1 text-[11px] font-semibold ${inRange && !away ? "text-[var(--sage)]" : "text-[var(--amber)]"}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${inRange && !away ? "bg-[var(--sage)]" : "bg-[var(--amber)]"}`} />
+            {p.kind === "rules" && p.status === "waiting" ? "Waiting in plan B" : p.kind === "rules" && p.status === "parked" ? `Parked in ${p.livePool.base.symbol}/${p.livePool.quote.symbol}` : inRange ? "In range" : "Out of range"}
           </span>
         </div>
         <div className="text-[13px] text-[var(--muted)]">
@@ -96,10 +98,10 @@ function PositionRow({ p }: { p: RulePosition | PlainPosition }) {
       </div>
       <div className="text-right text-[13px]">
         <div>
-          {fmt(p.amount0)} {p.pool.token0.symbol}
+          {fmt(p.amount0)} {tokens.token0.symbol}
         </div>
         <div>
-          {fmt(p.amount1)} {p.pool.token1.symbol}
+          {fmt(p.amount1)} {tokens.token1.symbol}
         </div>
       </div>
       <div className="w-[120px] text-right">

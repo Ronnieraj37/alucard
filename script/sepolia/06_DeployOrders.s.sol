@@ -7,11 +7,13 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {RuleHook} from "../../src/RuleHook.sol";
 import {ConditionalOrders} from "../../src/ConditionalOrders.sol";
 import {PriceFeeds} from "../../src/PriceFeeds.sol";
+import {Rules} from "../../src/Rules.sol";
 import {MockAggregator} from "../../src/testnet/MockAggregator.sol";
 
-/// @notice Deploys the token list (PriceFeeds) and a new ConditionalOrders that points at the RuleHook already on
-/// Sepolia, and lists the test tokens with Chainlink's Sepolia price feeds. The hook, its pools and its limit orders
-/// stay as they are. Rewrites deployments/sepolia-core.json with the two new addresses.
+/// @notice Lists the test tokens in the hook's token list (PriceFeeds) with Chainlink's Sepolia price feeds, and
+/// deploys Rules and a new ConditionalOrders that point at the RuleHook already on Sepolia. The hook, its pools and
+/// its limit orders stay as they are. Tokens already listed are skipped (changing a listed feed needs queueFeed and
+/// a 2-day wait). Rewrites deployments/sepolia-core.json with the new addresses.
 ///
 ///   forge script script/sepolia/06_DeployOrders.s.sol --rpc-url $SEPOLIA_RPC --broadcast
 ///
@@ -39,19 +41,20 @@ contract DeployOrders is Script {
         IPoolManager poolManager = IPoolManager(vm.parseJsonAddress(core, ".poolManager"));
         RuleHook hook = RuleHook(vm.parseJsonAddress(core, ".ruleHook"));
 
+        PriceFeeds feeds = hook.feeds();
+
         vm.startBroadcast();
-        PriceFeeds feeds = new PriceFeeds(msg.sender);
         MockAggregator usdtUsd = new MockAggregator(8, 1e8);
+        _list(feeds, address(0), ETH_USD, HOURLY); // native ETH: gas is priced through it
+        _list(feeds, vm.parseJsonAddress(toks, ".WETH"), ETH_USD, HOURLY);
+        _list(feeds, vm.parseJsonAddress(toks, ".WBTC"), BTC_USD, HOURLY);
+        _list(feeds, vm.parseJsonAddress(toks, ".LINK"), LINK_USD, HOURLY);
+        _list(feeds, vm.parseJsonAddress(toks, ".USDC"), USDC_USD, DAILY);
+        _list(feeds, vm.parseJsonAddress(toks, ".DAI"), DAI_USD, DAILY);
+        _list(feeds, vm.parseJsonAddress(toks, ".USDT"), address(usdtUsd), DAILY);
 
-        feeds.setFeed(address(0), ETH_USD, HOURLY); // native ETH: gas is priced through it
-        feeds.setFeed(vm.parseJsonAddress(toks, ".WETH"), ETH_USD, HOURLY);
-        feeds.setFeed(vm.parseJsonAddress(toks, ".WBTC"), BTC_USD, HOURLY);
-        feeds.setFeed(vm.parseJsonAddress(toks, ".LINK"), LINK_USD, HOURLY);
-        feeds.setFeed(vm.parseJsonAddress(toks, ".USDC"), USDC_USD, DAILY);
-        feeds.setFeed(vm.parseJsonAddress(toks, ".DAI"), DAI_USD, DAILY);
-        feeds.setFeed(vm.parseJsonAddress(toks, ".USDT"), address(usdtUsd), DAILY);
-
-        ConditionalOrders orders = new ConditionalOrders(poolManager, hook, feeds);
+        Rules rules = new Rules(poolManager, hook, feeds);
+        ConditionalOrders orders = new ConditionalOrders(poolManager, hook, feeds, rules);
         vm.stopBroadcast();
 
         // deployBlock stays the hook's block: the app reads the hook's events from there too
@@ -61,6 +64,7 @@ contract DeployOrders is Script {
         json = vm.serializeAddress("core", "permit2", vm.parseJsonAddress(core, ".permit2"));
         json = vm.serializeAddress("core", "ruleHook", address(hook));
         json = vm.serializeAddress("core", "conditionalOrders", address(orders));
+        json = vm.serializeAddress("core", "rules", address(rules));
         json = vm.serializeAddress("core", "priceFeeds", address(feeds));
         json = vm.serializeAddress("core", "usdtMockFeed", address(usdtUsd));
         json = vm.serializeUint("core", "deployBlock", vm.parseJsonUint(core, ".deployBlock"));
@@ -68,5 +72,9 @@ contract DeployOrders is Script {
         console.log("PriceFeeds", address(feeds));
         console.log("ConditionalOrders", address(orders));
         console.log("USDT mock feed", address(usdtUsd));
+    }
+
+    function _list(PriceFeeds feeds, address token, address aggregator, uint32 maxAge) internal {
+        if (!feeds.isListed(token)) feeds.setFeed(token, aggregator, maxAge);
     }
 }

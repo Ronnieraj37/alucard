@@ -53,26 +53,15 @@ contract GasBench is RuleSetup {
         low.removeBps = 10_000;
         low.swapToToken1 = true;
         OrderState.Side memory off;
-        ConditionalOrders.CreateParams memory p = ConditionalOrders.CreateParams({
-            key: poolKey,
-            tickLower: -600,
-            tickUpper: 600,
-            liquidity: 10e18,
-            amount0Max: type(uint128).max,
-            amount1Max: type(uint128).max,
-            swapPoolIndex: 0,
-            expiry: uint32(block.timestamp + 1 days),
-            maxKeeperFeeBps: 10,
-            maxSlippage: 100, // 1,000 ticks
-            lower: low,
-            upper: off
-        });
+        ConditionalOrders.CreateParams memory p = _params(low, off);
+        p.maxSlippage = 100; // 1,000 ticks
         vm.prank(alice);
         uint256 g = gasleft();
         uint256 id = orders.createOrder(p);
         console.log("createOrder:", g - gasleft());
 
         _swap(true, 5e18);
+        _settle();
         vm.prank(keeper);
         g = gasleft();
         orders.execute(id, false);

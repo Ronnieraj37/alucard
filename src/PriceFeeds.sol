@@ -25,10 +25,17 @@ interface ITokenDecimals {
 /// minimum order size), and the Chainlink price of a pair as a tick (the Chainlink condition).
 ///
 /// No view here reverts on a broken feed: each returns `ok = false`, so an order can never be stuck by a feed.
+///
+/// Open orders depend on the feeds (Chainlink conditions, keeper pay), so a listed token's feed can only be changed
+/// or removed FEED_DELAY after the change was announced with `queueFeed`. Listing a new token takes effect at once:
+/// no open order uses it yet.
 contract PriceFeeds {
     error NotOwner();
     error BadFeed();
     error NotListed();
+    error NotQueued();
+
+    uint256 public constant FEED_DELAY = 2 days;
 
     struct Feed {
         address aggregator;
@@ -45,8 +52,17 @@ contract PriceFeeds {
     mapping(address token => Feed) public feeds;
     address[] internal _tokens;
 
+    /// @notice An announced change of a listed token's feed: hash of (aggregator, maxAge), and when it may be applied.
+    struct Queued {
+        bytes32 change;
+        uint64 readyAt;
+    }
+
+    mapping(address token => Queued) public queued;
+
     event FeedSet(address indexed token, address indexed aggregator, uint32 maxAge);
     event FeedRemoved(address indexed token);
+    event FeedQueued(address indexed token, address aggregator, uint32 maxAge, uint64 readyAt);
     event MinOrderUsdSet(uint256 minOrderUsd);
     event OwnerChanged(address indexed owner);
 
@@ -64,11 +80,29 @@ contract PriceFeeds {
     // Admin
     // ---------------------------------------------------------------
 
-    /// @notice List a token (or change its feed). The feed must answer with a positive, fresh price right now.
+    /// @notice Announce a change of a listed token's feed (aggregator = 0 removes the token). It can be applied with
+    /// `setFeed` FEED_DELAY from now.
+    function queueFeed(address token, address aggregator, uint32 maxAge) external onlyOwner {
+        if (feeds[token].aggregator == address(0)) revert NotListed();
+        uint64 readyAt = uint64(block.timestamp + FEED_DELAY);
+        queued[token] = Queued(keccak256(abi.encode(aggregator, maxAge)), readyAt);
+        emit FeedQueued(token, aggregator, maxAge, readyAt);
+    }
+
+    /// @notice List a token, or apply a queued change of a listed one. The feed must answer with a positive, fresh
+    /// price right now.
     /// @param token the token, or the zero address for native ETH
-    /// @param aggregator its Chainlink TOKEN / USD feed
+    /// @param aggregator its Chainlink TOKEN / USD feed (0 removes a listed token)
     /// @param maxAge how old an answer may be, in seconds (the feed's heartbeat plus some slack)
     function setFeed(address token, address aggregator, uint32 maxAge) external onlyOwner {
+        if (feeds[token].aggregator != address(0)) {
+            Queued memory q = queued[token];
+            if (q.change != keccak256(abi.encode(aggregator, maxAge)) || block.timestamp < q.readyAt) {
+                revert NotQueued();
+            }
+            delete queued[token];
+            if (aggregator == address(0)) return _remove(token);
+        }
         if (aggregator == address(0) || maxAge == 0) revert BadFeed();
         uint8 feedDecimals = IAggregator(aggregator).decimals();
         uint8 tokenDecimals = token == address(0) ? 18 : ITokenDecimals(token).decimals();
@@ -81,9 +115,8 @@ contract PriceFeeds {
         emit FeedSet(token, aggregator, maxAge);
     }
 
-    /// @notice Take a token off the list. Open orders keep running; new orders with it are refused.
-    function removeFeed(address token) external onlyOwner {
-        if (feeds[token].aggregator == address(0)) revert NotListed();
+    /// @dev Take a token off the list. Open orders keep running; new orders with it are refused.
+    function _remove(address token) internal {
         delete feeds[token];
         uint256 n = _tokens.length;
         for (uint256 i; i < n; ++i) {

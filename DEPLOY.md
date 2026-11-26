@@ -5,7 +5,7 @@
 | Frontend (`frontend/`) | Vercel, Hobby plan | free |
 | Backtest API (`frontend/api/backtest.py`) | the same Vercel project (Python function) | free |
 | Keeper bot (`frontend/scripts/keeper.ts`) | GitHub Actions schedule (`.github/workflows/keeper.yml`) | free (public repo; private: 2,000 min/month) |
-| Contracts | on Sepolia (`deployments/`): ConditionalOrders `0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63`, PriceFeeds `0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e` | Sepolia gas only |
+| Contracts | on Sepolia (`deployments/`); v2 deploy steps in section 4 | Sepolia gas only |
 
 Keys live only in git-ignored files (`.env`, `frontend/.env.local`) or in the hosts' secret settings.
 
@@ -85,53 +85,44 @@ npm run dev           # terminal 2: app on localhost:3000 (forwards /api/backtes
 - **Newer dates**: rerun `lp_study/fetch.py` for a new window, then `export_backtest.py`, commit, push.
 - **Caching**: requests are GETs. Mainnet history never changes: a one-year CDN cache. Our pools: one hour.
 
-## 4. Redeploying ConditionalOrders with the token list (Chainlink feeds)
+## 4. Deploying the contracts (autopilot v2)
 
-RuleHook did not change, so keep it, its pools and its limit orders. `script/sepolia/06_DeployOrders.s.sol` deploys:
+v2 changes the hook (it keeps an average price, and reads the token list to pay `fillBucket` callers), so it is a full
+redeploy: a new token list, a new hook (pools belong to a hook, so new pools), `Rules` and `ConditionalOrders`. The test
+tokens and the faucet stay. Every contract is under the 24,576-byte limit, so the same scripts work on Unichain.
 
-- `PriceFeeds`, the token list. The deployer owns it. It lists native ETH and the six test tokens with Chainlink's
-  Sepolia USD feeds (addresses from docs.chain.link/data-feeds/price-feeds/addresses, Ethereum Sepolia):
+| Script | Deploys |
+|---|---|
+| `script/sepolia/02_DeployCore.s.sol` | `PriceFeeds` (lists ETH and the six test tokens on Chainlink's Sepolia feeds; USDT gets a fixed $1 mock, reused if one exists), `RuleHook` at a mined address, `Rules`, `ConditionalOrders`. Writes `deployments/sepolia-core.json` |
+| `script/sepolia/03_CreatePools.s.sol` | the pools at today's Chainlink prices with the deployer's liquidity; an existing hookless pool is reused (registered, not re-created). Writes `deployments/sepolia-pools.json` |
 
-  | Token | Feed | Address | Heartbeat |
-  |---|---|---|---|
-  | ETH, tWETH | ETH / USD | `0x694AA1769357215DE4FAC081bf1f309aDC325306` | 1 h |
-  | tWBTC | BTC / USD | `0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43` | 1 h |
-  | tLINK | LINK / USD | `0xc59E3633BAAC79493d908e63626716e204A45EdF` | 1 h |
-  | tUSDC | USDC / USD | `0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E` | 24 h |
-  | tDAI | DAI / USD | `0x14866185B1962B63C3Ea9E03Bc1da838bab34C19` | 24 h |
-  | tUSDT | none on Sepolia | a `MockAggregator` fixed at $1, deployed by the script | - |
+Chainlink feeds used (Ethereum Sepolia): ETH / USD `0x694AA1769357215DE4FAC081bf1f309aDC325306`, BTC / USD
+`0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43`, LINK / USD `0xc59E3633BAAC79493d908e63626716e204A45EdF` (1 h heartbeat);
+USDC / USD `0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E`, DAI / USD `0x14866185B1962B63C3Ea9E03Bc1da838bab34C19` (24 h).
 
-- a new `ConditionalOrders` that points at the existing hook and at `PriceFeeds`.
-
-Orders in the old ConditionalOrders keep working there; their owners can still cancel them.
-
-1. Rehearse on a local fork first (nothing is sent to Sepolia):
+1. Rehearse on a local fork (nothing is sent to Sepolia; the real `deployments/` files are not touched):
    ```bash
    set -a; source .env; set +a
-   anvil --fork-url $SEPOLIA_RPC --port 8546 --code-size-limit 65536
-   # in another terminal: back up deployments/sepolia-core.json, then
-   forge script script/sepolia/06_DeployOrders.s.sol --rpc-url http://127.0.0.1:8546 --broadcast \
-     --private-key <an anvil test key> --code-size-limit 65536
-   cd frontend && npm run sync && RPC_URL=http://127.0.0.1:8546 PRIVATE_KEY=<the same test key> npx tsx scripts/e2e-fork.ts
-   # (a fork left running for hours makes its frozen Chainlink prices look old: start a fresh one)
-   # restore deployments/sepolia-core.json afterwards and run npm run sync again
+   anvil --fork-url $SEPOLIA_RPC --port 8546        # terminal 1
+   script/sepolia/rehearse-fork.sh                  # terminal 2
    ```
-2. Real deploy. ConditionalOrders is about 35 KB: over the 24 KB limit of Unichain and Ethereum mainnet, so this
-   works on Sepolia only until the contract is split.
+   It deploys into `deployments/fork/`, points the frontend at the fork, lets an hour pass (pools need average-price
+   history), then runs `check-rules` (every template against the contract) and `e2e-fork` (real swaps, the keeper,
+   plan B). To click through the app against the fork: `NEXT_PUBLIC_RPC_URL=http://127.0.0.1:8546
+   NEXT_PUBLIC_LOGS_RPC_URL=http://127.0.0.1:8546 NEXT_DIST_DIR=.next-fork npx next dev -p 3107`.
+2. Real deploy (Sepolia charges far more gas for contract code than forge estimates locally, hence the multiplier):
    ```bash
-   forge script script/sepolia/06_DeployOrders.s.sol --rpc-url $SEPOLIA_RPC --broadcast --private-key $PRIVATE_KEY \
-     --code-size-limit 65536 --gas-estimate-multiplier 1000
+   forge script script/sepolia/02_DeployCore.s.sol --rpc-url $SEPOLIA_RPC --broadcast --private-key $PRIVATE_KEY --gas-estimate-multiplier 1000
+   forge script script/sepolia/03_CreatePools.s.sol --rpc-url $SEPOLIA_RPC --broadcast --private-key $PRIVATE_KEY --gas-estimate-multiplier 1000
    ```
-   Sepolia charges far more gas for contract code than forge's local estimate assumes, hence the multiplier: the
-   node estimates about 55 million gas for ConditionalOrders (the block limit there is 200 million; the earlier 21 KB
-   version used 33 million). After it, remove the fork rehearsal's `broadcast/06_DeployOrders.s.sol` log if one is
-   left over, so only the real run is kept.
-   The script rewrites `deployments/sepolia-core.json` (`conditionalOrders`, `priceFeeds`, `usdtMockFeed`).
-3. `cd frontend && npm run sync`, commit, push.
+3. `cd frontend && npm run sync` (back to the real `deployments/`), commit, push. Wait a few minutes before creating
+   orders with a trailing stop or a long averaging time: a new pool has no average price yet.
 
-Done on 2026-11-19 (ConditionalOrders `0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63`, PriceFeeds
-`0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e`, USDT mock feed `0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4`); the frontend is synced.
+Admin calls on `PriceFeeds` (owner only): `setFeed(token, aggregator, maxAge)` lists a new token at once; changing or
+removing a listed one is announced with `queueFeed(token, aggregator, maxAge)` (aggregator 0 removes) and applied with
+`setFeed` two days later. `setMinOrderUsd(usd with 18 decimals)` sets the smallest order; `transferOwnership` then
+`acceptOwnership` hands the list over.
 
-Admin calls on `PriceFeeds` afterwards (owner only): `setFeed(token, aggregator, maxAge)` to list a token,
-`removeFeed(token)` to take one off (open orders keep running), `setMinOrderUsd(usd with 18 decimals)` for the
-smallest order, `transferOwnership` then `acceptOwnership` to hand the list over.
+Earlier deployment (v1, still on Sepolia; its orders can be cancelled there): ConditionalOrders
+`0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63`, PriceFeeds `0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e`, RuleHook
+`0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0`.

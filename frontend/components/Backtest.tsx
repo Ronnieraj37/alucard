@@ -4,9 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Info, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePublicClient } from "wagmi";
-import { conditionalOrdersAbi } from "@/lib/generated/abis";
-import { CORE, type Pool, fmt, poolByIndex, priceAtTick } from "@/lib/pools";
-import { type Advanced, type LaneId, type Rules, describeLane, laneTitle } from "@/lib/rules";
+import { rulesAbi } from "@/lib/generated/abis";
+import { CORE, type Pool, fmt, maxUsable, minUsable, poolByIndex, tickAtPrice } from "@/lib/pools";
+import { type Advanced, type LaneId, type Rules, describeBack, describeLane, encodeRules, laneTitle, sharedToken } from "@/lib/rules";
 
 // Series colors: validated with the dataviz palette checker (contrast, chroma, color-blind separation).
 const C_RULES = "#1b1d22"; // graphite: the position with its rules
@@ -26,7 +26,7 @@ type Single = {
   endPrice: number;
   deposit: number;
   range: { lo: number; hi: number; full: boolean };
-  rules: { final: number; fees: number; keeperPaid: number; runs: number; timeInRange: number; closed: boolean };
+  rules: { final: number; fees: number; keeperPaid: number; runs: number; moves: number; timeInRange: number; closed: boolean; away: boolean };
   noRules: { final: number; fees: number; timeInRange: number };
   hold: { final: number };
   series: { t: number[]; price: number[]; rules: number[]; noRules: number[]; hold: number[]; lo: (number | null)[]; hi: (number | null)[] };
@@ -93,8 +93,8 @@ export default function Backtest({
   const [allWindows, setAllWindows] = useState(false);
   const [deposit, setDeposit] = useState(10_000);
   const [chain, setChain] = useState(CHAINS[0]);
-  // How the contract pays keepers: in native-ETH pools a gas refund; in pools of two ERC20 tokens the whole fee cap
-  // (ConditionalOrders._payKeeper cannot price gas in those tokens).
+  // How the contract pays keepers: the measured gas, in any pool (Chainlink prices it in the pool's tokens); the whole
+  // fee cap only when no Chainlink price is available (Rules.keeperPay).
   const [keeperMode, setKeeperMode] = useState<"gas" | "ceiling">("gas");
 
   const ethLike = pool.base.symbol === "WETH" || pool.base.symbol === "ETH";
@@ -103,38 +103,41 @@ export default function Backtest({
     queryKey: ["backtest", history, pool.index, dataStart, days, startMonth, allWindows, deposit, chain.id, keeperMode, JSON.stringify(rules), JSON.stringify(range), JSON.stringify(advanced)],
     staleTime: Infinity,
     queryFn: async () => {
-      // Price triggers are sent relative to today's price of the pool they watch, so they apply to a past window.
-      const lanes: Record<string, unknown> = {};
-      for (const id of ["down", "up"] as LaneId[]) {
-        const L = rules[id];
-        if (!L.trigger || !L.actions.length) continue;
-        const rel = async (tr: NonNullable<typeof L.trigger>) => {
-          const t = { ...tr } as Record<string, unknown>;
-          if (tr.kind === "price" || tr.kind === "otherPool" || tr.kind === "oracle") {
-            let ref = price;
-            if (tr.kind === "otherPool" && tr.poolIndex && client) {
-              const w = poolByIndex(tr.poolIndex);
-              if (w) {
-                const [, tick] = await client.readContract({ address: CORE.conditionalOrders, abi: conditionalOrdersAbi, functionName: "poolState", args: [w.index] });
-                ref = priceAtTick(w, Number(tick));
-              }
-            }
-            t.pricePct = ((tr.price ?? ref) / ref - 1) * 100;
-            delete t.price;
-          }
-          return t;
-        };
-        const t = await rel(L.trigger);
-        const t2 = L.trigger2 ? await rel(L.trigger2) : undefined;
-        lanes[id] = { ...L, trigger: t, trigger2: t2 };
-      }
+      // The engine runs the exact order the contract would get (encodeRules), made at today's price. It moves the
+      // order's price levels to the backtest window: a level x% from today's price stays x% from the window's start.
+      const read = async (index: number) =>
+        Number((await client!.readContract({ address: CORE.rules, abi: rulesAbi, functionName: "poolState", args: [index] }))[1]);
+      const refTick = client ? await read(pool.index) : 0;
+      const s = pool.key.tickSpacing;
+      const at = (pct: number) => tickAtPrice(pool, price * (1 + pct / 100));
+      const ticks: [number, number] =
+        "full" in range
+          ? [minUsable(s), maxUsable(s)]
+          : [Math.floor(Math.min(at(range.loPct), at(range.hiPct)) / s) * s, Math.floor(Math.max(at(range.loPct), at(range.hiPct)) / s) * s + s];
+      const enc = encodeRules(pool, rules, ticks);
+      const lanes = [rules.down, rules.up, rules.plan?.back.down, rules.plan?.back.up];
+      const otherIndex = lanes.flatMap((l) => [l?.trigger, l?.trigger2]).find((t) => (t?.kind === "otherPool" || t?.kind === "trail") && t.poolIndex && t.poolIndex !== pool.index)?.poolIndex;
+      const otherRefTick = otherIndex && client ? await read(otherIndex) : undefined;
+      const park = rules.plan?.where === "park" && rules.plan.parkPool ? poolByIndex(rules.plan.parkPool) : undefined;
+      const order = {
+        lower: enc.lower.toString(),
+        upper: enc.upper.toString(),
+        home: enc.home,
+        away: { ...enc.away, shared: park ? sharedToken(pool, park) : null },
+        awayLower: enc.awayLower.toString(),
+        awayUpper: enc.awayUpper.toString(),
+      };
       const req = {
         pool: own ? `sepolia:${pool.index}` : history,
         days,
         start: dataStart + startMonth * 30 * 86400,
         depositUsd: deposit,
         range,
-        rules: lanes,
+        order,
+        refTick,
+        otherRefTick,
+        homeIndex: pool.index,
+        baseIs0: pool.baseIs0,
         keeperFeeBps: advanced.keeperFeeBps,
         slippagePct: advanced.slippagePct,
         delaySec: 12,
@@ -289,7 +292,7 @@ function RulesSummary({ pool, rules }: { pool: Pool; rules: Rules }) {
   return (
     <div className="flex flex-wrap gap-x-6 gap-y-1 px-1 text-[12px] text-[var(--muted)]">
       {(["down", "up"] as LaneId[]).map((l) => {
-        const t = describeLane(pool, l, rules[l]);
+        const t = describeLane(pool, l, rules[l], rules.plan);
         return t ? (
           <div key={l}>
             <span className="font-semibold text-[var(--ink)]">{laneTitle(pool, l, rules[l])}: </span>
@@ -297,6 +300,13 @@ function RulesSummary({ pool, rules }: { pool: Pool; rules: Rules }) {
           </div>
         ) : null;
       })}
+      {rules.plan &&
+        describeBack(pool, rules.plan).map((t) => (
+          <div key={t}>
+            <span className="font-semibold text-[var(--ink)]">Plan B: </span>
+            {t}
+          </div>
+        ))}
     </div>
   );
 }
@@ -326,7 +336,7 @@ function SingleResult({ r }: { r: Single }) {
         <Tile
           label="Rules ran"
           value={`${r.rules.runs}×`}
-          sub={`fees ${usd(r.rules.fees)} · keepers ${usd(r.rules.keeperPaid)}${r.rules.closed ? " · closed" : ""}`}
+          sub={`${r.rules.moves ? `${r.rules.moves} to plan B and back · ` : ""}fees ${usd(r.rules.fees)} · keepers ${usd(r.rules.keeperPaid)}${r.rules.closed ? " · closed" : r.rules.away ? " · ends in plan B" : ""}`}
         />
       </div>
 

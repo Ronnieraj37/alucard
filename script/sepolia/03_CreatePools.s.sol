@@ -10,6 +10,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {IPermit2} from "permit2/src/interfaces/IPermit2.sol";
@@ -26,10 +27,11 @@ interface IFeed {
 /// full range (low concentration), some tight around the price (high concentration). Most pools use RuleHook; one
 /// hookless pool is added to the hook's pool table so orders can read its price and swap in it.
 ///   forge script script/sepolia/03_CreatePools.s.sol --rpc-url sepolia --broadcast
+/// OUT_DIR (default ./deployments): where the core file is read and the pool file written (a fork rehearsal).
 contract CreatePools is Script {
     using PoolIdLibrary for PoolKey;
+    using StateLibrary for IPoolManager;
 
-    string constant OUT = "./deployments/sepolia-pools.json";
 
     struct Tok {
         address addr; // address(0) = native ETH
@@ -46,7 +48,8 @@ contract CreatePools is Script {
     uint256 poolCount;
 
     function run() external {
-        string memory core = vm.readFile("./deployments/sepolia-core.json");
+        string memory dir = vm.envOr("OUT_DIR", string("./deployments"));
+        string memory core = vm.readFile(string.concat(dir, "/sepolia-core.json"));
         string memory toks = vm.readFile("./deployments/sepolia-tokens.json");
         poolManager = IPoolManager(vm.parseJsonAddress(core, ".poolManager"));
         posm = IPositionManager(vm.parseJsonAddress(core, ".positionManager"));
@@ -83,7 +86,7 @@ contract CreatePools is Script {
         _pool(Spec("ETH_USDC_3000", ETH, USDC, 3000, 60, true, 0, 10, 488, 10)); // ~$10 per side each
         vm.stopBroadcast();
 
-        vm.writeJson(poolsJson, OUT);
+        vm.writeJson(poolsJson, string.concat(dir, "/sepolia-pools.json"));
     }
 
     function _feed(address f) internal view returns (uint256) {
@@ -118,6 +121,14 @@ contract CreatePools is Script {
         uint160 sqrtP = uint160(
             FixedPointMathLib.sqrt(FullMath.mulDiv(t0.usd * 10 ** t1.decimals, 1 << 192, t1.usd * 10 ** t0.decimals))
         );
+        // a pool without the hook may exist from an earlier deployment: keep it (and its liquidity), only register it
+        (uint160 existing,,,) = poolManager.getSlot0(key.toId());
+        if (existing != 0) {
+            require(!sp.hooked, "hook pool already exists");
+            hook.registerPool(key);
+            _record(sp.name, key);
+            return;
+        }
         int24 tick = poolManager.initialize(key, sqrtP);
         if (!sp.hooked) hook.registerPool(key);
 

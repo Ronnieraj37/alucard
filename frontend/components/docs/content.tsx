@@ -129,8 +129,8 @@ export const SECTIONS: DocSection[] = [
           sale reverses. Only a full cross locks it in.
         </Callout>
         <Callout kind="tip" title="Very small orders">
-          Orders below 0.01% of the pool’s active liquidity are not filled inside swaps (so nobody can spam swappers with dust). Once crossed, anyone can fill
-          them; in pools with native ETH the filler is paid back its gas from the order’s proceeds.
+          Orders below 0.1% of the pool’s active liquidity are not filled inside swaps: swappers are not paid for filling, so their extra gas is kept small (at
+          most 5 fills per swap). Once crossed, anyone can fill them and is paid back its gas from the order’s proceeds, in the token the order received.
         </Callout>
         <Dev>
           <p>
@@ -359,8 +359,8 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
       <Section id="safety" title="Safety and limits" lead="What protects your position, and what to be aware of.">
         <Cards
           items={[
-            { icon: ShieldCheck, title: "No flash-loan triggers", text: "A rule cannot run right after a swap in the same transaction, so nobody can borrow money to push the price and fire it." },
-            { icon: ArrowLeftRight, title: "Slippage from the trigger price", text: "Conversions never sell worse than your slippage limit measured from the trigger price, however far someone pushes the price." },
+            { icon: ShieldCheck, title: "Average prices, not the price of the moment", text: "Rules read the pool's average price over at least 2 minutes. A price pushed within a block counts for nothing, so nobody can borrow money to push the price and fire your rule." },
+            { icon: ArrowLeftRight, title: "Slippage from the average price", text: "Every swap stops at your slippage limit, measured from the average price, however far someone pushes the price before it." },
             { icon: Layers, title: "Payouts are never stuck", text: "If a transfer to you fails (e.g. a contract wallet that refuses ETH), it is held for you to withdraw to any address." },
             { icon: LineChart, title: "Always yours", text: "Withdraw everything at any time. After expiry anyone can close it, and the tokens still go to you." },
           ]}
@@ -370,9 +370,10 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
         </Callout>
         <Dev>
           <p>
-            Flash-loan guard: <code>RuleHook._beforeSwap</code> sets a transient flag at <code>keccak256(abi.encode(poolId, SWAPPED_TAG))</code>;{" "}
-            <code>execute</code> reverts with <code>SwappedThisTx</code> if the order’s pool (or the pool a TICK side watches) is flagged. Pools without the hook
-            are never flagged, so a cross-pool trigger on a hookless pool is protected only by the slippage limit.
+            Average price: before the first swap of each block <code>RuleHook._beforeSwap</code> adds the tick that held since the last update to a running sum
+            (tick × seconds) and keeps a snapshot about once a minute (64 snapshots). <code>averageTick(poolId, window)</code> divides two points of the sum.
+            Every pool condition, swap limit and new range in <code>Rules</code> uses it (at least 120 s, or the side&apos;s hold). Conditions read only pools of the
+            hook; pools without it have no average. A side runs at most once a minute (<code>MIN_GAP</code>), so no transaction can loop it.
           </p>
         </Dev>
       </Section>
@@ -451,13 +452,19 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
               the tokens.
             </>,
             <>
-              A keeper sees <code>canExecute(id, upper) == true</code> and calls <code>execute</code>; the contract re-checks the condition at the current tick.
+              A keeper sees <code>Rules.canExecute(vault, id, upper) == true</code> and calls <code>execute</code>; the contract asks <code>Rules.met</code>{" "}
+              again, on average prices.
             </>,
             <>
               Inside <code>unlockCallback</code>: remove → reserve keeper ceiling → swap (optional) → add (optional) → update the side → close or store →
               pay keeper → pay owner.
             </>,
             <>When both sides are off or no liquidity is left, everything is removed and paid to the owner.</>,
+            <>
+              A side with the move bit takes everything out of the live leg (swapping into the shared token when the other leg is another pair), puts it into the
+              other leg (held as ERC-6909 claims while waiting, or swapped to the range&apos;s mix and added), and swaps the legs: the one left keeps its sides
+              for the way back.
+            </>,
           ]}
         />
       </Section>
@@ -629,7 +636,7 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
             <tr>
               <td>Trailing stop (x%)</td>
               <td>
-                <code>checker=4</code>, <code>value</code> = ticks for a move of x%; the best tick seen is kept in <code>memo</code> and raised by <code>poke</code>
+                <code>checker=4</code>, <code>value</code> = ticks for a move of x%; the best average tick seen is kept in <code>best</code> and raised by <code>poke</code>
               </td>
             </tr>
             <tr>
@@ -639,9 +646,22 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
               </td>
             </tr>
             <tr>
-              <td>Hold m minutes</td>
+              <td>Average over m minutes</td>
               <td>
-                <code>holdMinutes = m</code>; <code>poke</code> arms the side (time kept in <code>memo</code>); it may run m to 2m minutes later
+                <code>holdMinutes = m</code> (1–60): pool conditions read the average over m minutes instead of 2
+              </td>
+            </tr>
+            <tr>
+              <td>Fees earned x% / fees dry up y% a year</td>
+              <td>
+                <code>checker=6</code>, <code>value = x × 100</code> (bps of the position); <code>checker=7</code> (lower side only, must leave),{" "}
+                <code>value = y × 100</code>, from the fees since the last collection (at least an hour)
+              </td>
+            </tr>
+            <tr>
+              <td>Move to plan B</td>
+              <td>
+                bit 4 with remove 100% and keep fees (a waiting leg: bit 4 alone), always <code>repeat</code>; swap bit when it must sell into the shared token
               </td>
             </tr>
             <tr>
@@ -670,16 +690,18 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
             </tr>
           </tbody>
         </table>
-        <h3>Validation (ConditionalOrders._validateSide)</h3>
+        <h3>Validation (Rules.checkSide and Rules.checkLegs)</h3>
         <ul>
           <li>Actions must include remove, keep-fees or add; swap and add together are rejected.</li>
-          <li>TIME needs value &gt; 0; EDGE needs value ≥ 0; a TICK pool index must exist.</li>
+          <li>A side that removes everything and adds nothing cannot repeat: nothing would be left to run on.</li>
+          <li>TIME needs value &gt; 0; EDGE needs value ≥ 0; TICK and TRAIL may read another pool only if it is a pool of the hook.</li>
           <li>A repeating TICK side without add needs a step; one-sided add needs EDGE, remove 100% and a width.</li>
-          <li>A repeating EDGE side must move its range (one-sided add), and its margin must be at least one spacing.</li>
+          <li>Holds are at most 60 minutes. APR only on the lower side of a side that leaves.</li>
+          <li>Moves need a second leg; a waiting leg only moves; a move into another pair must swap into the shared token.</li>
         </ul>
         <p>
-          <code>scripts/check-rules.ts</code> encodes every template on every pool and dry-runs <code>createOrder</code> against the live contract (56 cases), and
-          checks <code>encode(decode(x)) == x</code>.
+          <code>scripts/check-rules.ts</code> encodes every template on every pool and dry-runs <code>createOrder</code> against the contract, and{" "}
+          <code>test/EditorParity.t.sol</code> checks that the editor accepts exactly what the contract accepts.
         </p>
       </Section>
     ),
@@ -691,22 +713,20 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
     keywords: "execute execution flow wouldrefire close reserve swap add",
     render: () => (
       <Section dev id="execution" title="Execution, step by step" lead="What ConditionalOrders._execute does, in order.">
-        <Code lang="text">{`1  side off?                            -> revert SideOff
-2  pool (or watched pool) swapped in this tx? -> revert SwappedThisTx
-3  condition at the current tick / time?      -> else revert ConditionNotMet
-4  refTick = trigger level (EDGE/TICK) or current tick (TIME)
+        <Code lang="text">{`1  side off?                                  -> revert SideOff
+2  ran less than a minute ago?                -> revert TooSoon
+3  Rules.met: condition on average prices?    -> else revert ConditionNotMet
+4  move bit? -> take everything out, swap, enter the other leg, swap legs (see above)
 5  remove removeBps of liquidity; fees collected with it
 6  reserve = maxKeeperFeeBps of everything removed; fees not kept -> owner
-7  swap (bit 2): all of one token, price limit = refTick -/+ maxSlippage*10,
+7  swap (bit 2): all of one token, price limit = average -/+ maxSlippage*10,
    skipped if the price is already past the limit
-8  add (bit 3): same range, or one-sided next to the price (follow)
+8  add (bit 3): same range, or one-sided next to the average price (follow)
 9  side: lastRun = now; repeat ? (TICK without add: value += step) : clear
-10 pay keeper out of the reserve
-11 no liquidity left or both sides off -> remove the rest, pay owner, delete
-12 same side would fire again at once     -> revert WouldRefire
-13 pay out everything else to the owner, store the new word`}</Code>
+10 no liquidity left or both sides off -> remove the rest, delete
+11 pay keeper out of the reserve (Rules.keeperPay), everything else to the owner`}</Code>
         <p>
-          Payouts take the tokens to the contract first and then try to send them (ETH with a 100,000 gas stipend). If a send fails, the amount is recorded in{" "}
+          Payouts take the tokens to the contract first and then try to send them (ETH with a 30,000 gas stipend). If a send fails, the amount is recorded in{" "}
           <code>owed[owner][currency]</code> and the owner calls <code>withdraw(currency, to)</code>.
         </p>
       </Section>
@@ -737,21 +757,21 @@ struct Share { uint128 liquidity; uint128 debt0; uint128 debt1; }`}</Code>
           <tbody>
             <tr>
               <td>
-                <code>MIN_FILL_BPS = 1</code>
+                <code>MIN_FILL_BPS = 10</code>
               </td>
-              <td>A bucket is filled inside swaps only if it holds ≥ 0.01% of the pool’s active liquidity.</td>
+              <td>A bucket is filled inside swaps only if it holds ≥ 0.1% of the pool’s active liquidity.</td>
             </tr>
             <tr>
               <td>
-                <code>MAX_FILLS_PER_SWAP = 50</code>
+                <code>MAX_FILLS_PER_SWAP = 5</code>
               </td>
-              <td>At most ~3.5M gas of fills per swap; the rest wait in a per-pool backlog that the next swaps finish first.</td>
+              <td>At most ~350k gas of fills per swap (swappers are not paid for them); the rest wait in a per-pool backlog that the next swaps finish first.</td>
             </tr>
             <tr>
               <td>
                 <code>fillBucket</code>
               </td>
-              <td>Anyone fills a crossed bucket; reward = (gas + 50,000) × capped gas price × 110%, at most 1% of the proceeds (native-ETH pools).</td>
+              <td>Anyone fills a crossed bucket; reward = (gas + 50,000) × capped gas price × 110%, in the token received at Chainlink prices, at most 1% of the proceeds.</td>
             </tr>
           </tbody>
         </table>
@@ -815,16 +835,17 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
           <tbody>
             {(
               [
-                ["createOrder(CreateParams) payable → orderId", "Add liquidity with a rule. Native ETH as msg.value; extra refunded."],
-                ["updateOrder(id, UpdateParams)", "Owner only. New rule; range and liquidity unchanged; timers restart."],
+                ["createOrder(CreateParams) payable → orderId", "Add liquidity with a strategy (sides as packed words, an optional second leg). Native ETH as msg.value; extra refunded."],
+                ["updateOrder(id, UpdateParams)", "Owner only. New rules for the live leg; range, liquidity, plan B and the side clocks unchanged."],
                 ["execute(id, upper)", "Anyone. Runs one side if its condition holds."],
                 ["executeMany(ids[], uppers[]) → ran", "Anyone. Runs many sides in one transaction; the ones that cannot run are skipped. Each order pays less than alone."],
-                ["keeperGasCost(gasUsed) / keeperGasCostIn(token, gasUsed) view", "What a keeper is paid for that much gas, in ETH or in a token."],
+                ["poke(id, upper)", "Anyone. Moves a trailing side's remembered best to the current average price."],
                 ["feeds() view", "The PriceFeeds contract: the token list (isListed, tokens), Chainlink prices (priceOf, quote, pairTick), minOrderUsd."],
                 ["cancel(id)", "Owner any time; anyone after expiry. Everything to the owner."],
                 ["withdraw(currency, to)", "Collect payouts that could not be sent."],
-                ["canExecute(id, upper) view", "For keepers."],
-                ["getOrder(id) / ordersOf(owner) / orderAmounts(id) / poolState(index)", "Views for apps."],
+                ["getOrder(id) / getPlan(id) / ordersOf(owner)", "Views for apps: the order (packed sides), its second leg, an owner's orders."],
+                ["Rules.canExecute(vault, id, upper) / orderAmounts(vault, id) / poolState(index)", "Views for keepers and apps."],
+                ["Rules.encode(side) / decode(word) / gasWei(gas) / averageTick(index, window)", "Helpers: pack a side, the gas price counted, a pool's average price."],
               ] as [string, string][]
             ).map(([f, d]) => (
               <tr key={f}>
@@ -844,8 +865,8 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
                 ["placeLimit(key, tickLower, sellToken0, amount) payable → epochId", "Join or open the bucket at that price."],
                 ["cancelLimit(epochId, to) / claimLimit(epochId, to)", "Before / after the fill."],
                 ["fillBucket(key, tickLower, sellToken0) → reward", "Fill a crossed bucket no swap filled."],
-                ["registerPool(key) → index", "Add a hookless pool to the table (for price checks and swaps)."],
-                ["swappedThisTx(poolId) view", "The flash-loan flag."],
+                ["registerPool(key) → index", "Add a hookless pool to the table (for swaps; rules cannot read its price: it has no average)."],
+                ["averageTick(poolId, window) view → (ok, tick)", "The pool's average price over at least `window` seconds: what every rule reads."],
               ] as [string, string][]
             ).map(([f, d]) => (
               <tr key={f}>
