@@ -235,3 +235,15 @@ select.input option { background: var(--white); color: var(--ink); }
   box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.35), 0 16px 40px -26px rgba(139, 108, 255, 0.8); }
 .strat.on { box-shadow: inset 0 0 0 1px rgba(94, 224, 168, 0.35); }
 .strat-ic { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; color: #fff; background: linear-gradient(135deg, #a58bff, #5a6bff); box-shadow: 0 0 20px -6px #8b6cff; }
+
+/* the network switch in the header */
+.net-btn { display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 12px; border-radius: 999px; font-size: 13.5px; font-weight: 600; color: var(--ink2);
+  box-shadow: inset 0 0 0 1px var(--line); transition: box-shadow 0.15s, color 0.15s; }
+.net-btn:hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--glow); }
+.net-dot { width: 9px; height: 9px; border-radius: 99px; box-shadow: 0 0 10px currentColor; }
+.net-menu { position: absolute; right: 0; top: calc(100% + 8px); z-index: 50; width: 250px; padding: 8px; border-radius: 14px; background: var(--white);
+  box-shadow: inset 0 0 0 1px var(--line), 0 24px 60px -20px rgba(0, 0, 0, 0.8); animation: menu-in 0.14s ease-out; }
+.net-menu-h { padding: 6px 10px 4px; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); font-family: var(--font-marcellus), serif; }
+.net-item { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; font-size: 14px; color: var(--ink); }
+.net-item:hover { background: var(--line2); }
+.net-menu-f { padding: 6px 10px 4px; font-size: 12px; color: var(--muted); }

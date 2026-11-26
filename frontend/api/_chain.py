@@ -1,8 +1,9 @@
-"""Reads the price history of our own Sepolia pools from the chain: Chainlink rounds, the pool's liquidity, and the
+"""Reads the price history of our own testnet pools (Sepolia, Unichain Sepolia) from the chain: Chainlink rounds, the pool's liquidity, and the
 token list (PriceFeeds). Standard library only; every read is an eth_call (batched through Multicall3), so it works
 with any RPC, including free plans that limit eth_getLogs.
 
-RPC: RPC_URL, else NEXT_PUBLIC_RPC_URL, else a public Sepolia node.
+RPC: per chain. Sepolia: RPC_URL, else NEXT_PUBLIC_RPC_URL, else a public node. Unichain Sepolia: UNICHAIN_RPC_URL,
+else the Sepolia Alchemy URL with the network swapped (one Alchemy key serves both), else the public node.
 """
 from __future__ import annotations
 
@@ -20,7 +21,9 @@ SEL_LATEST = "feaf968c"  # latestRoundData()
 SEL_ROUND = "9a6fc8f5"  # getRoundData(uint80)
 SEL_AGG3 = "82ad56cb"  # aggregate3((address,bool,bytes)[])
 SEL_FEEDS = "2fba4aa9"  # PriceFeeds.feeds(address)
-SEL_POOL_STATE = "26479bd6"  # ConditionalOrders.poolState(uint24)
+SEL_POOL_STATE = "26479bd6"  # Rules.poolState(uint24)
+PUBLIC = {11155111: "https://ethereum-sepolia-rpc.publicnode.com", 1301: "https://sepolia.unichain.org"}
+CHAIN = 11155111  # the chain this request reads (use())
 
 BATCH = 300  # rounds per eth_call
 MAX_ROUNDS = 8000  # ~11 months of an hourly feed
@@ -29,13 +32,34 @@ CACHE_S = 600  # a feed's history is refetched at most every 10 minutes per inst
 _feed_cache: dict[str, tuple[float, list[tuple[int, int]]]] = {}
 
 
+def use(chain_id: int | None) -> None:
+    """Read this chain from now on (one request at a time per instance)."""
+    global CHAIN
+    CHAIN = int(chain_id or 11155111)
+
+
 def rpc_url() -> str:
-    return os.environ.get("RPC_URL") or os.environ.get("NEXT_PUBLIC_RPC_URL") or PUBLIC_RPC
+    sep = os.environ.get("RPC_URL") or os.environ.get("NEXT_PUBLIC_RPC_URL")
+    if CHAIN == 1301:
+        uni = os.environ.get("UNICHAIN_RPC_URL") or os.environ.get("NEXT_PUBLIC_UNICHAIN_RPC_URL")
+        if uni:
+            return uni
+        if sep and "eth-sepolia.g.alchemy.com" in sep:
+            return sep.replace("eth-sepolia", "unichain-sepolia")
+        return PUBLIC[1301]
+    return sep or PUBLIC_RPC
 
 
 def deployment() -> dict:
+    """This chain's deployment (core, tokens, pools), from the file npm run sync writes."""
     with open(DEPLOYMENT) as f:
-        return json.load(f)
+        d = json.load(f)
+    chains = d.get("chains")
+    if chains is None:
+        return d  # an older single-chain file
+    if str(CHAIN) not in chains:
+        raise ValueError(f"not deployed on chain {CHAIN}")
+    return chains[str(CHAIN)]
 
 
 def _rpc(method: str, params: list):
@@ -113,8 +137,8 @@ def feed_of(price_feeds: str, token: str) -> tuple[str, int, int]:
     return agg, w[2], w[3]
 
 
-def pool_liquidity(conditional_orders: str, pool_index: int) -> int:
-    w = _words(call(conditional_orders, SEL_POOL_STATE + _word(pool_index)))
+def pool_liquidity(rules: str, pool_index: int) -> int:
+    w = _words(call(rules, SEL_POOL_STATE + _word(pool_index)))
     return w[2]
 
 

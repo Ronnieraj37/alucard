@@ -1,12 +1,13 @@
 "use client";
 
 import { ArrowLeftRight, Bot, FlaskConical, Layers, LineChart, ShieldCheck, Sparkles, Target, Waypoints } from "lucide-react";
+import { CHAIN_ID, CHAIN_LABEL, EXPLORER } from "@/lib/chain";
 import Link from "next/link";
 import { CORE, POOLS, TOKENS } from "@/lib/pools";
 import { Callout, Cards, Code, Dev, Kbd, Section, Steps } from "./ui";
 import { Architecture, BitMap, Decoder, RangeSides } from "./visuals";
 
-const ES = "https://sepolia.etherscan.io/address/";
+const ES = `${EXPLORER}/address/`;
 const A = ({ a }: { a: string }) => (
   <a href={`${ES}${a}`} target="_blank" rel="noreferrer" className="font-mono text-[12.5px]">
     {a.slice(0, 6)}…{a.slice(-4)}
@@ -489,7 +490,7 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
     group: "dev",
     keywords: "addresses deployment sepolia etherscan pools tokens",
     render: () => (
-      <Section dev id="addresses" title="Addresses" lead="Ethereum Sepolia (chain id 11155111). Source of truth: deployments/*.json.">
+      <Section dev id="addresses" title="Addresses" lead={`${CHAIN_LABEL} (chain id ${CHAIN_ID}); switch networks in the header for the other one. Source of truth: deployments/*.json.`}>
         <table>
           <thead>
             <tr>

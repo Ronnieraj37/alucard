@@ -10,7 +10,7 @@
 import { createPublicClient, createWalletClient, http, maxUint256, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { withHeadroom } from "../lib/gas";
-import { sepolia } from "viem/chains";
+import { CHAIN } from "../lib/chain";
 import { conditionalOrdersAbi, mockAggregatorAbi, priceFeedsAbi, routerAbi, rulesAbi, testTokenAbi } from "../lib/generated/abis";
 import { CORE, POOLS, type Pool, amountsFor, liquidityFor, priceAtTick, rangeAround, sqrtFromX96 } from "../lib/pools";
 import { type ChainPlan, type Lane, type Rules, createParams, describeLane, isValid, validate } from "../lib/rules";
@@ -24,8 +24,8 @@ const KEY = (process.env.PRIVATE_KEY ?? "") as Hex;
 if (!KEY) throw new Error("PRIVATE_KEY not set");
 
 const account = privateKeyToAccount((KEY.startsWith("0x") ? KEY : `0x${KEY}`) as Hex);
-const client = createPublicClient({ chain: sepolia, transport: http(RPC) });
-const wallet = createWalletClient({ account, chain: sepolia, transport: http(RPC) });
+const client = createPublicClient({ chain: CHAIN, transport: http(RPC) });
+const wallet = createWalletClient({ account, chain: CHAIN, transport: http(RPC) });
 const c = { address: CORE.conditionalOrders, abi: conditionalOrdersAbi } as const;
 const r = { address: CORE.rules, abi: rulesAbi } as const;
 const pool = POOLS.find((p) => p.name === "WETH_USDC_3000")!;

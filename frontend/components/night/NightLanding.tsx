@@ -7,6 +7,7 @@ import { motion, useInView, useScroll, useTransform, type MotionValue } from "fr
 import { ArrowRight, Check, Eye, KeyRound, Moon, Radio, ShieldCheck, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { CHAIN_LABEL, explorerAddress } from "@/lib/chain";
 import { CORE } from "@/lib/pools";
 import Horizon from "./Horizon";
 
@@ -77,7 +78,7 @@ function Hero() {
       </motion.div>
       <div className="n-hero-copy">
         <motion.p className="n-eyebrow" initial={{ opacity: 0, letterSpacing: "0.6em" }} animate={{ opacity: 1, letterSpacing: "0.32em" }} transition={{ duration: 1.6, ease: EASE }}>
-          <Moon className="h-3.5 w-3.5" /> Uniswap v4 · live on Sepolia
+          <Moon className="h-3.5 w-3.5" /> Uniswap v4 · live on Sepolia and Unichain
         </motion.p>
         <motion.h1 className="n-h1" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.2, delay: 0.2, ease: EASE }}>
           You sleep.
@@ -346,7 +347,7 @@ function Trust() {
           ))}
         </div>
         <p className="mt-6 text-[14px] text-[var(--muted)]">
-          Not audited yet. On Sepolia nobody arbitrages the pools, so we run a small bot that keeps them on Chainlink, the job arbitrageurs do on mainnet.
+          Not audited yet. On testnets nobody arbitrages the pools, so we run a small bot that keeps them on Chainlink, the job arbitrageurs do on mainnet.
         </p>
       </div>
     </section>
@@ -403,7 +404,7 @@ function Proof() {
           ))}
         </div>
         <p className="mt-6 text-[14px] text-[var(--muted)]">
-          Live on Sepolia:{" "}
+          Live on {CHAIN_LABEL} (and the other testnet in the app):{" "}
           {[
             ["ConditionalOrders", CORE.conditionalOrders],
             ["Rules", CORE.rules],
@@ -411,7 +412,7 @@ function Proof() {
           ].map(([n, a], i) => (
             <span key={n}>
               {i > 0 && " · "}
-              <a className="n-link" href={`https://sepolia.etherscan.io/address/${a}`} target="_blank" rel="noreferrer">
+              <a className="n-link" href={explorerAddress(a)} target="_blank" rel="noreferrer">
                 {n} {short(a)}
               </a>
             </span>

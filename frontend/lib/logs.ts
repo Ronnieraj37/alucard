@@ -1,13 +1,12 @@
 import { createPublicClient, http } from "viem";
-import { sepolia } from "viem/chains";
+import { CHAIN, logsRpc } from "./chain";
 import { CORE } from "./pools";
 
 // Event logs need a node that answers wide block ranges. Free Alchemy keys allow 10 blocks per eth_getLogs, so logs
 // go to their own RPC (a public node by default, 50,000 blocks per request) while everything else uses the app's RPC.
-const LOGS_RPC = process.env.NEXT_PUBLIC_LOGS_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com";
-const CHUNK = 50_000n;
+const { url: LOGS_RPC, chunk: CHUNK } = logsRpc();
 
-export const logsClient = createPublicClient({ chain: sepolia, transport: http(LOGS_RPC) });
+export const logsClient = createPublicClient({ chain: CHAIN, transport: http(LOGS_RPC) });
 
 type GetLogsArgs = Parameters<typeof logsClient.getLogs>[0];
 

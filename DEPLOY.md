@@ -6,7 +6,7 @@
 | Backtest API (`frontend/api/backtest.py`) | the same Vercel project (Python function) | free |
 | Keeper bot (`frontend/scripts/keeper.ts`) | GitHub Actions schedule (`.github/workflows/keeper.yml`) | free (public repo; private: 2,000 min/month) |
 | Arbitrage bot (`frontend/scripts/arb.ts`) | your machine (`npx tsx scripts/arb.ts --keep` also runs the keeper) | test tokens and Sepolia gas |
-| Contracts | on Sepolia (`deployments/`); v2 deploy steps in section 4 | Sepolia gas only |
+| Contracts | on Sepolia and Unichain Sepolia (`deployments/`); steps in section 5 | testnet gas only |
 
 Keys live only in git-ignored files (`.env`, `frontend/.env.local`) or in the hosts' secret settings.
 
@@ -64,8 +64,8 @@ in tight ranges, so real ETH moves trigger them while the bot runs.
 ```bash
 set -a; source .env; set +a
 PM=0xE03A1074c86CFeDd5C142C4F04F1a1536e203543
-FEEDS=0x6Ea9DCEF1EA55001E2a87FafA0F6b7D0cCe45DF6; HOOK=0x5F8Bfff761fE01aE2586a19036dfdC0C1220D0C0
-RULES=0xc2c6CC90005823829c2Cf0415D9cD30dae8705D3; ORDERS=0x6CD66E4c91635E2C7705fa2CE61Ac6df24cb12d3
+FEEDS=0xC539EE58250B88F2ECAb86682c06ce4cD6592a1b; HOOK=0x0482555fd63636Baa88bF1eA7d0e48e3F2Cb50C0
+RULES=0x59AC15D97080BF47be608750d82bB9528e57996E; ORDERS=0xa653D69C934B431431C11e55a59bbf69e524Db3c
 forge verify-contract --chain sepolia --watch $FEEDS src/PriceFeeds.sol:PriceFeeds \
   --constructor-args $(cast abi-encode "constructor(address)" $(cast wallet address --private-key $PRIVATE_KEY))
 forge verify-contract --chain sepolia --watch $HOOK src/RuleHook.sol:RuleHook \
@@ -134,8 +134,28 @@ USDC / USD `0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E`, DAI / USD `0x14866185B1
    forge script script/sepolia/02_DeployCore.s.sol --rpc-url $SEPOLIA_RPC --broadcast --private-key $PRIVATE_KEY --gas-estimate-multiplier 1000
    forge script script/sepolia/03_CreatePools.s.sol --rpc-url $SEPOLIA_RPC --broadcast --private-key $PRIVATE_KEY --gas-estimate-multiplier 1000
    ```
-3. `cd frontend && npm run sync` (back to the real `deployments/`), then `npx tsx scripts/arb.ts --once` so every pool
+3. `cd frontend && npm run sync` (back to the real `deployments/`; it writes every chain it finds), then
+   `CHAIN=sepolia APPROVE=1 npx tsx scripts/check-rules.ts` (the deployer approves the new vault, every template is
+   dry-run against it) and `npx tsx scripts/arb.ts --once` so every pool
    (an older hookless one too) starts on Chainlink. Commit, push.
+
+### Unichain Sepolia
+
+The same scripts (they pick files and Chainlink feeds by chain id: `script/sepolia/Net.sol`). Your Sepolia Alchemy URL
+works there with the network swapped. Gas is a fraction of a cent, so no multiplier is needed:
+
+```bash
+set -a; source .env; set +a
+U=${SEPOLIA_RPC/eth-sepolia/unichain-sepolia}
+for s in 01_DeployTokens 05_DeployFaucet 02_DeployCore 03_CreatePools; do
+  forge script script/sepolia/$s.s.sol --rpc-url $U --broadcast --private-key $PRIVATE_KEY
+done
+cd frontend && npm run sync
+CHAIN=unichain APPROVE=1 npx tsx scripts/check-rules.ts && CHAIN=unichain npx tsx scripts/arb.ts --once
+```
+
+01 and 05 only once per chain (tokens and faucet are reused). On Vercel, `NEXT_PUBLIC_UNICHAIN_RPC_URL` is optional: by
+default the app uses the Sepolia Alchemy URL with the network swapped (allow both networks for the key in Alchemy).
 
 Admin calls on `PriceFeeds` (owner only): `setFeed(token, aggregator, maxAge)` lists a new token at once; changing or
 removing a listed one is announced with `queueFeed(token, aggregator, maxAge)` (aggregator 0 removes) and applied with
@@ -143,5 +163,5 @@ removing a listed one is announced with `queueFeed(token, aggregator, maxAge)` (
 (200 ≈ 2%; 0 turns the check off and is for tests only); `transferOwnership` then `acceptOwnership` hands the list over.
 
 Earlier deployments, still on Sepolia (their orders can be cancelled there): ConditionalOrders
-`0xfCde70E4Ec35C79CD025306ff26AE1dEfFe72408` (average-price version), `0x05c6f35e2F12eFc54F26b26CE16A6226Ac74B6bC`; v1
+`0x6CD66E4c91635E2C7705fa2CE61Ac6df24cb12d3` (before the 2026-11-27 review fixes), `0xfCde70E4Ec35C79CD025306ff26AE1dEfFe72408` (average-price version), `0x05c6f35e2F12eFc54F26b26CE16A6226Ac74B6bC`; v1
 ConditionalOrders `0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63` (RuleHook `0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0`).

@@ -3,9 +3,10 @@
 // the same words.
 //   npx tsx scripts/check-rules.ts                      Sepolia, as the deployer (holds test tokens, has approved)
 //   RPC_URL=http://127.0.0.1:8546 PRIVATE_KEY=0x… npx tsx scripts/check-rules.ts   a local fork: approves first
+//   CHAIN=unichain APPROVE=1 PRIVATE_KEY=0x… npx tsx scripts/check-rules.ts       Unichain Sepolia, after a new deployment
 import { createPublicClient, createWalletClient, http, maxUint256, type Hex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
+import { nonceManager, privateKeyToAccount } from "viem/accounts";
+import { CHAIN, rpcUrl } from "../lib/chain";
 import { conditionalOrdersAbi, rulesAbi, testTokenAbi } from "../lib/generated/abis";
 import { CORE, POOLS, TOKENS, amountsFor, liquidityFor, priceAtTick, rangeAround, sqrtFromX96 } from "../lib/pools";
 import {
@@ -23,12 +24,13 @@ import {
   watchable,
 } from "../lib/rules";
 
-const RPC = process.env.RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com";
+const RPC = process.env.RPC_URL ?? rpcUrl();
 const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(RPC);
 const KEY = process.env.PRIVATE_KEY as Hex | undefined;
-const account = LOCAL && KEY ? privateKeyToAccount((KEY.startsWith("0x") ? KEY : `0x${KEY}`) as Hex) : undefined;
+// APPROVE=1 on a live testnet: the deployer approves the vault for its test tokens first (needed once per deployment)
+const account = (LOCAL || process.env.APPROVE === "1") && KEY ? privateKeyToAccount((KEY.startsWith("0x") ? KEY : `0x${KEY}`) as Hex, { nonceManager }) : undefined;
 const FROM = account?.address ?? "0x02847D22C33f5F060Bd27e69F1a413AD44cab213";
-const client = createPublicClient({ chain: sepolia, transport: http(RPC) });
+const client = createPublicClient({ chain: CHAIN, transport: http(RPC) });
 const c = { address: CORE.conditionalOrders, abi: conditionalOrdersAbi } as const;
 const r = { address: CORE.rules, abi: rulesAbi } as const;
 
@@ -37,7 +39,7 @@ const move = (trigger: Lane["trigger"]): Lane => ({ trigger, actions: [{ kind: "
 
 async function approveAll() {
   if (!account) return;
-  const wallet = createWalletClient({ account, chain: sepolia, transport: http(RPC) });
+  const wallet = createWalletClient({ account, chain: CHAIN, transport: http(RPC) });
   for (const t of TOKENS.filter((x) => !x.native)) {
     const hash = await wallet.writeContract({ address: t.address, abi: testTokenAbi, functionName: "approve", args: [CORE.conditionalOrders, maxUint256] });
     await client.waitForTransactionReceipt({ hash });

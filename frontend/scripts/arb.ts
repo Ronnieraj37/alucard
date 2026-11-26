@@ -12,14 +12,14 @@
 // (a swap that crosses ticks meets different liquidity) until it is close. Runs on your machine with your key; it
 // spends test tokens and Sepolia gas only.
 import { createPublicClient, createWalletClient, erc20Abi, http, maxUint256, type Hex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
+import { nonceManager, privateKeyToAccount } from "viem/accounts";
+import { CHAIN, rpcUrl } from "../lib/chain";
 import { withHeadroom } from "../lib/gas";
 import { priceFeedsAbi, routerAbi, rulesAbi } from "../lib/generated/abis";
 import { CORE, POOLS, type Pool, priceAtTick } from "../lib/pools";
 import { keep } from "./keeper";
 
-const RPC = process.env.RPC_URL ?? process.env.SEPOLIA_RPC ?? "https://ethereum-sepolia-rpc.publicnode.com";
+const RPC = process.env.RPC_URL ?? rpcUrl();
 const KEY = (process.env.ARB_PRIVATE_KEY ?? process.env.PRIVATE_KEY ?? "") as string;
 if (!KEY) throw new Error("set PRIVATE_KEY (or ARB_PRIVATE_KEY): the account that trades");
 const args = process.argv.slice(2);
@@ -33,9 +33,9 @@ const KEEP = flag("--keep");
 const EVERY = opt("--every", 60);
 const WITHIN = opt("--within", 5);
 
-const account = privateKeyToAccount((KEY.startsWith("0x") ? KEY : `0x${KEY}`) as Hex);
-const client = createPublicClient({ chain: sepolia, transport: http(RPC) });
-const wallet = createWalletClient({ account, chain: sepolia, transport: http(RPC) });
+const account = privateKeyToAccount((KEY.startsWith("0x") ? KEY : `0x${KEY}`) as Hex, { nonceManager });
+const client = createPublicClient({ chain: CHAIN, transport: http(RPC) });
+const wallet = createWalletClient({ account, chain: CHAIN, transport: http(RPC) });
 const Q96 = 2 ** 96;
 const approved = new Set<string>();
 

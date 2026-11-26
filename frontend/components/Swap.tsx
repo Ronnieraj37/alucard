@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { CHAIN_ID, CHAINS } from "@/lib/chain";
 import { ArrowDown, Info } from "lucide-react";
 import { useMemo, useState } from "react";
 import { type Abi } from "viem";
@@ -169,7 +170,7 @@ function MarketSwap() {
             <>
               <TokenIcon symbol={t.symbol} size={28} />
               <span className="font-semibold">{t.symbol}</span>
-              <span className="text-[12px] text-[var(--muted)]">{t.native ? "Sepolia ETH" : `Test ${t.symbol}`}</span>
+              <span className="text-[12px] text-[var(--muted)]">{t.native ? `${CHAINS[CHAIN_ID].short} ETH` : `Test ${t.symbol}`}</span>
             </>
           )}
         />

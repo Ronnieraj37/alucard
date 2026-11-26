@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { CHAIN_ID, CHAINS } from "@/lib/chain";
 import { ArrowLeft, Info, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePublicClient } from "wagmi";
@@ -149,6 +150,7 @@ export default function Backtest({
         refTick,
         otherRefTick,
         homeIndex: pool.index,
+        chainId: CHAIN_ID,
         spacing: pool.key.tickSpacing, // one-sided widths are in spacings: the replay keeps their width in price
         baseIs0: pool.baseIs0,
         keeperFeeBps: advanced.keeperFeeBps,
@@ -234,7 +236,7 @@ export default function Backtest({
             <div className="flex gap-2 rounded-[10px] bg-[var(--line2)] p-3 text-[12px] text-[var(--muted)]">
               <Info className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
-                {pool.base.symbol}/{pool.quote.symbol}&apos;s price is taken from every round of its tokens&apos; Chainlink feeds on Sepolia, read from the chain.
+                {pool.base.symbol}/{pool.quote.symbol}&apos;s price is taken from every round of its tokens&apos; Chainlink feeds on {CHAINS[CHAIN_ID].label}, read from the chain.
                 A testnet pool has almost no traders, so the swaps are the arbitrage trades that keep it on that price, with this pool&apos;s fee tier: fees
                 are a lower bound for a real pool.
               </span>

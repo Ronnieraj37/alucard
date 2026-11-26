@@ -7,21 +7,21 @@
 //
 // Runs once and exits, so a scheduler (GitHub Actions cron, or scripts/arb.ts --keep) can call it every few minutes.
 import { createPublicClient, createWalletClient, http, parseEventLogs, type Hex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { nonceManager, privateKeyToAccount } from "viem/accounts";
 import { withHeadroom } from "../lib/gas";
-import { sepolia } from "viem/chains";
+import { CHAIN, rpcUrl } from "../lib/chain";
 import { conditionalOrdersAbi, rulesAbi } from "../lib/generated/abis";
-import deployment from "../lib/generated/deployment.json";
+import { DEPLOYMENT as deployment } from "../lib/chain";
 import { CHECK, decodeSide } from "../lib/side";
 
-const ORDERS = deployment.core.conditionalOrders as `0x${string}`;
+const ORDERS = (deployment.core as { conditionalOrders: string }).conditionalOrders as `0x${string}`;
 const RULES = (deployment.core as { rules: string }).rules as `0x${string}`;
-const RPC = process.env.RPC_URL ?? process.env.SEPOLIA_RPC ?? "https://ethereum-sepolia-rpc.publicnode.com";
+const RPC = process.env.RPC_URL ?? rpcUrl();
 const KEY = process.env.KEEPER_PRIVATE_KEY ?? process.env.PRIVATE_KEY;
 const DRY = !!process.env.DRY_RUN;
 
 export async function keep(rpc = RPC, key = KEY, dry = DRY, log = console.log) {
-  const client = createPublicClient({ chain: sepolia, transport: http(rpc) });
+  const client = createPublicClient({ chain: CHAIN, transport: http(rpc) });
   const c = { address: ORDERS, abi: conditionalOrdersAbi } as const;
   const r = { address: RULES, abi: rulesAbi } as const;
 
@@ -59,8 +59,8 @@ export async function keep(rpc = RPC, key = KEY, dry = DRY, log = console.log) {
     return { ready, pokes, sent: 0 };
   }
 
-  const account = privateKeyToAccount((key.startsWith("0x") ? key : `0x${key}`) as Hex);
-  const wallet = createWalletClient({ account, chain: sepolia, transport: http(rpc) });
+  const account = privateKeyToAccount((key.startsWith("0x") ? key : `0x${key}`) as Hex, { nonceManager });
+  const wallet = createWalletClient({ account, chain: CHAIN, transport: http(rpc) });
   const send = async (label: string, functionName: "poke" | "execute", id: bigint, upper: boolean) => {
     try {
       // re-checked on the latest block: another keeper may have run it, or the price moved back

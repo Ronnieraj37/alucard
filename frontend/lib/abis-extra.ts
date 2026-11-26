@@ -1,7 +1,9 @@
 // Small hand-written ABIs for Uniswap contracts the app calls directly.
 
-/** Uniswap v4 Quoter on Sepolia (same PoolManager as our pools). Called with eth_call; it is not a view function. */
-export const QUOTER = "0x61b3f2011a92d183c7dbadbda940a7555ccf9227" as const;
+import { CHAIN_ID } from "./chain";
+
+/** Uniswap v4 Quoter on the active chain (same PoolManager as our pools). Called with eth_call; it is not a view function. */
+export const QUOTER = (CHAIN_ID === 1301 ? "0x56DCD40A3F2d466F48e7F48bDBE5Cc9B92Ae4472" : "0x61b3f2011a92d183c7dbadbda940a7555ccf9227") as `0x${string}`;
 
 const poolKey = {
   type: "tuple",

@@ -6,12 +6,25 @@ import { readFileSync, writeFileSync } from "node:fs";
 const root = new URL("../../", import.meta.url);
 const read = (p) => JSON.parse(readFileSync(new URL(p, root), "utf8"));
 
+import { existsSync } from "node:fs";
+
+// Every testnet we are deployed on: deployments/<name>-{core,tokens,pools,faucet}.json
+const NETS = [
+  { name: "sepolia", chainId: 11155111 },
+  { name: "unichain-sepolia", chainId: 1301 },
+];
 const dir = process.env.SYNC_DIR ?? "deployments";
-const core = read(`${dir}/sepolia-core.json`);
-const tokens = read("deployments/sepolia-tokens.json");
-const pools = read(`${dir}/sepolia-pools.json`);
-const faucet = read("deployments/sepolia-faucet.json").faucet;
-const deployment = JSON.stringify({ chainId: 11155111, core: { ...core, faucet }, tokens, pools }, null, 2);
+const chains = {};
+for (const n of NETS) {
+  const at = (what, d = "deployments") => `${d}/${n.name}-${what}.json`;
+  if (!existsSync(new URL(at("core", dir), root))) continue;
+  const core = read(at("core", dir));
+  const tokens = read(at("tokens"));
+  const pools = read(at("pools", dir));
+  const faucet = read(at("faucet")).faucet;
+  chains[n.chainId] = { chainId: n.chainId, name: n.name, core: { ...core, faucet }, tokens, pools };
+}
+const deployment = JSON.stringify({ chains }, null, 2);
 writeFileSync(new URL("../lib/generated/deployment.json", import.meta.url), deployment);
 // the backtest API reads our pools from here (api/_data is bundled with the Python function)
 writeFileSync(new URL("../api/_data/deployment.json", import.meta.url), deployment + "\n");
@@ -39,4 +52,4 @@ const out = [
   `export const mockAggregatorAbi = ${JSON.stringify(abi("MockAggregator"))} as const;`,
 ].join("\n\n");
 writeFileSync(new URL("../lib/generated/abis.ts", import.meta.url), out + "\n");
-console.log("synced", Object.keys(pools).length, "pools,", Object.keys(tokens).length, "tokens");
+for (const c of Object.values(chains)) console.log("synced", c.name, Object.keys(c.pools).length, "pools,", Object.keys(c.tokens).length, "tokens");

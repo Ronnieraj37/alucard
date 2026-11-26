@@ -208,7 +208,7 @@ def chain_series(pool_index: int, since: float) -> Series:
     u0, u1 = _ffill(ts0, p0, ts), _ffill(ts1, p1, ts)
     t1per0 = u0 / u1 * 10.0 ** (dec1 - dec0)  # raw units, like the pool's price
 
-    L = float(_chain.pool_liquidity(core["conditionalOrders"], pool_index))
+    L = float(_chain.pool_liquidity(core["rules"], pool_index))
     sw = arb_swaps(ts, t1per0, L, int(pk["fee"]))
     if len(sw["ts"]) < 2:
         raise ValueError("the Chainlink price of this pair has not moved enough to trade")
@@ -223,7 +223,7 @@ def chain_series(pool_index: int, since: float) -> Series:
         source="chainlink",
     )
     base, quote = (s0, s1) if s.base_is0 else (s1, s0)
-    s.label = f"{base}/{quote} {int(pk['fee']) / 1e4:g}% (our Sepolia pool, Chainlink prices)"
+    s.label = f"{base}/{quote} {int(pk['fee']) / 1e4:g}% (our {'Unichain Sepolia' if dep.get('chainId') == 1301 else 'Sepolia'} pool, Chainlink prices)"
     q_ts, q_p = (ts1, p1) if s.base_is0 else (ts0, p0)
     s.quote_usd = _ffill(q_ts, q_p, sts)
     return s
@@ -232,6 +232,9 @@ def chain_series(pool_index: int, since: float) -> Series:
 def series_for(req: dict, since: float | None = None) -> Series:
     key = str(req.get("pool", "eth_usdc_030"))
     if key.startswith(CHAIN_PREFIX):
+        import _chain  # noqa: PLC0415
+
+        _chain.use(req.get("chainId"))
         days = float(req.get("days", 30))
         start = float(req.get("start", 0)) or (time.time() - days * 86400)
         return chain_series(int(key[len(CHAIN_PREFIX):]), since if since is not None else start - 86400)

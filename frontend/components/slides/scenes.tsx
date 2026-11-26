@@ -2,7 +2,7 @@
 
 import { useEffect, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import Movement from "@/components/watch/Movement";
-import deployment from "@/lib/generated/deployment.json";
+import { DEPLOYMENT as deployment, explorerAddress } from "@/lib/chain";
 import { SIM, tokensAt } from "./sim";
 import { useCount, useTimeline } from "./useTimeline";
 
@@ -632,7 +632,7 @@ function Built() {
         </div>
         <div className="bt-addrs in" style={d(1200)}>
           {addrs.map(([k, a]) => (
-            <a key={k} href={`https://sepolia.etherscan.io/address/${a}`} target="_blank" rel="noreferrer">
+            <a key={k} href={explorerAddress(a)} target="_blank" rel="noreferrer">
               <span>{k}</span>
               <code>
                 {a.slice(0, 8)}…{a.slice(-6)}

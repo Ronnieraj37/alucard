@@ -19,6 +19,7 @@ import {FixedPointMathLib} from "solmate/src/utils/FixedPointMathLib.sol";
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {RuleHook} from "../../src/RuleHook.sol";
 import {Rules} from "../../src/Rules.sol";
+import {Net} from "./Net.sol";
 
 interface IFeed {
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80);
@@ -50,22 +51,23 @@ contract CreatePools is Script {
 
     function run() external {
         string memory dir = vm.envOr("OUT_DIR", string("./deployments"));
-        string memory core = vm.readFile(string.concat(dir, "/sepolia-core.json"));
-        string memory toks = vm.readFile("./deployments/sepolia-tokens.json");
+        string memory core = vm.readFile(Net.file(block.chainid, dir, "core"));
+        string memory toks = vm.readFile(Net.file(block.chainid, "./deployments", "tokens"));
+        Net.Feeds memory f = Net.feeds(block.chainid);
         poolManager = IPoolManager(vm.parseJsonAddress(core, ".poolManager"));
         posm = IPositionManager(vm.parseJsonAddress(core, ".positionManager"));
         permit2 = IPermit2(vm.parseJsonAddress(core, ".permit2"));
         hook = RuleHook(vm.parseJsonAddress(core, ".ruleHook"));
         rules = Rules(vm.parseJsonAddress(core, ".rules"));
 
-        // Chainlink feeds on Sepolia (8 decimals). There is no USDT feed there: USDT is priced at $1.
-        uint256 ethUsd = _feed(0x694AA1769357215DE4FAC081bf1f309aDC325306);
+        // Chainlink's feeds on this chain (8 decimals); a stablecoin without one is priced at $1
+        uint256 ethUsd = _feed(f.eth);
         Tok memory WETH = Tok(vm.parseJsonAddress(toks, ".WETH"), 18, ethUsd);
-        Tok memory WBTC = Tok(vm.parseJsonAddress(toks, ".WBTC"), 8, _feed(0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43));
-        Tok memory USDC = Tok(vm.parseJsonAddress(toks, ".USDC"), 6, _feed(0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E));
-        Tok memory USDT = Tok(vm.parseJsonAddress(toks, ".USDT"), 6, 1e8);
-        Tok memory DAI = Tok(vm.parseJsonAddress(toks, ".DAI"), 18, _feed(0x14866185B1962B63C3Ea9E03Bc1da838bab34C19));
-        Tok memory LINK = Tok(vm.parseJsonAddress(toks, ".LINK"), 18, _feed(0xc59E3633BAAC79493d908e63626716e204A45EdF));
+        Tok memory WBTC = Tok(vm.parseJsonAddress(toks, ".WBTC"), 8, _feed(f.btc));
+        Tok memory USDC = Tok(vm.parseJsonAddress(toks, ".USDC"), 6, _feed(f.usdc));
+        Tok memory USDT = Tok(vm.parseJsonAddress(toks, ".USDT"), 6, _feed(f.usdt));
+        Tok memory DAI = Tok(vm.parseJsonAddress(toks, ".DAI"), 18, _feed(f.dai));
+        Tok memory LINK = Tok(vm.parseJsonAddress(toks, ".LINK"), 18, _feed(f.link));
         Tok memory ETH = Tok(address(0), 18, ethUsd);
 
         vm.startBroadcast();
@@ -88,10 +90,11 @@ contract CreatePools is Script {
         _pool(Spec("ETH_USDC_3000", ETH, USDC, 3000, 60, true, 0, 10, 488, 10)); // ~$10 per side each
         vm.stopBroadcast();
 
-        vm.writeJson(poolsJson, string.concat(dir, "/sepolia-pools.json"));
+        vm.writeJson(poolsJson, Net.file(block.chainid, dir, "pools"));
     }
 
     function _feed(address f) internal view returns (uint256) {
+        if (f == address(0)) return 1e8;
         (, int256 answer,,,) = IFeed(f).latestRoundData();
         require(answer > 0, "bad feed");
         return uint256(answer);

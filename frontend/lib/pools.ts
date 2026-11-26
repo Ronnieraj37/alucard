@@ -1,4 +1,4 @@
-import deployment from "./generated/deployment.json";
+import { DEPLOYMENT as deployment } from "./chain";
 
 export const CORE = deployment.core as {
   poolManager: `0x${string}`;

@@ -12,7 +12,7 @@ until the owner withdraws.
 Alucard is not a strategy and does not pick one. It gives LPs the parts to build their own, checks that what they build is
 valid, lets them replay it on real history, and runs it exactly as written.
 
-Built for the Uniswap Hook Incubator (UHI11) hookathon, theme "Active management". Live on Ethereum Sepolia.
+Built for the Uniswap Hook Incubator (UHI11) hookathon, theme "Active management". Live on Ethereum Sepolia and Unichain Sepolia.
 
 ## What you can build
 
@@ -121,16 +121,20 @@ for any range and size, a push held for hours fires nothing while a real move fi
 skipped, no move into a pushed pool, value kept through a move but for the swap fee and the keeper's fee, strategies on
 a hookless pool.
 
-## Deployed (Ethereum Sepolia)
+## Deployed (Ethereum Sepolia and Unichain Sepolia)
 
-| Contract | Address |
-|---|---|
-| RuleHook | [`0x5F8Bfff761fE01aE2586a19036dfdC0C1220D0C0`](https://sepolia.etherscan.io/address/0x5F8Bfff761fE01aE2586a19036dfdC0C1220D0C0) |
-| ConditionalOrders | [`0x6CD66E4c91635E2C7705fa2CE61Ac6df24cb12d3`](https://sepolia.etherscan.io/address/0x6CD66E4c91635E2C7705fa2CE61Ac6df24cb12d3) |
-| Rules | [`0xc2c6CC90005823829c2Cf0415D9cD30dae8705D3`](https://sepolia.etherscan.io/address/0xc2c6CC90005823829c2Cf0415D9cD30dae8705D3) |
-| PriceFeeds | [`0x6Ea9DCEF1EA55001E2a87FafA0F6b7D0cCe45DF6`](https://sepolia.etherscan.io/address/0x6Ea9DCEF1EA55001E2a87FafA0F6b7D0cCe45DF6) |
+The same contracts on both testnets, each with its own test tokens and eight pools. The app's network menu switches
+between them (and follows your wallet).
 
-Pools, test tokens and the faucet: [`deployments/README.md`](deployments/README.md).
+| Contract | Ethereum Sepolia (11155111) | Unichain Sepolia (1301) |
+|---|---|---|
+| RuleHook | [`0x0482…50C0`](https://sepolia.etherscan.io/address/0x0482555fd63636Baa88bF1eA7d0e48e3F2Cb50C0) | [`0x8B7f…90C0`](https://sepolia.uniscan.xyz/address/0x8B7f7798eE5d9Af14529eB964A1e912b670890C0) |
+| ConditionalOrders | [`0xa653…Db3c`](https://sepolia.etherscan.io/address/0xa653D69C934B431431C11e55a59bbf69e524Db3c) | [`0xb190…3FBD`](https://sepolia.uniscan.xyz/address/0xb190f93B9511B40c12F068b9bdd2d392aBAC3FBD) |
+| Rules | [`0x59AC…996E`](https://sepolia.etherscan.io/address/0x59AC15D97080BF47be608750d82bB9528e57996E) | [`0x67CB…a947`](https://sepolia.uniscan.xyz/address/0x67CB05bb62b72DCbd359670acEb53E0159bda947) |
+| PriceFeeds | [`0xC539…2a1b`](https://sepolia.etherscan.io/address/0xC539EE58250B88F2ECAb86682c06ce4cD6592a1b) | [`0xA7dD…6C36`](https://sepolia.uniscan.xyz/address/0xA7dD5FCE507A4b6F0a24aBdCB169DaA023746C36) |
+
+On Unichain Sepolia every token but DAI has a real Chainlink feed (USDT too, which Sepolia lacks); DAI uses a fixed $1
+mock there. Full addresses, tokens, pools and faucets: [`deployments/README.md`](deployments/README.md).
 
 ## Run it
 
@@ -144,6 +148,7 @@ npm run dev:api                 # backtest API on 127.0.0.1:8787
 npm run dev                     # app on http://localhost:3000
 
 PRIVATE_KEY=0x... npx tsx scripts/arb.ts --keep     # keep the test pools on Chainlink, and run the keeper, every minute
+CHAIN=unichain PRIVATE_KEY=0x... npx tsx scripts/arb.ts --keep   # the same on Unichain Sepolia (RPC: your Sepolia Alchemy key, swapped)
 PRIVATE_KEY=0x... npx tsx scripts/demo-orders.ts    # a few example strategies in tight ranges
 # the assistant: GEMINI_API_KEYS=key1,key2 in frontend/.env.local (server-side only; a rate-limited key is skipped)
 ```

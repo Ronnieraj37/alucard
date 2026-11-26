@@ -1,6 +1,7 @@
 # Free keeper: GitHub Actions runs scripts/keeper.ts on a schedule.
 # OFF until you set the repository variable KEEPER_ENABLED=true (Settings > Secrets and variables > Actions > Variables).
-# Secrets needed: KEEPER_PRIVATE_KEY (a funded Sepolia key) and SEPOLIA_RPC_URL (e.g. your Alchemy URL).
+# Secrets needed: KEEPER_PRIVATE_KEY (funded on Sepolia and Unichain Sepolia) and SEPOLIA_RPC_URL (your Alchemy URL;
+# the Unichain run uses the same key with the network swapped, or set UNICHAIN_RPC_URL).
 # Public repos: unlimited free minutes. Private repos: 2,000 free minutes a month, so use */15 or slower there.
 # GitHub may start scheduled runs a few minutes late, and pauses schedules after 60 days without repo activity.
 name: keeper
@@ -30,7 +31,17 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --ignore-scripts
-      - run: npx tsx scripts/keeper.ts
+      - name: Sepolia
+        run: npx tsx scripts/keeper.ts
         env:
+          CHAIN: sepolia
           KEEPER_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY }}
           RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+      - name: Unichain Sepolia
+        if: always()
+        run: npx tsx scripts/keeper.ts
+        env:
+          CHAIN: unichain
+          KEEPER_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY }}
+          SEPOLIA_RPC: ${{ secrets.SEPOLIA_RPC_URL }}
+          UNICHAIN_RPC_URL: ${{ secrets.UNICHAIN_RPC_URL }}
