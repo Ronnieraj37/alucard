@@ -1,6 +1,6 @@
-import WatchLanding from "@/components/watch/WatchLanding";
-import "@/components/watch/watch.css";
+import NightLanding from "@/components/night/NightLanding";
+import "@/components/night/night.css";
 
 export default function Home() {
-  return <WatchLanding />;
+  return <NightLanding />;
 }

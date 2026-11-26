@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { type Abi, encodeAbiParameters, encodePacked } from "viem";
 import { useAccount, usePublicClient, useReadContract } from "wagmi";
 import StrategyEditor from "@/components/StrategyEditor";
-import { Menu, PoolIcons, TokenBox, Toggle, TxLine } from "@/components/ui";
+import { Menu, PoolIcons, TokenBox, TxLine } from "@/components/ui";
 import { ACTIONS, permit2Abi, positionManagerAbi } from "@/lib/abis-extra";
 import { conditionalOrdersAbi, faucetAbi, rulesAbi } from "@/lib/generated/abis";
 import {
@@ -238,6 +238,53 @@ export default function AddLiquidity() {
           </div>
         </div>
 
+        {/* the strategy: the point of Alucard, so it comes before the deposit */}
+        <div className={`strat ${rulesOn && hasRules ? "on" : ""}`}>
+          <div className="flex items-start gap-3">
+            <span className="strat-ic">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[15px] font-semibold">Strategy</div>
+              {!(rulesOn && hasRules) && (
+                <div className="text-[13px] text-[var(--muted)]">Say what should happen while you are away, or pick it card by card. You can also add one later.</div>
+              )}
+              {rulesOn && hasRules && (
+                <div className="mt-1.5 flex flex-col gap-1">
+                  {(["down", "up"] as LaneId[]).map((lane) => {
+                    const text = describeLane(pool, lane, rules[lane], rules.plan);
+                    const back = rules.plan && has(rules[lane], "move") ? rules.plan.back[backLaneOf(lane)].trigger : null;
+                    return text ? (
+                      <div key={lane} className="text-[13px] text-[var(--ink2)]">
+                        <span className={`font-semibold ${lane === "up" ? "text-[var(--sage)]" : "text-[var(--rose)]"}`}>{laneTitle(pool, lane, rules[lane])}: </span>
+                        {text}
+                        {back && ` It comes back when ${describeTrigger(pool, backLaneOf(lane), back)}.`}
+                      </div>
+                    ) : null;
+                  })}
+                  {ruleProblem && <div className="text-[12px] text-[var(--amber)]">⚠ {ruleProblem}</div>}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className={`btn ${rulesOn && hasRules ? "btn-light" : "btn-dark"} !py-2`}
+              onClick={() => {
+                setRulesOn(true);
+                setEditor(true);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" /> {rulesOn && hasRules ? "Edit strategy" : "Build a strategy"}
+            </button>
+            {rulesOn && (
+              <button className="btn btn-light !py-2" onClick={() => setRulesOn(false)}>
+                Remove it
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* amounts */}
         <div className="flex flex-col gap-1.5">
           <div className="mb-0.5 flex items-center justify-between">
@@ -257,47 +304,6 @@ export default function AddLiquidity() {
             <TokenBox label={pool.quote.symbol} token={pool.quote} value={quoteText} onChange={(t) => setTyped({ side: "quote", text: t })} balance={num(balQuote, pool.quote.decimals)} />
           ) : (
             <NotNeeded symbol={pool.quote.symbol} />
-          )}
-        </div>
-
-        {/* optional strategy */}
-        <div className={`rounded-[12px] border p-3 ${rulesOn ? "border-[var(--ink)]" : "border-[var(--line)]"}`}>
-          <div className="flex items-center gap-3">
-            <Sparkles className="h-4 w-4 shrink-0" />
-            <div className="flex-1">
-              <div className="text-[14px] font-semibold">Add a strategy</div>
-              <div className="text-[12px] text-[var(--muted)]">Optional. Your own conditions and steps: exit, move to another pool and back, compound, follow the price…</div>
-            </div>
-            <Toggle
-              value={rulesOn}
-              onChange={(on) => {
-                setRulesOn(on);
-                if (on && !hasRules) setEditor(true);
-              }}
-            />
-          </div>
-          {rulesOn && (
-            <div className="mt-3 flex flex-col gap-1.5 border-t border-[var(--line)] pt-3">
-              {hasRules ? (
-                (["down", "up"] as LaneId[]).map((lane) => {
-                  const text = describeLane(pool, lane, rules[lane], rules.plan);
-                  const back = rules.plan && has(rules[lane], "move") ? rules.plan.back[backLaneOf(lane)].trigger : null;
-                  return text ? (
-                    <div key={lane} className="text-[12px]">
-                      <span className={`font-semibold ${lane === "up" ? "text-[var(--sage)]" : "text-[var(--rose)]"}`}>{laneTitle(pool, lane, rules[lane])}: </span>
-                      {text}
-                      {back && ` It comes back when ${describeTrigger(pool, backLaneOf(lane), back)}.`}
-                    </div>
-                  ) : null;
-                })
-              ) : (
-                <div className="text-[12px] text-[var(--muted)]">No strategy yet.</div>
-              )}
-              {ruleProblem && <div className="text-[12px] text-[var(--amber)]">⚠ {ruleProblem}</div>}
-              <button className="btn btn-light mt-1 self-start" onClick={() => setEditor(true)}>
-                <Pencil className="h-3.5 w-3.5" /> {hasRules ? "Edit strategy" : "Open the editor"}
-              </button>
-            </div>
           )}
         </div>
 

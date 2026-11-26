@@ -33,7 +33,7 @@ export function Section({ id, title, lead, children }: { id: string; title: stri
 /** Technical notes inside a guide section, set apart so readers can skip them. */
 export function Dev({ children, title = "Under the hood" }: { children: React.ReactNode; title?: string }) {
   return (
-    <div className="my-5 rounded-[12px] border border-[var(--line)] bg-white">
+    <div className="my-5 rounded-[12px] border border-[var(--line)] bg-[var(--white)]">
       <div className="flex items-center gap-2 border-b border-[var(--line2)] px-4 py-2 text-[12px] font-semibold text-[var(--accent-ink)]">
         <Code2 className="h-3.5 w-3.5" />
         {title}
@@ -63,7 +63,7 @@ export function Callout({ kind = "note", title, children }: { kind?: "note" | "t
 export function Code({ children, lang }: { children: string; lang?: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="group relative my-4 overflow-hidden rounded-[8px] bg-[#1b1d22]">
+    <div className="group relative my-4 overflow-hidden rounded-[8px] bg-[#0a0816] border border-[var(--line)]">
       {lang && <div className="border-b border-white/10 px-4 py-1.5 text-[11px] font-medium uppercase tracking-wider text-white/40">{lang}</div>}
       <button
         aria-label="Copy"
@@ -72,7 +72,7 @@ export function Code({ children, lang }: { children: string; lang?: string }) {
           setCopied(true);
           setTimeout(() => setCopied(false), 1200);
         }}
-        className="absolute right-2 top-1.5 grid h-7 w-7 place-items-center rounded-md text-white/50 opacity-0 transition-opacity hover:bg-white/10 hover:text-white group-hover:opacity-100"
+        className="absolute right-2 top-1.5 grid h-7 w-7 place-items-center rounded-md text-white/50 opacity-0 transition-opacity hover:bg-[var(--white)]/10 hover:text-white group-hover:opacity-100"
       >
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
       </button>
@@ -104,7 +104,7 @@ export function Cards({ items }: { items: { icon: React.ElementType; title: stri
     <div className="my-6 grid gap-3 sm:grid-cols-2">
       {items.map((c) => {
         const body = (
-          <div className="h-full rounded-[12px] border border-[var(--line)] bg-white p-4 transition-colors hover:border-[var(--accent)]">
+          <div className="h-full rounded-[12px] border border-[var(--line)] bg-[var(--white)] p-4 transition-colors hover:border-[var(--accent)]">
             <div className="mb-2 grid h-8 w-8 place-items-center rounded-[9px] bg-[var(--accent-lt)] text-[var(--accent-ink)]">
               <c.icon className="h-4 w-4" />
             </div>
@@ -125,5 +125,5 @@ export function Cards({ items }: { items: { icon: React.ElementType; title: stri
 }
 
 export function Kbd({ children }: { children: React.ReactNode }) {
-  return <span className="rounded-md border border-[var(--line)] bg-white px-1.5 py-0.5 text-[12px] font-medium shadow-[0_1px_0_var(--line)]">{children}</span>;
+  return <span className="rounded-md border border-[var(--line)] bg-[var(--white)] px-1.5 py-0.5 text-[12px] font-medium shadow-[0_1px_0_var(--line)]">{children}</span>;
 }

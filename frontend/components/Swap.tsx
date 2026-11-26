@@ -125,7 +125,7 @@ function MarketSwap() {
           <div className="flex items-center justify-between gap-2">
             <span>Route</span>
             {quote.data!.length > 1 ? (
-              <select className="rounded border border-[var(--line)] bg-white px-1 py-0.5 text-right text-[12px] text-[var(--ink)]" value={chosen.pool.index} onChange={(e) => setRoute(Number(e.target.value))}>
+              <select className="rounded border border-[var(--line)] bg-[var(--white)] px-1 py-0.5 text-right text-[12px] text-[var(--ink)]" value={chosen.pool.index} onChange={(e) => setRoute(Number(e.target.value))}>
                 {quote.data!.map((x, i) => (
                   <option key={x.pool.index} value={x.pool.index}>
                     {x.pool.label}

@@ -189,7 +189,7 @@ function ParkedRange({ pool, range, tick }: { pool: Pool; range: [number, number
 function PlanLines({ p }: { p: RulePosition }) {
   const plan = p.rules.plan!;
   const lines = p.liveIsHome
-    ? [`A move takes the money ${describePlan(p.pool, plan)}.`, ...describeBack(p.pool, plan)]
+    ? [`${plan.where === "wait" ? "While moved, it holds" : "A move puts the money"} ${describePlan(p.pool, plan).replace(/^hold /, "")}.`, ...describeBack(p.pool, plan)]
     : (["down", "up"] as LaneId[]).filter((l) => p.rules[l].trigger).map((l) => `Back in the position: ${describeLane(p.pool, l, p.rules[l], plan)}`);
   return (
     <div className="flex gap-2 rounded-[10px] border border-dashed border-[var(--line)] p-3 text-[12px] text-[var(--muted)]">

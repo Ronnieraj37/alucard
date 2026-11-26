@@ -115,7 +115,7 @@ function PositionRow({ p }: { p: RulePosition | PlainPosition }) {
       </div>
       <div className="w-[120px] text-right">
         {p.kind === "rules" ? (
-          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${ready ? "bg-[var(--ink)] text-white" : "bg-[var(--line2)]"}`}>
+          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${ready ? "bg-[var(--accent)] text-white" : "bg-[var(--line2)]"}`}>
             <Sparkles className="h-3 w-3" />
             {ready ? "Step ready to run" : `Strategy · ${ruleCount} side${ruleCount === 1 ? "" : "s"}`}
           </span>

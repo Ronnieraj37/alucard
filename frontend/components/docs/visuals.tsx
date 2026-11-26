@@ -9,7 +9,7 @@ import { CORE, poolByIndex } from "@/lib/pools";
 
 export function RangeSides() {
   return (
-    <figure className="my-6 rounded-[14px] border border-[var(--line)] bg-white p-5">
+    <figure className="my-6 rounded-[14px] border border-[var(--line)] bg-[var(--white)] p-5">
       <svg viewBox="0 0 640 170" className="w-full" role="img" aria-label="A price range with a lower side that acts when the price falls below it and an upper side that acts when it rises above it">
         <defs>
           <linearGradient id="rng" x1="0" x2="1">
@@ -143,7 +143,7 @@ export function BitMap({ which }: { which: "side" | "slot0" }) {
   const total = 256;
   const [hover, setHover] = useState<F>(fields[1]);
   return (
-    <figure className="my-6 rounded-[14px] border border-[var(--line)] bg-white p-4">
+    <figure className="my-6 rounded-[14px] border border-[var(--line)] bg-[var(--white)] p-4">
       <div className="mb-1 flex justify-between text-[11px] text-[var(--muted)]">
         <span>bit 0</span>
         <span>bit {total - 1}</span>
@@ -258,7 +258,7 @@ export function Decoder() {
   };
 
   return (
-    <div className="my-6 rounded-[14px] border border-[var(--line)] bg-white p-4">
+    <div className="my-6 rounded-[14px] border border-[var(--line)] bg-[var(--white)] p-4">
       <div className="flex flex-wrap items-end gap-2">
         {(["lower", "upper"] as const).map((side) => (
           <label key={side} className="min-w-[220px] flex-1">

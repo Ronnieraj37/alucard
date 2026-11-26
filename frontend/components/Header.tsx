@@ -2,6 +2,7 @@
 
 import { Droplets, Wallet } from "lucide-react";
 import { APP_NAME } from "@/lib/brand";
+import { Mark } from "@/components/night/NightLanding";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type Abi } from "viem";
@@ -40,20 +41,15 @@ export default function Header() {
     <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-[var(--paper)]/90 backdrop-blur-sm">
       <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-3 px-4 sm:gap-6">
         <Link href="/" className="flex items-center gap-2.5">
-          <svg viewBox="0 0 64 64" className="h-7 w-7" aria-hidden="true">
-            <circle cx="32" cy="32" r="30" fill="#fbfbfc" stroke="#1b1d22" strokeWidth="3" />
-            <circle cx="32" cy="32" r="17" fill="#d7c39a" stroke="#9a7a45" strokeWidth="2" />
-            <circle cx="32" cy="32" r="11" fill="#a3122a" />
-            <circle cx="28.5" cy="28.5" r="3.5" fill="#ff9aa9" opacity="0.8" />
-          </svg>
-          <span className="display hidden text-[20px] tracking-[-0.02em] sm:inline">{APP_NAME}</span>
+          <Mark size={28} />
+          <span className="engraved hidden text-[17px] tracking-[0.16em] sm:inline">{APP_NAME}</span>
         </Link>
         <nav className="flex gap-1">
           {NAV.map((n) => (
             <Link
               key={n.href}
               href={n.href}
-              className={`relative px-2 py-1.5 text-[15px] sm:px-3 ${path.startsWith(n.href) ? "text-[var(--ink)] after:absolute after:inset-x-3 after:-bottom-[17px] after:h-[2px] after:bg-[var(--ruby)]" : "text-[var(--ink2)] hover:text-[var(--ink)]"}`}
+              className={`relative px-2 py-1.5 text-[15px] sm:px-3 ${path.startsWith(n.href) ? "text-[var(--ink)] after:absolute after:inset-x-3 after:-bottom-[17px] after:h-[2px] after:bg-[var(--glow)] after:shadow-[0_0_12px_var(--glow)]" : "text-[var(--ink2)] hover:text-[var(--ink)]"}`}
             >
               {n.label}
             </Link>

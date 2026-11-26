@@ -1,36 +1,47 @@
 @import "tailwindcss";
 
 :root {
-  /* The Watchmaker's Catalogue (DESIGN.md): graphite on cool paper, one ruby red. Variable names are the app's own. */
-  --ink: #1b1d22;
-  --ink2: #474b54;
-  --muted: #6c707a;
-  --muted2: #9a9ea7;
-  --line: #c6cad1;
-  --line2: #eceef1;
-  --paper: #f3f4f5;
-  --white: #fbfbfc;
-  --accent: #1b1d22; /* primary actions are graphite */
-  --accent-ink: #a3122a; /* and turn ruby on hover */
-  --accent-lt: #e9ebee;
-  --ruby: #a3122a;
-  --gilt: #9a7a45;
-  --steel: #e2e5e9;
-  --steel2: #b8bec7;
-  --sage: #2f6b4f;
-  --sage-lt: #e6f0ea;
-  --rose: #a3122a;
-  --rose-lt: #f6e7ea;
-  --amber: #8a6420;
-  --amber-lt: #f4eee2;
-  --blue: #2c4f8f;
-  --blue-lt: #e7ecf5;
-  --r: 6px;
-  --r-lg: 8px;
+  /* Night watch: deep indigo space, violet light from an event horizon, one crimson (Alucard's blood). The variable
+     names are the app's own: --ink is text, --paper the page, --white a raised surface. */
+  color-scheme: dark;
+  --ink: #ece9ff;
+  --ink2: #c3bce6;
+  --muted: #9089b8;
+  --muted2: #625b8a;
+  --line: #2c2650;
+  --line2: #1c1836;
+  --paper: #06050d;
+  --white: #0f0d1f; /* raised surface */
+  --white2: #151229; /* surface on a surface */
+  --accent: #8b6cff; /* primary actions glow violet */
+  --accent-ink: #b9a6ff;
+  --accent-lt: #1d1840;
+  --on-accent: #ffffff;
+  --glow: #a78bfa;
+  --glow2: #6d7cff;
+  --ember: #ffb46b; /* the hot side of the disk */
+  --ruby: #ff3d6e;
+  --gilt: #ffb46b;
+  --steel: #1c1836;
+  --steel2: #3a3366;
+  --sage: #5ee0a8;
+  --sage-lt: rgba(94, 224, 168, 0.1);
+  --rose: #ff5c8a;
+  --rose-lt: rgba(255, 92, 138, 0.1);
+  --amber: #f6c06a;
+  --amber-lt: rgba(246, 192, 106, 0.09);
+  --blue: #8fa8ff;
+  --blue-lt: rgba(143, 168, 255, 0.1);
+  --r: 8px;
+  --r-lg: 12px;
 }
 
 body {
-  background: var(--paper);
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(109, 124, 255, 0.13), transparent 60%),
+    radial-gradient(900px 520px at -10% 10%, rgba(139, 108, 255, 0.12), transparent 60%),
+    var(--paper);
+  background-attachment: fixed;
   color: var(--ink);
   font-family: var(--font-geist), system-ui, -apple-system, sans-serif;
   font-size: 15px;
@@ -39,11 +50,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 ::selection {
-  background: var(--ruby);
+  background: var(--accent);
   color: #fff;
 }
 :focus-visible {
-  outline: 2px solid var(--ruby);
+  outline: 2px solid var(--glow);
   outline-offset: 2px;
 }
 html {
@@ -65,9 +76,10 @@ h1, h2, h3, .display {
 
 /* a plate: enamel with a hairline, no shadow (the paper is flat) */
 .card {
-  background: var(--white);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 40%), var(--white);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 20px 50px -30px rgba(0, 0, 0, 0.8);
 }
 
 .btn {
@@ -84,11 +96,15 @@ h1, h2, h3, .display {
 }
 .btn:active:not(:disabled) { transform: scale(0.97); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-dark { background: var(--ink); color: #fff; box-shadow: 0 6px 16px -8px rgba(27, 29, 34, 0.55); }
-.btn-dark:hover:not(:disabled) { background: var(--ruby); }
-.btn-dark:disabled { background: var(--muted2); box-shadow: none; }
-.btn-light { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
-.btn-light:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--ink); }
+.btn-dark {
+  background: linear-gradient(135deg, #9b7bff, #6d5cff 60%, #5a6bff);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(185, 166, 255, 0.35) inset, 0 8px 28px -10px rgba(139, 108, 255, 0.8);
+}
+.btn-dark:hover:not(:disabled) { box-shadow: 0 0 0 1px rgba(220, 210, 255, 0.6) inset, 0 10px 34px -8px rgba(139, 108, 255, 1); filter: brightness(1.08); }
+.btn-dark:disabled { background: var(--steel2); box-shadow: none; }
+.btn-light { background: rgba(255, 255, 255, 0.02); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.btn-light:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--glow); color: #fff; }
 .btn-danger { background: transparent; color: var(--ruby); box-shadow: inset 0 0 0 1px var(--line); }
 .btn-danger:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--ruby); }
 
@@ -102,8 +118,9 @@ h1, h2, h3, .display {
   cursor: pointer;
   transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
-.chip:hover { box-shadow: inset 0 0 0 1px var(--ink); }
-.chip[data-on="true"] { background: var(--ink); color: #fff; box-shadow: none; }
+.chip:hover { box-shadow: inset 0 0 0 1px var(--glow); }
+.chip[data-on="true"] { background: var(--accent); color: #fff; box-shadow: 0 0 18px -6px var(--accent); }
+.chip { color: var(--ink2); }
 .chip:disabled { opacity: 0.45; cursor: not-allowed; }
 .chip:disabled:hover { box-shadow: inset 0 0 0 1px var(--line); }
 
@@ -113,12 +130,15 @@ h1, h2, h3, .display {
   box-shadow: inset 0 0 0 1px var(--line);
   border-radius: var(--r);
   padding: 8px 10px;
-  background: #fff;
+  background: var(--line2);
+  color: var(--ink);
   outline: none;
   font-size: 14px;
   transition: box-shadow 0.15s;
 }
-.input:focus { box-shadow: inset 0 0 0 1.5px var(--ink); }
+.input:focus { box-shadow: inset 0 0 0 1.5px var(--glow), 0 0 0 4px rgba(139, 108, 255, 0.15); }
+.input::placeholder { color: var(--muted2); }
+select.input option { background: var(--white); color: var(--ink); }
 
 .label {
   font-family: var(--font-marcellus), Georgia, serif;
@@ -142,7 +162,7 @@ h1, h2, h3, .display {
 .doc li { margin: 4px 0; padding-left: 2px; }
 .doc li::marker { color: var(--muted2); }
 .doc a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; }
-.doc a:hover { text-decoration-color: var(--ruby); }
+.doc a:hover { text-decoration-color: var(--glow); }
 .doc code { font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 0.86em; background: var(--line2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; color: var(--ink); }
 .doc strong { font-weight: 650; color: var(--ink); }
 .doc table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
@@ -159,3 +179,59 @@ h1, h2, h3, .display {
 @media (prefers-reduced-motion: reduce) {
   [class*="animate-[menu-in"] { animation: none !important; }
 }
+
+/* ---------------------------------------------------------------- the strategy assistant (a chat) */
+.chat {
+  display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 16px;
+  background: linear-gradient(135deg, rgba(139, 108, 255, 0.13), rgba(109, 124, 255, 0.03) 55%), var(--white);
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.38), 0 24px 60px -36px rgba(139, 108, 255, 0.9);
+}
+.chat-head { display: flex; align-items: flex-start; gap: 12px; }
+.chat-avatar { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 12px; color: #fff;
+  background: linear-gradient(135deg, #a58bff, #5a6bff); box-shadow: 0 0 24px -6px #8b6cff; }
+.chat-title { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+.chat-sub { font-size: 13px; color: var(--muted); line-height: 1.45; }
+.chat-reset { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: 12.5px; color: var(--muted); padding: 5px 10px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); }
+.chat-reset:hover:not(:disabled) { color: var(--ink); box-shadow: inset 0 0 0 1px var(--glow); }
+.chat-thread { display: flex; flex-direction: column; gap: 10px; max-height: min(46vh, 420px); overflow-y: auto; padding: 4px 2px; scrollbar-width: thin; }
+.chat-msg { max-width: min(640px, 88%); padding: 10px 14px; border-radius: 16px; font-size: 14.5px; line-height: 1.5; animation: menu-in 0.18s ease-out; }
+.chat-msg.user { align-self: flex-end; color: #fff; background: linear-gradient(135deg, #8b6cff, #6d5cff); border-bottom-right-radius: 6px; }
+.chat-msg.bot { align-self: flex-start; color: var(--ink); background: var(--white2); box-shadow: inset 0 0 0 1px var(--line); border-bottom-left-radius: 6px; }
+.chat-msg.err { color: var(--amber); background: var(--amber-lt); box-shadow: inset 0 0 0 1px rgba(246, 192, 106, 0.3); }
+.chat-summary { margin: 8px 0 0; padding-left: 18px; list-style: disc; color: var(--ink2); font-size: 13.5px; }
+.chat-summary li { margin: 3px 0; }
+.chat-warn { margin-top: 8px; font-size: 13px; color: var(--amber); }
+.chat-note { margin-top: 8px; font-size: 13px; color: var(--muted); }
+.chat-options, .chat-ideas { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chat-ideas { margin-top: 0; }
+.chat-option { display: inline-flex; align-items: center; gap: 6px; text-align: left; font-size: 13.5px; color: var(--ink); padding: 7px 13px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03); box-shadow: inset 0 0 0 1px var(--line); transition: box-shadow 0.15s, background 0.15s, transform 0.15s; }
+.chat-option:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--glow); background: rgba(139, 108, 255, 0.12); }
+.chat-option:active:not(:disabled) { transform: scale(0.97); }
+.chat-option:disabled { opacity: 0.45; cursor: default; }
+.chat-option.strong { color: #fff; background: var(--accent); box-shadow: 0 0 20px -8px var(--accent); }
+.chat-msg.typing { display: flex; gap: 5px; padding: 14px 16px; }
+.chat-msg.typing span { width: 7px; height: 7px; border-radius: 99px; background: var(--glow); animation: chat-dot 1.1s ease-in-out infinite; }
+.chat-msg.typing span:nth-child(2) { animation-delay: 0.15s; }
+.chat-msg.typing span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes chat-dot { 0%, 80%, 100% { opacity: 0.3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+.chat-bar { display: flex; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 16px; border-radius: 18px; background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line); transition: box-shadow 0.2s; }
+.chat-bar:focus-within { box-shadow: inset 0 0 0 1px var(--glow), 0 0 0 4px rgba(139, 108, 255, 0.14); }
+.chat-input { flex: 1; min-width: 0; min-height: 26px; max-height: 120px; padding: 8px 0; resize: none; background: transparent; border: 0; outline: none;
+  color: var(--ink); font-size: 15px; line-height: 1.45; }
+.chat-input::placeholder { color: var(--muted2); }
+.chat-icon, .chat-send { display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 999px; transition: background 0.15s, color 0.15s, box-shadow 0.15s; }
+.chat-icon { color: var(--muted); }
+.chat-icon:hover:not(:disabled) { color: var(--ink); background: var(--line2); }
+.chat-icon.on { color: #fff; background: var(--rose); animation: assist-pulse 1.2s ease-in-out infinite; }
+@keyframes assist-pulse { 50% { box-shadow: 0 0 0 6px rgba(255, 92, 138, 0.18); } }
+.chat-send { color: #fff; background: linear-gradient(135deg, #a58bff, #5a6bff); box-shadow: 0 0 20px -6px #8b6cff; }
+.chat-send:disabled { background: var(--steel2); box-shadow: none; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .chat-msg, .chat-msg.typing span { animation: none; } }
+
+/* the strategy step on the new-position card */
+.strat { border-radius: 14px; padding: 14px; background: linear-gradient(135deg, rgba(139, 108, 255, 0.14), rgba(109, 124, 255, 0.04) 60%), var(--white2);
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.35), 0 16px 40px -26px rgba(139, 108, 255, 0.8); }
+.strat.on { box-shadow: inset 0 0 0 1px rgba(94, 224, 168, 0.35); }
+.strat-ic { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; color: #fff; background: linear-gradient(135deg, #a58bff, #5a6bff); box-shadow: 0 0 20px -6px #8b6cff; }
