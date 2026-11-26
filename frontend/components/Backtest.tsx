@@ -9,14 +9,18 @@ import { CORE, type Pool, fmt, maxUsable, minUsable, poolByIndex, tickAtPrice } 
 import { type Advanced, type LaneId, type Rules, describeBack, describeLane, encodeRules, laneTitle, sharedToken } from "@/lib/rules";
 
 // Series colors: validated with the dataviz palette checker (contrast, chroma, color-blind separation).
-const C_RULES = "#1b1d22"; // graphite: the position with its rules
-const C_PLAIN = "#9a9ea7"; // pencil: the same position without rules
-const C_HOLD = "#9a7a45"; // gilt: just holding the tokens
+const C_RULES = "#a78bfa"; // violet: the position with its rules
+const C_PLAIN = "#625b8a"; // pencil: the same position without rules
+const C_HOLD = "#ffb46b"; // ember: just holding the tokens
 
 export type BacktestRange = { loPct: number; hiPct: number } | { full: true };
 
 type Single = {
   poolLabel: string;
+  base: string;
+  quote: string;
+  address: string | null;
+  source: "recorded" | "chainlink";
   start: number;
   end: number;
   dataFrom: number;
@@ -46,11 +50,24 @@ type Windows = {
 
 // "own": this pool, rebuilt from the chain (its tokens' Chainlink prices, arbitrage trades); the others are real mainnet
 // swaps recorded by lp_study.
-const HISTORY = [
-  { key: "own", label: "This pool", hint: "Six months of this pool's price from its tokens' Chainlink feeds on Sepolia, read from the chain" },
-  { key: "eth_usdc_030", label: "Mainnet ETH/USDC 0.30%", hint: "96k real swaps" },
-  { key: "eth_usdc_005", label: "Mainnet ETH/USDC 0.05%", hint: "1M real swaps" },
+// Real swaps of Ethereum mainnet Uniswap v3 pools (api/_data), by pair. A testnet pool has no real traders, so the
+// backtest replays the mainnet pool with the same two tokens.
+const RECORDED: { key: string; pair: [string, string]; label: string; hint: string }[] = [
+  { key: "eth_usdc_005", pair: ["WETH", "USDC"], label: "Mainnet 0.05%", hint: "Ethereum mainnet Uniswap v3 ETH/USDC 0.05%: every real swap" },
+  { key: "eth_usdc_030", pair: ["WETH", "USDC"], label: "Mainnet 0.30%", hint: "Ethereum mainnet Uniswap v3 ETH/USDC 0.30%: every real swap" },
+  { key: "wbtc_usdc_030", pair: ["WBTC", "USDC"], label: "Mainnet 0.30%", hint: "Ethereum mainnet Uniswap v3 WBTC/USDC 0.30%: every real swap" },
+  { key: "wbtc_eth_005", pair: ["WBTC", "WETH"], label: "Mainnet 0.05%", hint: "Ethereum mainnet Uniswap v3 WBTC/WETH 0.05%: every real swap" },
+  { key: "usdc_usdt_001", pair: ["USDC", "USDT"], label: "Mainnet 0.01%", hint: "Ethereum mainnet Uniswap v3 USDC/USDT 0.01%: every real swap" },
+  { key: "dai_usdc_001", pair: ["DAI", "USDC"], label: "Mainnet 0.01%", hint: "Ethereum mainnet Uniswap v3 DAI/USDC 0.01%: every real swap" },
+  { key: "link_eth_030", pair: ["LINK", "WETH"], label: "Mainnet 0.30%", hint: "Ethereum mainnet Uniswap v3 LINK/WETH 0.30%: every real swap" },
 ];
+const sym = (s: string) => (s === "ETH" ? "WETH" : s);
+const historiesFor = (p: Pool) => {
+  const pair = [sym(p.base.symbol), sym(p.quote.symbol)];
+  const same = RECORDED.filter((h) => h.pair.every((t) => pair.includes(t)));
+  // the matching tier first
+  return same.sort((a, b) => Math.abs(Number(a.label.match(/[\d.]+/)![0]) * 1e4 - p.key.fee) - Math.abs(Number(b.label.match(/[\d.]+/)![0]) * 1e4 - p.key.fee));
+};
 // recorded window: 2026-04-05 to 2026-10-03 (lp_study)
 const DATA_START = 1775347200;
 // our pools: the last 180 days, ending at the last full hour (so a repeated backtest within the hour is cached)
@@ -77,7 +94,12 @@ export default function Backtest({
   onClose: () => void;
 }) {
   const client = usePublicClient();
-  const [history, setHistory] = useState("own");
+  const histories = historiesFor(pool);
+  const HISTORY = [
+    ...histories.map((h) => ({ key: h.key, label: h.label, hint: h.hint })),
+    { key: "own", label: "Chainlink path", hint: "This pool's price from its tokens' Chainlink feeds; swaps are only the arbitrage that follows it (fees: a lower bound)" },
+  ];
+  const [history, setHistory] = useState(histories[0]?.key ?? "own");
   const own = history === "own";
   const dataStart = own ? ownStart() : DATA_START;
   const [days, setDays] = useState(90);
@@ -88,8 +110,6 @@ export default function Backtest({
   }, [own, days]);
   const [allWindows, setAllWindows] = useState(false);
   const [deposit, setDeposit] = useState(10_000);
-
-  const ethLike = pool.base.symbol === "WETH" || pool.base.symbol === "ETH";
 
   const q = useQuery({
     queryKey: ["backtest", history, pool.index, dataStart, days, startMonth, allWindows, deposit, JSON.stringify(rules), JSON.stringify(range), JSON.stringify(advanced)],
@@ -151,7 +171,7 @@ export default function Backtest({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[var(--paper)]">
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--line)] bg-white px-4">
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--line)] bg-[var(--white)] px-4">
         <button className="btn btn-light !px-2.5" onClick={onClose}>
           <ArrowLeft className="h-4 w-4" /> Back to rules
         </button>
@@ -220,11 +240,14 @@ export default function Backtest({
               </span>
             </div>
           )}
-          {!own && !ethLike && (
-            <div className="flex gap-2 rounded-[10px] bg-[var(--amber-lt)] p-3 text-[12px] text-[var(--amber)]">
+          {!own && (
+            <div className="flex gap-2 rounded-[10px] bg-[var(--line2)] p-3 text-[12px] text-[var(--muted)]">
               <Info className="mt-0.5 h-4 w-4 shrink-0" />
-              Your pool is {pool.base.symbol}/{pool.quote.symbol}; the recorded history is ETH/USDC. This shows how your rules behave on ETH’s real price path, with
-              your range and triggers scaled to it.
+              <span>
+                Your pool is on a testnet, where nobody trades. The replay uses every real swap of the same pair on Ethereum mainnet (
+                {HISTORY.find((h) => h.key === history)?.hint.split(":")[0].replace("Ethereum mainnet ", "")}), 5 April – 3 October 2026: real prices, real
+                volume, real fees. Your range and price levels keep their distance from the price.
+              </span>
             </div>
           )}
 
@@ -263,7 +286,7 @@ function Seg({ value, onChange, items }: { value: string; onChange: (v: string) 
           key={it.id}
           title={it.title}
           onClick={() => onChange(it.id)}
-          className={`rounded-[8px] px-2.5 py-1 text-[12px] font-medium ${value === it.id ? "bg-white text-[var(--ink)] shadow-sm" : "text-[var(--muted)] hover:text-[var(--ink)]"}`}
+          className={`rounded-[8px] px-2.5 py-1 text-[12px] font-medium ${value === it.id ? "bg-[var(--white)] text-[var(--ink)] shadow-sm" : "text-[var(--muted)] hover:text-[var(--ink)]"}`}
         >
           {it.label}
         </button>
@@ -320,7 +343,7 @@ function SingleResult({ r }: { r: Single }) {
         <Tile
           label="Rules ran"
           value={`${r.rules.runs}×`}
-          sub={`${r.rules.moves ? `${r.rules.moves} to plan B and back · ` : ""}fees ${usd(r.rules.fees)} · keepers ${usd(r.rules.keeperPaid)}${r.rules.closed ? " · closed" : r.rules.away ? " · ends in plan B" : ""}`}
+          sub={`${r.rules.moves ? `${r.rules.moves} moves to another pool and back · ` : ""}fees ${usd(r.rules.fees)} · keepers ${usd(r.rules.keeperPaid)}${r.rules.closed ? " · closed" : r.rules.away ? " · ends moved" : ""}`}
         />
       </div>
 
@@ -328,7 +351,14 @@ function SingleResult({ r }: { r: Single }) {
         <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
           <div className="text-[14px] font-semibold">Position value</div>
           <div className="text-[12px] text-[var(--muted)]">
-            {day(r.start)} – {day(r.end)} · {r.swaps.toLocaleString()} swaps · {r.poolLabel}
+            {day(r.start)} – {day(r.end)} · {r.swaps.toLocaleString()} {r.source === "recorded" ? "real swaps" : "arbitrage swaps"} ·{" "}
+            {r.address ? (
+              <a className="underline decoration-[var(--line)] underline-offset-4 hover:decoration-[var(--glow)]" href={`https://etherscan.io/address/${r.address}`} target="_blank" rel="noreferrer">
+                {r.poolLabel}
+              </a>
+            ) : (
+              r.poolLabel
+            )}
           </div>
         </div>
         <Legend />
@@ -347,14 +377,16 @@ function SingleResult({ r }: { r: Single }) {
 
       <div className="card p-4">
         <div className="mb-1 flex items-baseline justify-between">
-          <div className="text-[14px] font-semibold">ETH price (USDC) and your range</div>
+          <div className="text-[14px] font-semibold">
+            {r.base} price ({r.quote}) and your range
+          </div>
           <div className="text-[12px] text-[var(--muted)]">
-            {fmt(r.entryPrice)} → {fmt(r.endPrice)} USDC · in range {Math.round(r.rules.timeInRange * 100)}% of the time with rules, {Math.round(r.noRules.timeInRange * 100)}% without
+            {fmt(r.entryPrice)} → {fmt(r.endPrice)} {r.quote} · in range {Math.round(r.rules.timeInRange * 100)}% of the time with rules, {Math.round(r.noRules.timeInRange * 100)}% without
           </div>
         </div>
         <LineChart
           t={r.series.t}
-          series={[{ name: "ETH price", color: "#1b1d22", values: r.series.price }]}
+          series={[{ name: `${r.base} price`, color: "#c3bce6", values: r.series.price }]}
           band={{ lo: r.series.lo, hi: r.series.hi }}
           markers={r.events.map((e) => e.t)}
           format={(n) => fmt(n)}
@@ -370,7 +402,7 @@ function SingleResult({ r }: { r: Single }) {
               <thead className="text-left text-[var(--muted)]">
                 <tr>
                   <th className="py-1 font-medium">Time</th>
-                  <th className="py-1 font-medium">ETH price</th>
+                  <th className="py-1 font-medium">{r.base} price</th>
                   <th className="py-1 font-medium">What happened</th>
                 </tr>
               </thead>
@@ -591,7 +623,7 @@ function LineChart({
       </svg>
       {hover !== null && (
         <div
-          className="pointer-events-none absolute top-1 rounded-[8px] border border-[var(--line)] bg-white px-2.5 py-1.5 text-[12px] shadow-sm"
+          className="pointer-events-none absolute top-1 rounded-[8px] border border-[var(--line)] bg-[var(--white)] px-2.5 py-1.5 text-[12px] shadow-sm"
           style={{ left: Math.min(Math.max(x(t[hover]) + 10, 0), w - 190) }}
         >
           <div className="mb-0.5 text-[var(--muted)]">{new Date(t[hover] * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>

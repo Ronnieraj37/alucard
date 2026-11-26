@@ -74,6 +74,7 @@ class Series:
     # fee in the input token per unit of liquidity the swap crosses (arbitrage-only history; None: share of fee_raw)
     fee_per_l: np.ndarray | None = None
     label: str = ""
+    address: str = ""  # the recorded pool's address on Ethereum mainnet
     source: str = "recorded"  # "recorded": real mainnet swaps; "chainlink": one of our pools, see chain_series
     # rows that are swaps (None: all); a path replayed in a test may stay on a price without swapping
     swapped: np.ndarray | None = None
@@ -107,11 +108,29 @@ def load(key: str) -> Series:
         ts=z["ts"], sp0=z["sp0"], sp1=sp1, lpre=z["lpre"], lpost=z["lpost"], fee_raw=z["fee"], t0in=z["t0in"].astype(bool),
         tick=np.floor(2.0 * np.log(sp1) / LN).astype(np.int64),
     )
+    s.label = POOL_LABELS.get(key, "")
+    s.address = m.get("address", "")
+    quote = s.token1 if s.base_is0 else s.token0
+    if quote in ("WETH", "ETH") and key != "eth_usdc_005":
+        # values in USD: ETH's price from the ETH/USDC history at the same moments
+        e = load("eth_usdc_005")
+        s.quote_usd = _ffill(e.ts, e.price(e.sp1), s.ts)
     _CACHE[key] = s
     return s
 
 
-POOL_LABELS = {"eth_usdc_030": "ETH/USDC 0.30% (Ethereum mainnet)", "eth_usdc_005": "ETH/USDC 0.05% (Ethereum mainnet)"}
+# Real swaps of Ethereum mainnet Uniswap v3 pools, one or two per pair of our pools (lp_study/export_backtest.py,
+# fetch_more.py). The frontend picks the one with the selected pool's tokens.
+POOL_LABELS = {
+    "eth_usdc_030": "ETH/USDC 0.30% (Ethereum mainnet)",
+    "eth_usdc_005": "ETH/USDC 0.05% (Ethereum mainnet)",
+    "wbtc_usdc_030": "WBTC/USDC 0.30% (Ethereum mainnet)",
+    "wbtc_eth_005": "WBTC/WETH 0.05% (Ethereum mainnet)",
+    "usdc_usdt_001": "USDC/USDT 0.01% (Ethereum mainnet)",
+    "dai_usdc_001": "DAI/USDC 0.01% (Ethereum mainnet)",
+    "link_eth_030": "LINK/WETH 0.30% (Ethereum mainnet)",
+}
+# a condition that watches another pool reads this pool's history (the same pair at another fee tier)
 OTHER_POOL = {"eth_usdc_030": "eth_usdc_005", "eth_usdc_005": "eth_usdc_030"}
 CHAIN_PREFIX = "sepolia:"  # "sepolia:<pool index>": one of our pools, history from Chainlink (chain_series)
 _SYMBOL_DECIMALS = {"WETH": 18, "WBTC": 8, "USDC": 6, "USDT": 6, "DAI": 18, "LINK": 18, "ETH": 18}
@@ -991,6 +1010,8 @@ def run(req: dict, s: Series | None = None) -> dict:
     reads = _reads_other({**order, "homeIndex": req.get("homeIndex", 0)})
     if reads and s.source != "recorded":
         raise ValueError("rules that watch another pool can be backtested on the recorded ETH/USDC history only")
+    if reads and s.key not in OTHER_POOL:
+        raise ValueError("rules that watch another pool can be backtested on the ETH/USDC histories only")
     other = load(OTHER_POOL[s.key]) if reads else None
     return run_series(s, other, req)
 
@@ -1140,6 +1161,9 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
         "pool": key,
         "poolLabel": s.label or POOL_LABELS.get(key, key),
         "source": s.source,
+        "base": (s.token0 if s.base_is0 else s.token1).replace("WETH", "ETH"),
+        "quote": (s.token1 if s.base_is0 else s.token0).replace("WETH", "ETH"),
+        "address": s.address or None,
         "quoteUsd": sim.quote_usd,
         "ticks": [tl, tu],
         "sides": {n: side_fields(d) for n, d in created.items()},
@@ -1177,19 +1201,21 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
             "Prices: every round of the two tokens' Chainlink USD feeds on Sepolia, read from the chain.",
             "Swaps: only the arbitrage trades that keep the pool on the Chainlink price (to the edge of its fee band). "
             "Real pools also have ordinary traders, so fees here are a lower bound.",
+        ] if s.source == "chainlink" else []) + ([
             "Values are in USD at the quote token's price at the start of the window.",
-        ] if s.source == "chainlink" else []) + [
+        ] if s.quote_usd is not None else []) + [
             "Real swaps from the recorded window; past results do not predict future ones." if s.source == "recorded"
             else "Past results do not predict future ones.",
-            "Rules read the pool's average price the way the hook keeps it (at least 2 minutes, or the side's averaging time).",
+            "Conditions read the pool's price after each swap. On chain a step also needs that price within about 2% of Chainlink; "
+            "the replay assumes it is (arbitrage keeps deep pools there), so a step refused in a crash is not modelled.",
             "Your own swaps do not move later prices in the replay, and they use the pool's liquidity at that moment.",
             "Fees assume your position is small next to the pool.",
             "A keeper runs each rule a fixed delay after its condition is met; price manipulation and MEV are not modelled.",
-            "Trailing stops: the best average price is updated at every swap (it assumes someone pokes each new best, as the keeper does).",
+            "Trailing stops: the best price is updated at every swap (it assumes someone pokes each new best, as the keeper does).",
             "Chainlink price levels are tested against this pool's price: no Chainlink history is loaded for them, and the real feed updates less often."
             if s.source == "recorded" else
             "Chainlink price levels are tested against the pool's price, which stays within its fee band of Chainlink here.",
-        ] + (["Plan B parking: the parking pool's fees are not modelled; the money is counted as the token it parks in."] if parked else []),
+        ] + (["Moves into another pool: that pool's fees are not modelled; while moved, the money is counted as the token it holds there (moved = held)."] if parked else []),
     }
 
 
