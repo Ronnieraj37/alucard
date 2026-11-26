@@ -14,6 +14,7 @@ import {EasyPosm} from "./utils/libraries/EasyPosm.sol";
 import {RuleSetup} from "./utils/RuleSetup.sol";
 import {ConditionalOrders} from "../src/ConditionalOrders.sol";
 import {PriceFeeds} from "../src/PriceFeeds.sol";
+import {Rules} from "../src/Rules.sol";
 import {OrderState} from "../src/libraries/OrderState.sol";
 
 /// @dev An order owner that refuses ETH, or burns all the gas it is given.
@@ -45,10 +46,9 @@ contract EthOwner {
     }
 }
 
-/// @notice Keeper pay, payouts, and the token list. Pay depends on the gas price, and Foundry's isolate mode runs
-/// calls at gas price 0, so the pay tests run as one transaction (isolate = false). Rules read averages, so they are
-/// timed rules (CHECK_TIME) here where the price does not matter.
-contract KeeperPayTest is RuleSetup {
+/// @notice The keeper's fee, payouts, pools and the token list. The fee is the owner's: a set share of what each run
+/// takes out, whatever the gas price. These are timed rules (CHECK_TIME), so the price does not matter.
+contract KeeperFeeTest is RuleSetup {
     using EasyPosm for IPositionManager;
 
     PoolKey ethKey;
@@ -80,79 +80,65 @@ contract KeeperPayTest is RuleSetup {
         _wait(1 hours);
     }
 
-    /// A timed exit after 1 minute, ceiling 1%.
+    /// A timed exit after 1 minute.
     function _timed() internal pure returns (OrderState.Side memory) {
         return _exit(OrderState.CHECK_TIME, 1);
     }
 
-    // ---------------------------------------------------------------- pay
+    // ---------------------------------------------------------------- the fee
 
-    /// The keeper is paid its gas (at a capped gas price, plus a premium) in the order's tokens, at most the
-    /// ceiling. In a token pool that is token units at the Chainlink price: 1 ETH = 2,000 tokens here.
-    /// forge-config: default.isolate = false
-    function test_payIsTheGasCostInTheOrdersTokens() public {
+    /// The keeper gets exactly the owner's fee (1% here) of each token the run takes out; the owner gets the rest.
+    function test_keeperGetsTheOwnersFee() public {
         uint256 id = _create(_off(), _timed());
         _wait(2 minutes);
-        uint256 g = gasleft();
+        (uint256 a0, uint256 a1) = rules.orderAmounts(orders, id);
+        uint256 o0 = _bal(currency0, alice);
+        uint256 o1 = _bal(currency1, alice);
         _run(id, true);
-        uint256 used = g - gasleft();
-        uint256 paid = _bal(currency0, keeper) + _bal(currency1, keeper);
-        uint256 costInTokens = rules.gasWei(used) * 2000; // ETH at $2,000, tokens at $1
-        assertGt(paid, (costInTokens * 80) / 100);
-        assertLt(paid, (costInTokens * 150) / 100);
+        assertApproxEqAbs(_bal(currency0, keeper), a0 / 100, 2);
+        assertApproxEqAbs(_bal(currency1, keeper), a1 / 100, 2);
+        assertApproxEqAbs(_bal(currency0, alice) - o0, a0 - a0 / 100, 2);
+        assertApproxEqAbs(_bal(currency1, alice) - o1, a1 - a1 / 100, 2);
     }
 
-    /// The order's ceiling caps the pay, however high the gas.
+    /// The fee does not depend on the gas price: a keeper cannot raise it by paying more for gas.
     /// forge-config: default.isolate = false
-    function test_payNeverAboveTheCeiling() public {
-        ConditionalOrders.CreateParams memory p = _params(_off(), _timed());
-        p.maxKeeperFeeBps = 1; // 0.01%
-        p.liquidity = 0.001e18; // a tiny order
-        feeds.setMinOrderUsd(0);
-        uint256 id = _submit(alice, p);
+    function test_theFeeIgnoresTheGasPrice() public {
+        uint256 a = _create(_off(), _timed());
+        uint256 b = _submit(bob, _params(_off(), _timed()));
         _wait(2 minutes);
-        _run(id, true);
-        // the tiny position holds ~0.00003 of each token: 0.01% of that
-        assertLe(_bal(currency0, keeper) + _bal(currency1, keeper), 1e10);
-    }
-
-    /// The gas price counted is capped at base fee + 0.01 gwei, so a keeper gains nothing by bidding high.
-    /// forge-config: default.isolate = false
-    function test_gasPriceIsCapped() public {
-        uint256 id = _create(_off(), _timed());
-        _wait(2 minutes);
+        _run(a, true);
+        uint256 cheap = _bal(currency1, keeper);
         vm.txGasPrice(500 gwei);
-        assertEq(rules.gasWei(1), 0.0005 gwei + 1 gwei);
-        _run(id, true);
-        assertLt(_bal(currency0, keeper) + _bal(currency1, keeper), 1e16);
+        _run(b, true);
+        assertApproxEqAbs(_bal(currency1, keeper) - cheap, cheap, 2);
     }
 
-    /// A token without a price pays nothing: the keeper's gas is paid in the other token, at its cost, never the
-    /// ceiling (a repeating rule would otherwise hand over 1% every run while a feed is down).
-    /// forge-config: default.isolate = false
-    function test_brokenFeedPaysInTheOtherToken() public {
-        uint256 id = _create(_off(), _timed());
+    /// After a swap the fee is paid in the token the owner asked for, out of what the swap produced.
+    function test_aSwapPaysTheFeeInTheTokenBought() public {
+        OrderState.Side memory s = _timed();
+        s.actions |= OrderState.ACT_SWAP;
+        s.swapToToken1 = true;
+        uint256 id = _create(_off(), s);
         _wait(2 minutes);
-        feed0.setBroken(true);
         _run(id, true);
         assertEq(_bal(currency0, keeper), 0);
         assertGt(_bal(currency1, keeper), 0);
-        assertLt(_bal(currency1, keeper), 0.5e16); // the gas cost, far below 1% of the position
     }
 
-    /// With no price at all the keeper is not paid; the order still runs for whoever runs it.
-    /// forge-config: default.isolate = false
-    function test_noPriceNoPay() public {
-        uint256 id = _create(_off(), _timed());
+    /// An owner can run without paying anyone: a fee of 0 is allowed (they or a friend run it).
+    function test_aZeroFeeOrderStillRuns() public {
+        ConditionalOrders.CreateParams memory p = _params(_off(), _timed());
+        p.keeperFeeBps = 0;
+        uint256 id = _submit(alice, p);
         _wait(2 minutes);
-        feedEth.setBroken(true);
         _run(id, true);
         assertEq(_bal(currency0, keeper) + _bal(currency1, keeper), 0);
+        assertEq(orders.getOrder(id).owner, address(0));
     }
 
-    /// In an ETH pool the part paid in ETH is the gas cost itself.
-    /// forge-config: default.isolate = false
-    function test_ethPoolPaysGasInEth() public {
+    /// In an ETH pool the fee's ETH part is paid as ETH.
+    function test_ethPoolPaysTheFeeInEth() public {
         ConditionalOrders.CreateParams memory p = _params(_off(), _timed());
         p.key = ethKey;
         vm.deal(alice, 10 ether);
@@ -162,6 +148,33 @@ contract KeeperPayTest is RuleSetup {
         uint256 before = keeper.balance;
         _run(id, true);
         assertGt(keeper.balance - before, 0);
+    }
+
+    // ---------------------------------------------------------------- pools
+
+    /// Strategies work in any pool of listed tokens: here a hookless pool of the same pair.
+    function test_aHooklessPoolWorks() public {
+        PoolKey memory bare = PoolKey(currency0, currency1, 500, 10, IHooks(address(0)));
+        poolManager.initialize(bare, Constants.SQRT_PRICE_1_1);
+        _addFullRange(bare);
+        ConditionalOrders.CreateParams memory p = _params(_off(), _timed());
+        p.key = bare;
+        uint256 id = _submit(alice, p);
+        _wait(2 minutes);
+        _run(id, true);
+        assertEq(orders.getOrder(id).owner, address(0));
+    }
+
+    /// A pool with some other hook is refused: its hook could take a cut of the order's swaps or block them.
+    function test_aPoolWithAnotherHookIsRefused() public {
+        PoolKey memory other = PoolKey(currency0, currency1, 500, 10, IHooks(address(0xBEEF)));
+        vm.expectRevert(Rules.PoolNotAllowed.selector);
+        rules.registerPool(other);
+    }
+
+    function test_aPoolIsRegisteredOnce() public {
+        assertEq(rules.registerPool(poolKey), 1);
+        assertEq(rules.poolCount(), 1);
     }
 
     // ---------------------------------------------------------------- payouts
@@ -206,11 +219,12 @@ contract KeeperPayTest is RuleSetup {
         (Currency a, Currency b) = address(t) < Currency.unwrap(currency0)
             ? (Currency.wrap(address(t)), currency0)
             : (currency0, Currency.wrap(address(t)));
-        PoolKey memory k = _newPool(a, b, Constants.SQRT_PRICE_1_1);
+        PoolKey memory k = PoolKey(a, b, 3000, 60, IHooks(address(0)));
+        poolManager.initialize(k, Constants.SQRT_PRICE_1_1);
         ConditionalOrders.CreateParams memory p = _params(_off(), _timed());
         p.key = k;
         vm.prank(alice);
-        vm.expectRevert(ConditionalOrders.TokenNotAllowed.selector);
+        vm.expectRevert(Rules.TokenNotAllowed.selector);
         orders.createOrder(p);
     }
 
@@ -248,13 +262,5 @@ contract KeeperPayTest is RuleSetup {
         vm.expectRevert(PriceFeeds.NotOwner.selector);
         feeds.setFeed(address(0xBEEF), address(feed1), MAX_AGE);
         vm.stopPrank();
-    }
-
-    function test_minimumOrderSize() public {
-        feeds.setMinOrderUsd(100e18);
-        ConditionalOrders.CreateParams memory p = _params(_off(), _timed()); // ~$0.6
-        vm.prank(alice);
-        vm.expectRevert(ConditionalOrders.OrderTooSmall.selector);
-        orders.createOrder(p);
     }
 }

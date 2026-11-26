@@ -82,24 +82,24 @@ export function explain(e: unknown): string {
 }
 
 const HUMAN_ERRORS: Record<string, string> = {
-  ConditionNotMet: "Its condition is not met right now (rules read the average price, so a move needs a couple of minutes to count).",
+  ConditionNotMet: "Its condition is not true right now (a pool's price counts only while it is near Chainlink's).",
+  NotHeldLongEnough: "Its condition has not been true long enough yet (“Only if it lasts”). Keepers mark when it first is.",
   TooSoon: "This side ran (or started) less than a minute ago. A side runs at most once a minute: try again shortly.",
-  NoPrice: "This pool does not have enough price history yet for that average (a new pool, or a long averaging time). Try a shorter time, or again later.",
+  NoPrice: "This pool's price is too far from Chainlink's right now to start a trailing stop from it. Try again shortly.",
   NothingToEnter: "The move could not put anything into the new range at today's price. It is tried again later.",
-  PriceMoved: "The price right now is too far from its recent average (or from Chainlink), so nothing runs at it: someone may have pushed it. It runs once the price settles.",
+  PriceMoved: "The pool's price is too far from Chainlink's (someone may have pushed it, or arbitrage has not caught up), so nothing runs at it. It runs once they agree again.",
   NothingToPoke: "Nothing to update: the remembered price is already the best one.",
   SideOff: "This side has no rule.",
   InvalidSide: "One of the rules is not allowed. Check the warnings in the editor.",
-  InvalidLeg: "That move is not allowed: the other pool must be an Alucard pool sharing a token with this one, and the move must swap into that token.",
+  InvalidLeg: "That move is not allowed: the other pool must share a token with this one, and the move must swap into that token.",
   InvalidOrder: "The order settings are not valid (expiry, fee, both sides empty, or a move without a way out and back).",
-  UnknownPool: "That pool is not an Alucard pool, so rules cannot read its price.",
+  UnknownPool: "That pool does not exist yet.",
+  PoolNotAllowed: "That pool uses another hook, so strategies cannot use it.",
+  TokenNotAllowed: "One of this pool's tokens has no Chainlink price on the list, so strategies cannot use it.",
   TooMuchIn: "The price moved while you were confirming. Refresh and try again.",
   NotOwner: "Only the owner can do this.",
   Expired: "This order has expired. Anyone can now cancel it, which returns the tokens to the owner.",
   UnknownOrder: "This order no longer exists.",
-  TokenNotAllowed: "Rules are only available for tokens on the list (tokens with a Chainlink price). One of this pool's tokens is not on it.",
-  OrderTooSmall: "This position is below the smallest size a rule can be attached to. Add more, or try again when the Chainlink price has updated.",
-  BatchOutOfGas: "The batch ran out of gas. Send it with more gas, or fewer rules at once.",
 };
 
 /** Balance of a token (native ETH or ERC20) for the connected wallet. */

@@ -34,7 +34,7 @@ export default function AddLiquidity() {
   const router = useRouter();
   const { address, isConnected } = useAccount();
   const client = usePublicClient();
-  const [poolIndex, setPoolIndex] = useState(POOLS.find((p) => p.hooked)!.index);
+  const [poolIndex, setPoolIndex] = useState(POOLS[0].index);
   const pool = poolByIndex(poolIndex)!;
   const [poolMenu, setPoolMenu] = useState(false);
 
@@ -206,7 +206,6 @@ export default function AddLiquidity() {
               {pool.base.symbol} / {pool.quote.symbol}
             </span>
             <span className="rounded bg-[var(--line2)] px-1.5 py-0.5 text-[11px] font-semibold">{pool.key.fee / 10_000}%</span>
-            {!pool.hooked && <span className="text-[11px] text-[var(--muted)]">no strategies here</span>}
             <ChevronDown className="ml-auto h-4 w-4 text-[var(--muted)]" />
           </button>
           <div className="mt-1.5 text-[12px] text-[var(--muted)]">
@@ -277,8 +276,7 @@ export default function AddLiquidity() {
               }}
             />
           </div>
-          {!pool.hooked && rulesOn && <div className="mt-2 text-[12px] text-[var(--amber)]">Strategies need an Alucard pool. Pick another fee tier.</div>}
-          {rulesOn && pool.hooked && (
+          {rulesOn && (
             <div className="mt-3 flex flex-col gap-1.5 border-t border-[var(--line)] pt-3">
               {hasRules ? (
                 (["down", "up"] as LaneId[]).map((lane) => {
@@ -305,7 +303,7 @@ export default function AddLiquidity() {
 
         <button
           className="btn btn-dark w-full !rounded-[14px] !py-3.5 !text-[15px]"
-          disabled={!isConnected || !calc || !!short || tx.state.busy || (rulesOn && (!hasRules || !pool.hooked || !!ruleProblem))}
+          disabled={!isConnected || !calc || !!short || tx.state.busy || (rulesOn && (!hasRules || !!ruleProblem))}
           onClick={submit}
         >
           {tx.state.busy ? tx.state.message : buttonText}
@@ -330,7 +328,6 @@ export default function AddLiquidity() {
                 {p.base.symbol} / {p.quote.symbol}
               </span>
               <span className="rounded bg-[var(--line2)] px-1.5 py-0.5 text-[11px] font-semibold">{p.key.fee / 10_000}%</span>
-              {!p.hooked && <span className="ml-auto text-[11px] text-[var(--muted)]">no strategies</span>}
             </>
           )}
         />

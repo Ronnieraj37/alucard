@@ -2,18 +2,19 @@
 
 It runs the exact order the app's editor sends to the contract (the packed words of lib/rules.ts encodeRules), the way
 src/ConditionalOrders.sol and src/Rules.sol run it:
-  * every pool condition reads the hook's average price (RuleHook.averageTick, replayed swap by swap: a sum of
-    tick x seconds before the first swap of each block, a snapshot at most once a minute, 64 kept), over at least two
-    minutes or the side's averaging time; Chainlink levels read the pool's price (no Chainlink history is loaded)
+  * every pool condition reads the pool's price after each swap. The contract also requires that price to be near
+    Chainlink; recorded pools are arbitraged to the market, so here that check always passes
+  * a hold ("only if it lasts") needs the condition true for the whole time, from the first swap it was true at
+    (a keeper pokes it there) to the run
   * TIME counts from the side's last run; FEES and APR from the fees the position earned since they were collected
-  * a side runs at most once a minute (MIN_GAP); trailing stops follow the best average price (someone pokes it)
+  * a side runs at most once a minute (MIN_GAP); trailing stops follow the best price (keepers poke it)
   * a keeper executes `delay` seconds after the condition holds, if it still holds then (the contract re-checks)
-  * remove -> keeper reserve -> fees kept or paid out -> optional swap (maxSlippage past the average price) ->
-    optional add (same range, or one-sided next to the average price) -> side updated -> keeper paid -> close if
-    nothing is left or both sides are off
-  * a move takes everything to plan B: waiting (tokens held), or parked in another pool (counted as the token it
-    parks in; that pool's fees are not modelled), and back into the same range or one centred on the average price,
-    after swapping to the range's mix
+  * remove -> keeper fee set aside -> fees kept or paid out -> optional swap (maxSlippage past the price before it)
+    -> optional add (same range, or a new range around the price after swapping to its mix) -> side updated ->
+    keeper paid its fee -> close if nothing is left or both sides are off
+  * a move takes everything to the other leg: holding a token, or into another pool (counted as the token it goes
+    in as; that pool's fees are not modelled), and back into the same range or one centred on the price, after
+    swapping to the range's mix
 
 Fees use the validated swap replay of lp_study (lp_sim.swap_shares): each swap pays a unit of liquidity
 overlap_fraction / pool_liquidity of its LP fee. Valid while the position is small next to the pool.
@@ -35,12 +36,12 @@ import numpy as np
 LN = math.log(1.0001)
 MIN_TICK, MAX_TICK = -887272, 887272
 BPS = 10_000
-CHECK_OFF, CHECK_EDGE, CHECK_TICK, CHECK_TIME, CHECK_TRAIL, CHECK_ORACLE = 0, 1, 2, 3, 4, 5
-LEVELS = (CHECK_TICK, CHECK_ORACLE)  # a price level: the pool's price or the pair's Chainlink price; a repeating one steps
+CHECK_OFF, CHECK_EDGE, CHECK_TICK, CHECK_TIME, CHECK_TRAIL = 0, 1, 2, 3, 4
+LEVELS = (CHECK_TICK,)  # a price level: a repeating one steps
 COMBINE_NONE, COMBINE_AND, COMBINE_OR = 0, 1, 2
 BASE_TIME = 1_767_225_600  # OrderState.BASE_TIME: stored times round up to the minute after this
 ACT_KEEP_FEES, ACT_REMOVE, ACT_SWAP, ACT_ADD = 1, 2, 4, 8
-ADD_SAME, ADD_ONE_SIDED = 0, 1
+ADD_SAME, ADD_CENTERED = 0, 1
 MAX_RUNS = 5000
 
 QUOTE_RANK = ["USDC", "USDT", "DAI", "WETH", "ETH", "WBTC", "LINK"]
@@ -289,10 +290,8 @@ def stored_time(t: float) -> float:
 CHECK_FEES, CHECK_APR = 6, 7
 ACT_MOVE = 16
 LEG_IDLE, LEG_RANGE, LEG_CENTERED = 1, 2, 3
-MIN_WINDOW = 120  # Rules.MIN_WINDOW: seconds of average price a condition reads at least
 MIN_GAP = 60  # ConditionalOrders.MIN_GAP: a side runs at most once in this many seconds after its last run
 MIN_APR_TIME = 3600  # Rules.MIN_APR_TIME
-SNAPSHOTS, SNAPSHOT_EVERY = 64, 60  # RuleHook
 
 
 def _s24(x: int) -> int:
@@ -318,8 +317,9 @@ class Side:
     check_pool2: str = "own"
     combine: int = 0
     hold_min: int = 0
-    best: int = 0  # TRAIL: the best average tick seen
+    best: int = 0  # TRAIL: the best tick seen
     runs_left: int = 0
+    armed: float = 0.0  # a side with a hold: when its condition was first seen true (0 = not now)
 
     def conds(self):
         """(checker, value, pool) of condition A and, if any, condition B."""
@@ -331,9 +331,6 @@ class Side:
     def trail_pool(self) -> str | None:
         return next((p for c, _, p in self.conds() if c == CHECK_TRAIL), None)
 
-    def window(self) -> int:
-        """Rules._window: seconds of average price the side reads."""
-        return max(MIN_WINDOW, self.hold_min * 60)
 
 
 def decode_word(w: int, home_index: int) -> Side:
@@ -386,7 +383,7 @@ def place_side(d: Side, pl: Placement) -> Side:
         e.value = pl.level(e.value, e.check_pool)
     if e.combine != COMBINE_NONE and e.checker2 in LEVELS:
         e.value2 = pl.level(e.value2, e.check_pool2)
-    if e.actions & ACT_ADD and e.add_mode == ADD_ONE_SIDED and pl.spacing_ratio != 1.0:
+    if e.actions & ACT_ADD and e.add_mode == ADD_CENTERED and pl.spacing_ratio != 1.0:
         # widths are counted in tick spacings: keep the same width in price on a pool of another spacing
         def scale(w: int) -> int:
             return min(2047, max(1, round(w * pl.spacing_ratio))) if w else 0
@@ -394,75 +391,9 @@ def place_side(d: Side, pl: Placement) -> Side:
     if pl.flip:
         if e.actions & ACT_SWAP:
             e.swap_to_token1 = not e.swap_to_token1
-        if e.actions & ACT_ADD and e.add_mode == ADD_ONE_SIDED:
+        if e.actions & ACT_ADD and e.add_mode == ADD_CENTERED:
             e.shape = ((e.shape & 2047) << 11) | ((e.shape >> 11) & 2047)
     return e
-
-
-# ---------------------------------------------------------------- the hook's average price (RuleHook.averageTick)
-
-
-class Oracle:
-    """RuleHook's oracle replayed on a series: before the first swap of each block the price that held since the last
-    update is added to a running sum (tick x seconds); a snapshot of the sum is kept at most once a minute; the
-    average over a window runs from the newest snapshot at least that old (among the last 64) until now."""
-
-    def __init__(self, s: "Series"):
-        ts = s.ts.astype(np.int64)
-        n = len(ts)
-        tick_after = s.tick.astype(np.int64)
-        tick_before = np.floor(2.0 * np.log(s.sp0) / LN).astype(np.int64)
-        swapped = s.swapped if s.swapped is not None else np.ones(n, dtype=bool)
-        start = int(s.oracle_start if s.oracle_start is not None else ts[0])
-        # the first swap of each block (a block is one timestamp) writes
-        first = np.zeros(n, dtype=bool)
-        last_t = start
-        idx = np.flatnonzero(swapped)
-        blk = idx[np.concatenate([[True], ts[idx][1:] != ts[idx][:-1]])] if len(idx) else idx
-        blk = blk[ts[blk] > start]
-        first[blk] = True
-        prev_t = np.concatenate([[start], ts[blk][:-1]])
-        contrib = tick_before[blk] * (ts[blk] - prev_t)
-        sums = np.cumsum(contrib) if len(blk) else np.zeros(0, dtype=np.int64)
-        # running state after each row
-        pos = np.searchsorted(blk, np.arange(n), side="right") - 1  # last write at or before row
-        self.o_time = np.where(pos >= 0, ts[blk][np.maximum(pos, 0)] if len(blk) else start, start)
-        self.o_sum = np.where(pos >= 0, sums[np.maximum(pos, 0)] if len(blk) else 0, 0)
-        # snapshots: at the writes at least SNAPSHOT_EVERY after the previous snapshot
-        snap_t, snap_s = [start], [0]
-        bt = ts[blk]
-        j = 0
-        while j < len(bt):
-            j = int(np.searchsorted(bt, snap_t[-1] + SNAPSHOT_EVERY, side="left"))
-            if j >= len(bt):
-                break
-            snap_t.append(int(bt[j]))
-            snap_s.append(int(sums[j]))
-            j += 1
-        self.snap_t = np.array(snap_t, dtype=np.int64)
-        self.snap_s = np.array(snap_s, dtype=np.int64)
-        self.n_snap = np.searchsorted(self.snap_t, ts, side="right")  # snapshots written by each row
-        self.ts = ts
-        self.tick = tick_after
-
-    def average(self, window: int, i: int, j: int) -> tuple[np.ndarray, np.ndarray]:
-        """(ok, average tick) for rows i..j-1, read right after each row's swap."""
-        t = self.ts[i:j]
-        sum_now = self.o_sum[i:j] + self.tick[i:j] * (t - self.o_time[i:j])
-        k = np.searchsorted(self.snap_t, t - window, side="right") - 1
-        ok = (k >= 0) & (k >= self.n_snap[i:j] - SNAPSHOTS)
-        kk = np.maximum(k, 0)
-        span = t - self.snap_t[kk]
-        avg = np.floor_divide(sum_now - self.snap_s[kk], np.maximum(span, 1))
-        return ok, avg
-
-
-def oracle_of(s: "Series") -> Oracle:
-    o = getattr(s, "_oracle", None)
-    if o is None:
-        o = Oracle(s)
-        s._oracle = o  # type: ignore[attr-defined]
-    return o
 
 
 # ---------------------------------------------------------------- simulation
@@ -473,7 +404,6 @@ class Params:
     keeper_fee_bps: int = 10
     slippage_steps: int = 10  # x10 ticks, like Order.maxSlippage
     delay_s: float = 12.0
-    keeper_cost_usd: float = 0.01  # gas cost of one run in USD
 
 
 @dataclass
@@ -519,10 +449,8 @@ class Sim:
         self.events: list[dict] = []
         self.samples: dict[int, float] = {}
         self.ranges: dict[int, tuple[float, float]] = {}
-        self.oracle = oracle_of(s)
-        # the other pool's average price at each of our swaps
+        # the other pool's row at each of our swaps
         if other is not None:
-            self.other_oracle = oracle_of(other)
             self.other_row = np.clip(np.searchsorted(other.ts, s.ts, side="right") - 1, 0, len(other.ts) - 1)
         self._avg_cache: dict[tuple, tuple] = {}
         self.failed = 0
@@ -540,26 +468,15 @@ class Sim:
         return 1.0 if q is None else float(q[self.i0])
 
     # ---- prices
-    def avg(self, pool: str, window: int, i: int, j: int) -> tuple[np.ndarray, np.ndarray]:
-        """(ok, average tick) of a pool's price for our rows i..j-1."""
+    def px(self, pool: str, i: int, j: int) -> tuple[np.ndarray, np.ndarray]:
+        """(ok, tick) of a pool's price right after each of our rows i..j-1."""
         if pool == "other":
             if self.other is None:
                 raise ValueError("a condition reads another pool, but no other pool's history is loaded")
-            rows = self.other_row[i:j]
-            o = self.other_oracle
-            t = self.s.ts[i:j].astype(np.int64)
-            # read at our swap's time: the other pool's sum carried forward to then
-            sum_now = o.o_sum[rows] + o.tick[rows] * (t - o.o_time[rows])
-            k = np.searchsorted(o.snap_t, t - window, side="right") - 1
-            n_snap = np.searchsorted(o.snap_t, t, side="right")
-            ok = (k >= 0) & (k >= n_snap - SNAPSHOTS)
-            kk = np.maximum(k, 0)
-            return ok, np.floor_divide(sum_now - o.snap_s[kk], np.maximum(t - o.snap_t[kk], 1))
-        return self.oracle.average(window, i, j)
-
-    def avg_at(self, window: int, k: int) -> int | None:
-        ok, a = self.oracle.average(window, k, k + 1)
-        return int(a[0]) if ok[0] else None
+            t = self.other.tick[self.other_row[i:j]]
+        else:
+            t = self.s.tick[i:j]
+        return np.ones(j - i, dtype=bool), t.astype(np.int64)
 
     def _pool_of(self, st: State, pool: str) -> str:
         """A condition's pool by role: the leg's own pool is the position's pool, unless the money is parked elsewhere."""
@@ -591,7 +508,7 @@ class Sim:
         n = j - i
         if st.L <= 0 or not st.home:
             return np.zeros(n, dtype=bool), np.zeros(n)
-        ok, a = self.oracle.average(MIN_WINDOW, i, j)
+        ok, a = self.px("own", i, j)
         f0, f1 = self._earned(st, i, j)
         sp = np.power(1.0001, a / 2.0)
         sa, sb = sqrt_at(st.tl), sqrt_at(st.tu)
@@ -609,10 +526,6 @@ class Sim:
         ts = self.s.ts[i:j]
         if checker == CHECK_TIME:
             return ts >= d.last_run + value * 60
-        if checker == CHECK_ORACLE:
-            # no Chainlink history is recorded: the pool's own price stands in for the feed (see the caveats)
-            t = self.s.tick[i:j]
-            return t >= value if slot == "upper" else t < value
         if checker in (CHECK_FEES, CHECK_APR):
             ok, bps = self.fee_bps(st, i, j)
             if checker == CHECK_FEES:
@@ -622,7 +535,7 @@ class Sim:
             with np.errstate(divide="ignore", invalid="ignore"):
                 rate = np.where(elapsed > 0, bps * 365 * 86400 / np.maximum(elapsed, 1), 0.0)
             return ok & (elapsed >= MIN_APR_TIME) & (rate < value)
-        ok, t = self.avg(self._pool_of(st, pool), d.window(), i, j)
+        ok, t = self.px(self._pool_of(st, pool), i, j)
         if checker == CHECK_EDGE:
             return ok & ((t >= st.tu + value) if slot == "upper" else (t < st.tl - value))
         if checker == CHECK_TICK:
@@ -633,36 +546,70 @@ class Sim:
         return np.zeros(j - i, dtype=bool)
 
     def _best(self, st: State, slot: str, d: Side, i: int, j: int) -> np.ndarray | None:
-        """A trailing side's best average tick at rows i..j-1: someone pokes each new best (the keeper does)."""
+        """A trailing side's best tick at rows i..j-1: someone pokes each new best (the keeper does)."""
         pool = d.trail_pool()
         if pool is None:
             return None
-        ok, t = self.avg(self._pool_of(st, pool), d.window(), i, j)
+        ok, t = self.px(self._pool_of(st, pool), i, j)
         if slot == "upper":
             return np.minimum(d.best, np.minimum.accumulate(np.where(ok, t, d.best)))
         return np.maximum(d.best, np.maximum.accumulate(np.where(ok, t, d.best)))
 
-    def mask(self, st: State, slot: str, d: Side, i: int, j: int) -> np.ndarray:
+    def met(self, st: State, slot: str, d: Side, i: int, j: int) -> np.ndarray:
+        """Rules.met at rows i..j-1: the side's conditions (no hold, no MIN_GAP)."""
         best = self._best(st, slot, d, i, j)
         cs = d.conds()
         m = self._cond_mask(st, slot, d, cs[0], i, j, best)
         if len(cs) == 2:
             m2 = self._cond_mask(st, slot, d, cs[1], i, j, best)
             m = (m & m2) if d.combine == COMBINE_AND else (m | m2)
+        return m
+
+    def _armed(self, m: np.ndarray, d: Side, i: int) -> np.ndarray:
+        """When each row's run of true conditions began (poke arms at its first row; 0 where it is false). A run
+        that began before row i carries d.armed."""
+        ts = self.s.ts[i : i + len(m)]
+        prev = np.concatenate([[d.armed > 0], m[:-1]])
+        starts = m & ~prev
+        last = np.maximum.accumulate(np.where(starts, np.arange(len(m)), -1))
+        at = np.where(last >= 0, ts[np.maximum(last, 0)], d.armed)
+        return np.where(m, at, 0.0)
+
+    def mask(self, st: State, slot: str, d: Side, i: int, j: int) -> np.ndarray:
+        m = self.met(st, slot, d, i, j)
+        ts = self.s.ts[i:j]
+        if d.hold_min:
+            m = m & (ts >= self._armed(m, d, i) + d.hold_min * 60)
         # ConditionalOrders.MIN_GAP: at most once a minute after the side's last run (kept to the minute)
-        return m & (self.s.ts[i:j] >= d.last_run + MIN_GAP)
+        return m & (ts >= d.last_run + MIN_GAP)
 
     def cond_at(self, st: State, slot: str, d: Side, k: int) -> bool:
         return bool(self.mask(st, slot, d, k, k + 1)[0])
 
+    def _carry(self, st: State, slot: str, d: Side, i: int, j: int) -> None:
+        """What pokes at rows i..j-1 leave in a side: the best price of a trailing side, the arming of a hold."""
+        if j <= i:
+            return
+        if d.hold_min:
+            d.armed = float(self._armed(self.met(st, slot, d, i, j), d, i)[-1])
+        b = self._best(st, slot, d, i, j)
+        if b is not None:
+            d.best = int(b[-1])
+
     def move_best(self, st: State, i: int, k: int) -> None:
-        """Trailing stops: take the best average of rows i+1..k (someone pokes each new best)."""
+        """Keepers poke every side at each swap of rows i+1..k."""
         for slot, d in st.sides.items():
-            if d.checker == CHECK_OFF or k <= i:
+            if d.checker != CHECK_OFF:
+                self._carry(st, slot, d, i + 1, k + 1)
+
+    def rearm(self, st: State, k: int, ran: str | None) -> None:
+        """After a run at row k the keeper pokes again: a hold whose condition is still true stays armed (the side
+        that ran, or sides that just entered play, from now), one that is false is forgotten."""
+        for slot, d in st.sides.items():
+            if d.checker == CHECK_OFF or not d.hold_min:
                 continue
-            b = self._best(st, slot, d, i + 1, k + 1)
-            if b is not None:
-                d.best = int(b[-1])
+            true_now = bool(self.met(st, slot, d, k, k + 1)[0])
+            d.armed = (d.armed if (d.armed and slot != ran) else float(self.s.ts[k])) if true_now else 0.0
 
     def first_true(self, st: State, slot: str, d: Side, i: int) -> int | None:
         """First row >= i where the side can run (searches in growing chunks)."""
@@ -674,9 +621,7 @@ class Sim:
             hit = np.flatnonzero(self.mask(st, slot, d, i, j))
             if len(hit):
                 return i + int(hit[0])
-            b = self._best(st, slot, d, i, j)
-            if b is not None:
-                d.best = int(b[-1])
+            self._carry(st, slot, d, i, j)
             i = j
             step *= 4
         return None
@@ -713,15 +658,13 @@ class Sim:
 
     # ---- swaps
     def swap(self, w0: float, w1: float, zero_for_one: bool, k: int, stop: float | None = None):
-        """Sell all of one token at the pool's liquidity at that moment, stopping maxSlippage past the average price
-        (or earlier at `stop`, a sqrt price). Skipped if the price is already past the limit. None: no average."""
+        """Sell all of one token at the pool's liquidity at that moment, stopping maxSlippage past the price before it
+        (or earlier at `stop`, a sqrt price)."""
         s, p = self.s, self.p
         amount_in = w0 if zero_for_one else w1
         if amount_in <= 0:
             return w0, w1, "nothing to convert"
-        ref = self.avg_at(MIN_WINDOW, k)
-        if ref is None:
-            return None
+        ref = int(s.tick[k])
         slip = p.slippage_steps * 10
         sl = sqrt_at(max(MIN_TICK + 1, min(MAX_TICK - 1, ref - slip if zero_for_one else ref + slip)))
         if stop is not None:
@@ -781,7 +724,7 @@ class Sim:
 
     # ---- taking tokens out (shared by runs and moves)
     def _take(self, st: State, d: Side, k: int):
-        """Remove (removeBps) and collect, set the keeper's ceiling aside, set aside fees not kept. Returns (new
+        """Remove (removeBps) and collect, set the keeper's fee aside, set aside fees not kept. Returns (new
         state, w0, w1, res0, res1, pay0, pay1, note)."""
         s, p = self.s, self.p
         sp = float(s.sp1[k])
@@ -802,7 +745,7 @@ class Sim:
         # a parked leg's swap (into the shared token) is in the parking pool: the money is already counted as that token
         swaps = bool(d.actions & ACT_SWAP) and st.home
         res0, res1 = out0 * cap, out1 * cap
-        if swaps:  # a run that swaps sets the keeper's ceiling after the swap
+        if swaps:  # a run that swaps takes the keeper's fee after the swap
             if d.swap_to_token1:
                 res0 = 0.0
             else:
@@ -829,17 +772,17 @@ class Sim:
         return new, w0, w1, res0, res1, pay0, pay1, note
 
     def _pay_keeper(self, new: State, res0: float, res1: float, sp: float) -> tuple[float, float]:
-        res_usd = self.usd(res0, res1, sp)
-        frac = 1.0 if res_usd <= 0 else min(1.0, self.p.keeper_cost_usd / res_usd)
-        new.keeper_usd += res_usd * frac
-        return res0 * (1 - frac), res1 * (1 - frac)
+        """The keeper takes its whole fee: nothing of it comes back to the owner."""
+        new.keeper_usd += self.usd(res0, res1, sp)
+        return 0.0, 0.0
 
     def _start_side(self, d: Side, k: int) -> Side:
         """A side entering play at row k: it starts its clock now, and a trailing side its best price."""
         e = replace(d)
         e.last_run = stored_time(float(self.s.ts[k]))
+        e.armed = 0.0
         if e.trail_pool() is not None:
-            ok, t = self.avg("other" if e.trail_pool() == "other" else "own", e.window(), k, k + 1)
+            ok, t = self.px("other" if e.trail_pool() == "other" else "own", k, k + 1)
             e.best = int(t[0]) if ok[0] else 0
         return e
 
@@ -852,17 +795,9 @@ class Sim:
         new.open = False
         note.append("closed")
 
-    def price_ok(self, k: int) -> bool:
-        """Rules.checkPrice: the price of the moment within the order's slippage of the average (the Chainlink band
-        is not modelled: no Chainlink history is recorded)."""
-        ref = self.avg_at(MIN_WINDOW, k)
-        return ref is not None and abs(int(self.s.tick[k]) - ref) <= self.p.slippage_steps * 10
-
     # ---- one run of one side at row k (None: the contract would revert, a keeper tries again later)
     def execute(self, st: State, slot: str, k: int) -> State | None:
         d = st.sides[slot]
-        if not self.price_ok(k):
-            return None  # PriceMoved: tried again later
         if d.actions & ACT_MOVE:
             return self.move(st, slot, k)
         s = self.s
@@ -874,30 +809,23 @@ class Sim:
         nd = new.sides[slot]
         if d.actions & ACT_ADD:
             s_ = s.spacing
-            if d.add_mode == ADD_ONE_SIDED:
-                avg = self.avg_at(MIN_WINDOW, k)
-                if avg is None:
+            if d.add_mode == ADD_CENTERED:
+                # Rules.centeredRange around the price, then the vault swaps to that range's mix (like a move)
+                mid = floor_to(int(s.tick[k]), s_)
+                ntl = max(min_usable(s_), mid - (d.shape & 2047) * s_)
+                ntu = min(max_usable(s_), mid + ((d.shape >> 11) & 2047) * s_)
+                z = self.zap(w0, w1, ntl, ntu, k)
+                if z is None:
                     return None
-                spot = int(s.tick[k])
-                # Rules.besidePrice: the lower of the average and the price of the moment for the upper side, the higher
-                # for the lower side, so the one token fills the whole range
-                ref = min(spot, avg) if slot == "upper" else max(spot, avg)
-                fl = floor_to(ref, s_)
-                if slot == "upper":
-                    ntu, ntl = fl, fl - (d.shape & 2047) * s_
-                    use0, use1 = 0.0, w1
-                else:
-                    ntl = fl + s_
-                    ntu, use0, use1 = ntl + ((d.shape >> 11) & 2047) * s_, w0, 0.0
-                if ntl >= min_usable(s_) and ntu <= max_usable(s_) and ntu > ntl:
-                    nsa, nsb = sqrt_at(ntl), sqrt_at(ntu)
-                    la = liquidity_for(sp, nsa, nsb, use0, use1) * 0.9999
-                    if la > 0:
-                        c0, c1 = amounts(la, sp, nsa, nsb)
-                        w0, w1 = w0 - c0, w1 - c1
-                        new.L, new.tl, new.tu = new.L + la, ntl, ntu
-                        lo_, hi_ = sorted((float(s.price(nsa)), float(s.price(nsb))))
-                        note.append(f"new range {fmt(lo_)}-{fmt(hi_)}")
+                w0, w1, _ = z
+                nsa, nsb = sqrt_at(ntl), sqrt_at(ntu)
+                la = liquidity_for(sp, nsa, nsb, max(w0, 0.0), max(w1, 0.0)) * 0.9999
+                if la > 0:
+                    c0, c1 = amounts(la, sp, nsa, nsb)
+                    w0, w1 = w0 - c0, w1 - c1
+                    new.L, new.tl, new.tu = new.L + la, ntl, ntu
+                    lo_, hi_ = sorted((float(s.price(nsa)), float(s.price(nsb))))
+                    note.append(f"new range {fmt(lo_)}-{fmt(hi_)}")
             else:
                 sa, sb = sqrt_at(st.tl), sqrt_at(st.tu)
                 la = liquidity_for(sp, sa, sb, w0, w1) * 0.9999 if (w0 > 0 or w1 > 0) else 0.0
@@ -914,9 +842,9 @@ class Sim:
             again = nd.runs_left != 0
         if again:
             if nd.trail_pool() is not None:
-                ok, t = self.avg("other" if nd.trail_pool() == "other" else "own", nd.window(), k, k + 1)
+                ok, t = self.px("other" if nd.trail_pool() == "other" else "own", k, k + 1)
                 nd.best = int(t[0]) if ok[0] else nd.best  # starts again from the price after the run
-            if not (d.actions & ACT_ADD and d.add_mode == ADD_ONE_SIDED):
+            if not (d.actions & ACT_ADD and d.add_mode == ADD_CENTERED):
                 step = d.shape if slot == "upper" else -d.shape
                 if d.checker in LEVELS:
                     nd.value = d.value + step
@@ -953,9 +881,7 @@ class Sim:
         left_sides, next_sides = new.sides, new.other_sides
         to_home = not new.home
         if to_home:
-            ref = self.avg_at(MIN_WINDOW, k)
-            if ref is None:
-                return None
+            ref = int(s.tick[k])
             if plan.home_kind == LEG_RANGE:
                 tl, tu = plan.home_a, plan.home_b
             else:
@@ -1038,6 +964,7 @@ class Sim:
                 self.failed += 1  # the contract reverts; the keeper tries again later
                 continue
             st = nxt
+            self.rearm(st, k, slot)
         self.accrue(st, i, self.i1 - 1)
         return st
 
@@ -1097,7 +1024,6 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
         keeper_fee_bps=int(req.get("keeperFeeBps", 10)),
         slippage_steps=max(1, round(float(req.get("slippagePct", 1)) * 10)),
         delay_s=float(req.get("delaySec", 12)),
-        keeper_cost_usd=float(req.get("keeperCostUsd", 0.01)),
     )
     deposit = float(req.get("depositUsd", 10_000))
 
@@ -1244,7 +1170,6 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
         "events": sim.events[:500],
         "assumptions": {
             "keeperDelaySec": p.delay_s,
-            "keeperCostUsd": p.keeper_cost_usd,
             "keeperFeeBps": p.keeper_fee_bps,
             "slippagePct": p.slippage_steps / 10,
         },

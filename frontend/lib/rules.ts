@@ -9,17 +9,17 @@
 // mapping below goes through `contractSide`.
 
 import { type Pool, POOLS, pctForTicks, priceAtTick, poolByIndex, ticksForPct, tickAtPrice, fmt } from "./pools";
-import { ACT, ADD_ONE_SIDED, ADD_SAME, CHECK, COMBINE, LEG, type Leg, type Side, decodeSide, encodeSide, noLeg, offSide } from "./side";
+import { ACT, ADD_CENTERED, ADD_SAME, CHECK, COMBINE, LEG, type Leg, type Side, decodeSide, encodeSide, noLeg, offSide } from "./side";
 
 export type { Side } from "./side";
 
 export type LaneId = "down" | "up"; // base price falls / rises
 
-export type TriggerKind = "leave" | "price" | "otherPool" | "oracle" | "timer" | "trail" | "fees" | "apr";
+export type TriggerKind = "leave" | "price" | "otherPool" | "timer" | "trail" | "fees" | "apr";
 export type Trigger = {
   kind: TriggerKind;
   bufferPct?: number; // leave: how far past the range edge
-  price?: number; // price, otherPool, oracle: base price in quote
+  price?: number; // price, otherPool: base price in quote
   poolIndex?: number; // otherPool; trail: the pool it follows (unset = this one)
   hours?: number; // timer
   trailPct?: number; // trail: how far the price turns back from its best
@@ -34,7 +34,7 @@ export type Action = {
   kind: ActionKind;
   pct?: number; // withdraw: % of the liquidity
   to?: "base" | "quote"; // convert; a move that holds a token: which one (unset = keep the tokens as they are)
-  widthPct?: number; // follow: width of the new range
+  widthPct?: number; // follow: the new range, this % below and above the price
 };
 
 export type Combine = "and" | "or";
@@ -121,17 +121,17 @@ export function markBackIn(p: Pool, r: Rules, range: [number, number]): Rules {
   return { ...r, plan: { ...r.plan, back: { down: mark(r.plan.back.down, "down"), up: mark(r.plan.back.up, "up") } } };
 }
 
-/** A price level: the pool's price or the pair's Chainlink price against a fixed tick. A repeating level steps. */
-const isLevel = (checker: number) => checker === CHECK.TICK || checker === CHECK.ORACLE;
+/** A price level: a pool's price against a fixed tick. A repeating level steps. */
+const isLevel = (checker: number) => checker === CHECK.TICK;
 export const MAX_RUNS = 127;
-/** Rules.MAX_HOLD_MINUTES: the hook keeps about an hour of prices. */
-export const MAX_HOLD_MINUTES = 60;
+/** Rules.MAX_HOLD_MINUTES: a day. */
+export const MAX_HOLD_MINUTES = 1440;
 /** OrderState.MAX_TRAIL: a 99.99% fall in ticks. */
 export const MAX_TRAIL_TICKS = 92_108;
 const MAX_TICK = 887_272;
 const BPS = 10_000;
 
-const isPrice = (t?: Trigger | null) => t?.kind === "price" || t?.kind === "otherPool" || t?.kind === "oracle";
+const isPrice = (t?: Trigger | null) => t?.kind === "price" || t?.kind === "otherPool";
 const isApr = (l: Lane) => l.trigger?.kind === "apr" || l.trigger2?.kind === "apr";
 const live = (l: Lane) => !!l.trigger && l.actions.length > 0;
 
@@ -151,7 +151,7 @@ export const watched = (p: Pool, lane: Lane, watch: Pool = p): Pool =>
 
 type Slot = "lower" | "upper";
 const otherSlot = (x: Slot): Slot => (x === "lower" ? "upper" : "lower");
-const directional = (t?: Trigger | null) => readsPrice(t) || t?.kind === "leave" || t?.kind === "oracle";
+const directional = (t?: Trigger | null) => readsPrice(t) || t?.kind === "leave";
 
 /** The contract side a lane must use, or null when either will do (timer and fee conditions). A price check runs on
  * the watched pool's ticks, so that pool's orientation decides; APR is a lower-side condition ("earns less than"). */
@@ -191,11 +191,11 @@ export function withAction(lane: Lane, a: Action): Lane {
 
 // ---------------------------------------------------------------- pools a move can go into
 
-/** Pools a condition can watch: pools of the hook only (they keep the average price), same pair first. */
+/** Pools a condition can watch: every pool in the table (with or without the hook), same pair first. */
 export const watchable = (p: Pool) => {
-  const hooked = POOLS.filter((q) => q.hooked && q.index !== p.index);
-  const same = hooked.filter((q) => q.key.currency0 === p.key.currency0 && q.key.currency1 === p.key.currency1);
-  return [...same, ...hooked.filter((q) => !same.includes(q))];
+  const others = POOLS.filter((q) => q.index !== p.index);
+  const same = others.filter((q) => q.key.currency0 === p.key.currency0 && q.key.currency1 === p.key.currency1);
+  return [...same, ...others.filter((q) => !same.includes(q))];
 };
 
 /** The token two pools share (null if none; the pair's token0 if they are the same pair). */
@@ -207,9 +207,9 @@ export function sharedToken(a: Pool, b: Pool): "token0" | "token1" | "both" | nu
 }
 
 const STABLE = ["USDC", "USDT", "DAI"];
-/** Pools a move can go into: every Alucard pool that shares a token with this one (another fee tier of the same pair
+/** Pools a move can go into: every pool in the table that shares a token with this one (another fee tier of the same pair
  * too). The money is swapped into the shared token on the way. */
-export const parkable = (p: Pool) => POOLS.filter((q) => q.hooked && q.index !== p.index && sharedToken(p, q));
+export const parkable = (p: Pool) => POOLS.filter((q) => q.index !== p.index && sharedToken(p, q));
 
 // ---------------------------------------------------------------- trailing distance <-> ticks
 
@@ -236,7 +236,6 @@ function encodeTrigger(c: Ctx, laneId: LaneId, t: Trigger): Cond {
     return { checker: CHECK.TICK, value: Math.round(tickAtPrice(w, t.price ?? 0)), checkPool: pool(w) };
   }
   // the pair's Chainlink price, as a tick of this pool: the same number a pool price level would use
-  if (t.kind === "oracle") return { checker: CHECK.ORACLE, value: Math.round(tickAtPrice(c.own, t.price ?? 0)), checkPool: 0 };
   if (t.kind === "trail") return { checker: CHECK.TRAIL, value: ticksForMove(t.trailPct ?? 5, laneId === "up"), checkPool: pool(watchedBy(c.own, t, c.watch)) };
   if (t.kind === "fees") return { checker: CHECK.FEES, value: Math.round((t.feesPct ?? 1) * 100), checkPool: 0 };
   if (t.kind === "apr") return { checker: CHECK.APR, value: Math.round((t.aprPct ?? 5) * 100), checkPool: 0 };
@@ -253,7 +252,6 @@ function encodeLane(c: Ctx, lane: Lane, laneId: LaneId, slot: Slot): Side {
   const spacing = p.key.tickSpacing;
 
   Object.assign(s, encodeTrigger(c, laneId, lane.trigger!));
-  if (lane.trigger!.kind === "leave" && follow && lane.repeat) s.value = Math.max(s.value, spacing); // the new range sits next to the price
   if (lane.trigger2) {
     const b = encodeTrigger(c, laneId, lane.trigger2);
     s.checker2 = b.checker;
@@ -302,11 +300,12 @@ function encodeLane(c: Ctx, lane: Lane, laneId: LaneId, slot: Slot): Side {
     s.addMode = ADD_SAME;
   }
   if (follow) {
+    // everything moves into a new range around the price: `widthPct` below and above it, in spacings
     bits |= ACT.ADD | ACT.REMOVE;
     s.removeBps = BPS;
-    s.addMode = ADD_ONE_SIDED;
+    s.addMode = ADD_CENTERED;
     const w = Math.max(1, Math.min(2047, Math.ceil(ticksForPct(follow.widthPct ?? 5) / spacing)));
-    s.shape = upper ? w : w << 11; // upper side builds below the price, lower side above it
+    s.shape = w | (w << 11);
   }
   s.actions = bits;
   s.repeat = lane.repeat;
@@ -407,7 +406,6 @@ function decodeTrigger(c: Ctx, laneId: LaneId, checker: number, value: number, c
     if (w.index === c.watch.index) return { kind: "price", price: priceAtTick(w, value) };
     return { kind: "otherPool", price: priceAtTick(w, value), poolIndex: w.index };
   }
-  if (checker === CHECK.ORACLE) return { kind: "oracle", price: priceAtTick(c.own, value) };
   if (checker === CHECK.TRAIL) {
     const t: Trigger = { kind: "trail", trailPct: round2(pctForMove(value, laneId === "up")) };
     const w = checkPool ? poolByIndex(checkPool) : c.own;
@@ -444,8 +442,8 @@ function decodeLane(c: Ctx, s: Side, upper: boolean, laneId: LaneId): Lane {
   const keep = (s.actions & ACT.KEEP_FEES) !== 0;
   const remove = (s.actions & ACT.REMOVE) !== 0;
   const add = (s.actions & ACT.ADD) !== 0;
-  if (add && s.addMode === ADD_ONE_SIDED) {
-    const w = upper ? s.shape & 2047 : (s.shape >> 11) & 2047;
+  if (add && s.addMode === ADD_CENTERED) {
+    const w = s.shape & 2047;
     if (!keep) lane.actions.push({ kind: "collect" });
     lane.actions.push({ kind: "follow", widthPct: round2(pctForTicks(w * p.key.tickSpacing)) });
   } else {
@@ -460,7 +458,7 @@ function decodeLane(c: Ctx, s: Side, upper: boolean, laneId: LaneId): Lane {
   lane.actions.sort((x, y) => ACTION_ORDER.indexOf(x.kind) - ACTION_ORDER.indexOf(y.kind));
   lane.repeat = s.repeat;
   const steps = isLevel(s.checker) || (lane.trigger2 && isLevel(s.checker2));
-  if (s.repeat && steps && !(add && s.addMode === ADD_ONE_SIDED)) lane.stepPct = round2(pctForTicks(s.shape));
+  if (s.repeat && steps && !(add && s.addMode === ADD_CENTERED)) lane.stepPct = round2(pctForTicks(s.shape));
   if (s.repeat && s.runsLeft) lane.maxRuns = s.runsLeft;
   return lane;
 }
@@ -474,7 +472,7 @@ function decodeLanes(c: Ctx, lower: Side, upper: Side): { down: Lane; up: Lane }
     if (s.checker === CHECK.APR || (s.combine && s.checker2 === CHECK.APR)) return contractSide(c.watch, "down") === "lower" ? "down" : "up";
     // the first condition that reads a pool's price decides the direction: that pool's (0 = the leg's own pool)
     const reads = (checker: number) => checker === CHECK.TICK || checker === CHECK.TRAIL;
-    const dir = (checker: number) => reads(checker) || checker === CHECK.EDGE || checker === CHECK.ORACLE;
+    const dir = (checker: number) => reads(checker) || checker === CHECK.EDGE;
     if (!dir(s.checker) && !(s.combine && dir(s.checker2))) return null;
     const first = reads(s.checker) ? s.checkPool : s.combine && reads(s.checker2) ? s.checkPool2 : null;
     const w = first === null ? c.watch : first ? poolByIndex(first) ?? c.watch : c.own;
@@ -542,7 +540,6 @@ function triggerErrors(c: Ctx, laneId: LaneId, t: Trigger, which: string): strin
     const w = t.poolIndex ? poolByIndex(t.poolIndex) : undefined;
     // the position's own pool is "price reaches a level"; a parked leg may still watch the pool it is parked in
     if (!w || (w.index === c.own.index && c.own.index === c.watch.index)) e.push(`Choose another pool to watch${which}.`);
-    else if (!w.hooked) e.push(`Conditions can only watch pools with the Alucard hook${which}: other pools have no average price.`);
   }
   if (t.kind === "trail") {
     const ok = t.trailPct! > 0 && (laneId === "up" || t.trailPct! < 100) && ticksForMove(t.trailPct!, laneId === "up") <= MAX_TRAIL_TICKS;
@@ -570,8 +567,6 @@ function laneErrors(c: Ctx, id: LaneId, lane: Lane): string[] {
   if (moves && !c.twoLegs) e.push("“Move” needs a place to go: choose a pool or a token to hold.");
   if (moves && lane.actions.length > 1) e.push("“Move” takes everything: remove the other steps.");
   if (c.idle && !moves) e.push("While waiting, the only step is coming back.");
-  if (follows && t.kind !== "leave") e.push("“Follow the price” only works when the first condition is “Leaves range”.");
-  if (follows && t2 && lane.combine === "or") e.push("“Follow the price” needs the price to have left the range: use “and” for the second condition, not “or”.");
   const w = get(lane, "withdraw");
   const leaves = moves || (!!w && (w.pct ?? 0) >= 100 && !has(lane, "readd") && !follows);
   if (!moves) {
@@ -580,6 +575,8 @@ function laneErrors(c: Ctx, id: LaneId, lane: Lane): string[] {
       e.push("Repeating this would fire again straight away, because the range does not move. Turn repeat off or use “Follow the price”.");
     if (t2 && lane.combine === "or" && lane.repeat && t2.kind === "leave" && !follows)
       e.push("With “or”, a repeating “Leaves range” condition would fire again straight away. Use “and”, or turn repeat off.");
+    if (lane.repeat && isPrice(t) && follows)
+      e.push("A repeating price level cannot step when the side follows the price, so it would fire again straight away. Use “Leaves my range”, or turn repeat off.");
     if (t2 && lane.combine === "or" && lane.repeat && isPrice(t2) && follows)
       e.push("With “or” and “Follow the price”, a repeating price level cannot move, so it would fire again straight away. Use “and”, or turn repeat off.");
     const priceLevel = isPrice(t) || isPrice(t2);
@@ -588,7 +585,7 @@ function laneErrors(c: Ctx, id: LaneId, lane: Lane): string[] {
   if ((t.kind === "apr" || t2?.kind === "apr") && !leaves) e.push("“Fees earn less than” is a reason to leave: withdraw everything, or move the money.");
   if (t.kind === "trail" && t2?.kind === "trail") e.push("Only one trailing stop per side.");
   const hold = lane.holdMinutes ?? 0;
-  if (hold && !(Number.isInteger(hold) && hold >= 1 && hold <= MAX_HOLD_MINUTES)) e.push(`The averaging time must be 1 to ${MAX_HOLD_MINUTES} whole minutes.`);
+  if (hold && !(Number.isInteger(hold) && hold >= 1 && hold <= MAX_HOLD_MINUTES)) e.push(`“Only if it lasts” must be 1 to ${MAX_HOLD_MINUTES} whole minutes.`);
   const runs = lane.maxRuns ?? 0;
   if (runs && !lane.repeat && !moves) e.push("A run limit only applies when the side repeats.");
   if (runs && !(Number.isInteger(runs) && runs >= 1 && runs <= MAX_RUNS)) e.push(`The run limit must be 1 to ${MAX_RUNS}.`);
@@ -633,7 +630,7 @@ export function validate(p: Pool, r: Rules, range?: [number, number], opts: { pl
     if (plan.where === "park") {
       const q = plan.parkPool ? poolByIndex(plan.parkPool) : undefined;
       if (!q) out.plan.push("Choose the pool to move into.");
-      else if (!q.hooked || !sharedToken(p, q)) out.plan.push("The other pool must be an Alucard pool that shares a token with this one.");
+      else if (!sharedToken(p, q)) out.plan.push("The other pool must share a token with this one.");
       if (!(ticksForPct(plan.parkWidthPct ?? 0) >= 1)) out.plan.push("Set the range in the other pool.");
       else if (q && alignUp(ticksForPct(plan.parkWidthPct!), q.key.tickSpacing) > MAX_TRAIL_TICKS) out.plan.push("The range in the other pool is too wide.");
     }
@@ -705,8 +702,6 @@ export function describeTrigger(p: Pool, id: LaneId, t: Trigger): string {
       const w = other ?? p;
       return `${w.base.symbol} ${id === "down" ? "drops below" : "rises above"} ${fmt(t.price ?? 0)} ${w.quote.symbol} in ${other?.label ?? "another pool"}`;
     }
-    case "oracle":
-      return `${p.base.symbol} ${id === "down" ? "drops below" : "rises above"} ${fmt(t.price ?? 0)} ${p.quote.symbol} on Chainlink`;
     case "trail": {
       const other = t.poolIndex ? poolByIndex(t.poolIndex) : undefined;
       const b = (other ?? p).base.symbol;
@@ -734,7 +729,7 @@ export function describeWhen(p: Pool, id: LaneId, lane: Lane): string {
   const t = lane.trigger!;
   let when = t.kind === "timer" ? `Every ${every(t.hours ?? 24)}` : `When ${describeTrigger(p, id, t)}`;
   if (lane.trigger2) when += `${lane.combine === "or" ? ", or" : " and"} ${describeSecond(p, id, lane)}`;
-  if (lane.holdMinutes) when += `, on average over ${lane.holdMinutes} min`;
+  if (lane.holdMinutes) when += `, for ${lane.holdMinutes} min in a row`;
   return when;
 }
 
@@ -756,7 +751,7 @@ export function describeAction(p: Pool, a: Action, plan?: PlanB): string {
     case "readd":
       return "put it back into the same range (compound)";
     case "follow":
-      return `move the range next to the new price (${a.widthPct}% wide)`;
+      return `re-centre around the price (±${a.widthPct}%)`;
     case "move": {
       if (!plan) return "move the money";
       const q = plan.where === "park" && plan.parkPool ? poolByIndex(plan.parkPool) : undefined;
@@ -808,7 +803,7 @@ export const TEMPLATES: Template[] = [
       const q = parkable(p)[0];
       if (!q) return null;
       return {
-        down: { trigger: leave(), actions: [{ kind: "move" }], repeat: false, holdMinutes: 10 },
+        down: { trigger: leave(), actions: [{ kind: "move" }], repeat: false },
         up: emptyLane(),
         plan: { where: "park", parkPool: q.index, parkWidthPct: defaultWidthPct(q), returnTo: "same", back: { down: emptyLane(), up: moveLane({ kind: "price", backIn: true, bufferPct: 1 }) } },
       };
@@ -819,8 +814,8 @@ export const TEMPLATES: Template[] = [
     name: "Hold a token, come back on a turn",
     hint: "Out of range: hold one token; come back centred on the price after a 10% turn",
     build: () => ({
-      down: { trigger: leave(), actions: [{ kind: "move", to: "quote" }], repeat: false, holdMinutes: 10 },
-      up: { trigger: leave(), actions: [{ kind: "move", to: "base" }], repeat: false, holdMinutes: 10 },
+      down: { trigger: leave(), actions: [{ kind: "move", to: "quote" }], repeat: false },
+      up: { trigger: leave(), actions: [{ kind: "move", to: "base" }], repeat: false },
       plan: {
         where: "wait",
         returnTo: "recentre",
@@ -843,7 +838,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "confirmedStop",
     name: "Confirmed stop loss",
-    hint: "Exit only if the price stays below the range on average for 30 minutes",
+    hint: "Exit only if the price stays below the range for 30 minutes in a row",
     build: () => ({ down: { trigger: leave(), actions: exitTo("quote"), repeat: false, holdMinutes: 30 }, up: emptyLane() }),
   },
   {
@@ -855,7 +850,7 @@ export const TEMPLATES: Template[] = [
   {
     id: "follow",
     name: "Auto re-range",
-    hint: "Keep moving the range next to the price",
+    hint: "Re-centre the range around the price whenever it leaves",
     build: () => ({
       down: { trigger: leave(1), actions: [{ kind: "follow", widthPct: 5 }], repeat: true },
       up: { trigger: leave(1), actions: [{ kind: "follow", widthPct: 5 }], repeat: true },
@@ -920,8 +915,6 @@ export function defaultTrigger(kind: TriggerKind, p: Pool, lane: LaneId, price: 
       return { kind, price: outside(p, price, range, lane, 5) };
     case "otherPool":
       return { kind, price: lane === "down" ? price * 0.95 : price * 1.05, poolIndex: otherPools[0]?.index ?? p.index };
-    case "oracle":
-      return { kind }; // the editor fills the level in from the Chainlink price once it has read it
     case "trail":
       return { kind, trailPct: 5 };
     case "fees":
@@ -967,7 +960,7 @@ export function createParams(
     tickUpper: range[1],
     ...amounts,
     expiry: expiryOf(adv),
-    maxKeeperFeeBps: Math.min(100, Math.max(0, Math.round(adv.keeperFeeBps))),
+    keeperFeeBps: Math.min(100, Math.max(0, Math.round(adv.keeperFeeBps))),
     maxSlippage: slippageOf(adv),
     lower: enc.lower,
     upper: enc.upper,
@@ -981,5 +974,5 @@ export function createParams(
 /** The argument of ConditionalOrders.updateOrder: new rules for the live leg. */
 export function updateParams(home: Pool, r: Rules, liveIsHome: boolean, adv: Advanced, range?: [number, number]) {
   const enc = encodeLive(home, r, liveIsHome, range);
-  return { expiry: expiryOf(adv), maxKeeperFeeBps: Math.min(100, Math.max(0, Math.round(adv.keeperFeeBps))), maxSlippage: slippageOf(adv), lower: enc.lower, upper: enc.upper };
+  return { expiry: expiryOf(adv), keeperFeeBps: Math.min(100, Math.max(0, Math.round(adv.keeperFeeBps))), maxSlippage: slippageOf(adv), lower: enc.lower, upper: enc.upper };
 }

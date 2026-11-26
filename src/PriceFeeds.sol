@@ -19,16 +19,15 @@ interface ITokenDecimals {
 }
 
 /// @title PriceFeeds: the token list of ConditionalOrders
-/// @notice A token is allowed in an order only when the admin has given it a Chainlink USD price feed here. Native
-/// ETH is the zero address and must be listed too: gas is priced through it. ConditionalOrders reads this contract
-/// for three things: turning a gas cost in wei into a token amount (keeper pay), the USD value of a new order (the
-/// minimum order size), and the Chainlink price of a pair as a tick (the Chainlink condition).
+/// @notice A token is allowed in an order only when the admin has given it a Chainlink USD price feed here (native
+/// ETH is the zero address). ConditionalOrders uses it for one thing: the Chainlink price of a pair as a tick, which a
+/// pool's price must be near for a strategy step to run (Rules.checkPrice). That is what makes the pool's price safe
+/// to act on: pushing it to fire someone's strategy means pushing it away from Chainlink, and then nothing runs.
 ///
-/// No view here reverts on a broken feed: each returns `ok = false`, so an order can never be stuck by a feed.
+/// No view here reverts on a broken feed: each returns `ok = false`.
 ///
-/// Open orders depend on the feeds (Chainlink conditions, keeper pay), so a listed token's feed can only be changed
-/// or removed FEED_DELAY after the change was announced with `queueFeed`. Listing a new token takes effect at once:
-/// no open order uses it yet.
+/// Open orders depend on the feeds, so a listed token's feed can only be changed or removed FEED_DELAY after the change
+/// was announced with `queueFeed`. Listing a new token takes effect at once: no open order uses it yet.
 contract PriceFeeds {
     error NotOwner();
     error BadFeed();
@@ -46,10 +45,8 @@ contract PriceFeeds {
 
     address public owner;
     address public pendingOwner;
-    /// @notice Smallest order createOrder accepts, in USD with 18 decimals. 0 = no minimum.
-    uint256 public minOrderUsd;
-    /// @notice How far (in ticks) a pool's average price may be from the pair's Chainlink price for a rule to run
-    /// (Rules.checkPrice). 0 = not checked. About 100 ticks is 1%.
+    /// @notice How far (in ticks) a pool's price may be from the pair's Chainlink price for a strategy step to run
+    /// (Rules.checkPrice). About 100 ticks is 1%. 0 = not checked (tests only).
     uint24 public maxDeviationTicks;
 
     mapping(address token => Feed) public feeds;
@@ -66,7 +63,6 @@ contract PriceFeeds {
     event FeedSet(address indexed token, address indexed aggregator, uint32 maxAge);
     event FeedRemoved(address indexed token);
     event FeedQueued(address indexed token, address aggregator, uint32 maxAge, uint64 readyAt);
-    event MinOrderUsdSet(uint256 minOrderUsd);
     event MaxDeviationSet(uint24 ticks);
     event OwnerChanged(address indexed owner);
 
@@ -114,7 +110,7 @@ contract PriceFeeds {
 
         if (feeds[token].aggregator == address(0)) _tokens.push(token);
         feeds[token] = Feed(aggregator, maxAge, feedDecimals, tokenDecimals);
-        (bool ok,) = _price(feeds[token], true);
+        (bool ok,) = _price(feeds[token]);
         if (!ok) revert BadFeed();
         emit FeedSet(token, aggregator, maxAge);
     }
@@ -131,11 +127,6 @@ contract PriceFeeds {
             }
         }
         emit FeedRemoved(token);
-    }
-
-    function setMinOrderUsd(uint256 usd) external onlyOwner {
-        minOrderUsd = usd;
-        emit MinOrderUsdSet(usd);
     }
 
     function setMaxDeviationTicks(uint24 ticks) external onlyOwner {
@@ -170,35 +161,8 @@ contract PriceFeeds {
     /// the feed fails, the answer is not positive, or it is older than the feed's maxAge.
     function priceOf(address token) external view returns (bool ok, uint256 price, uint8 decimals) {
         Feed memory f = feeds[token];
-        (ok, price) = _price(f, true);
+        (ok, price) = _price(f);
         decimals = f.feedDecimals;
-    }
-
-    /// @notice `weiAmount` of native ETH expressed in `token` (raw units), at the feeds' last prices. Used for keeper
-    /// pay, which is capped by the order anyway, so an old price is still used: it is closer to the gas cost than
-    /// no price at all. `ok` is false only when one of the two feeds has no positive answer.
-    function quote(address token, uint256 weiAmount) external view returns (bool ok, uint256 amount) {
-        if (token == address(0)) return (true, weiAmount);
-        Feed memory ft = feeds[token];
-        Feed memory fe = feeds[address(0)];
-        (bool okT, uint256 pT) = _price(ft, false);
-        (bool okE, uint256 pE) = _price(fe, false);
-        if (!okT || !okE || weiAmount > type(uint96).max) return (false, 0);
-        // wei x (USD per ETH) / (USD per token), then from 18 decimals to the token's. Prices and the amount are
-        // below 2^96, so neither step can overflow.
-        uint256 inToken18 = FullMath.mulDiv(weiAmount, pE * 10 ** ft.feedDecimals, pT * 10 ** fe.feedDecimals);
-        return (true, FullMath.mulDiv(inToken18, 10 ** ft.tokenDecimals, 1e18));
-    }
-
-    /// @notice USD value (18 decimals) of `amount` raw units of `token`, from a fresh price.
-    function usdValue(address token, uint256 amount) external view returns (bool ok, uint256 usd) {
-        Feed memory f = feeds[token];
-        (bool okP, uint256 p) = _price(f, true);
-        if (!okP) return (false, 0);
-        uint256 scale = p * 1e18;
-        uint256 div = 10 ** (uint256(f.feedDecimals) + f.tokenDecimals);
-        if (amount / div >= type(uint256).max / scale) return (false, 0); // too large to express
-        return (true, FullMath.mulDiv(amount, scale, div));
     }
 
     /// @notice The Chainlink price of token1 per token0 as a Uniswap tick (raw units, like a pool of the two).
@@ -206,8 +170,8 @@ contract PriceFeeds {
     function pairTick(address token0, address token1) external view returns (bool ok, int24 tick) {
         Feed memory f0 = feeds[token0];
         Feed memory f1 = feeds[token1];
-        (bool ok0, uint256 p0) = _price(f0, true);
-        (bool ok1, uint256 p1) = _price(f1, true);
+        (bool ok0, uint256 p0) = _price(f0);
+        (bool ok1, uint256 p1) = _price(f1);
         if (!ok0 || !ok1) return (false, 0);
 
         // token1 per token0 in raw units = (p0 / p1) x 10^(decimals1 - decimals0), each price scaled by its feed
@@ -220,15 +184,15 @@ contract PriceFeeds {
         return (true, TickMath.getTickAtSqrtPrice(uint160(sqrtPriceX96)));
     }
 
-    /// @dev Last answer of a feed. Never reverts. `fresh` also requires the answer to be within maxAge. Answers of
+    /// @dev Last answer of a feed, if positive and within maxAge. Never reverts. Answers of
     /// 2^96 or more are refused so the arithmetic above cannot overflow.
-    function _price(Feed memory f, bool fresh) internal view returns (bool ok, uint256 price) {
+    function _price(Feed memory f) internal view returns (bool ok, uint256 price) {
         if (f.aggregator == address(0)) return (false, 0);
         try IAggregator(f.aggregator).latestRoundData() returns (
             uint80, int256 answer, uint256, uint256 updatedAt, uint80
         ) {
             if (answer <= 0 || uint256(answer) > type(uint96).max) return (false, 0);
-            if (fresh && (updatedAt > block.timestamp || block.timestamp - updatedAt > f.maxAge)) return (false, 0);
+            if (updatedAt > block.timestamp || block.timestamp - updatedAt > f.maxAge) return (false, 0);
             return (true, uint256(answer));
         } catch {
             return (false, 0);

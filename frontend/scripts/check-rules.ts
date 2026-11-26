@@ -68,8 +68,8 @@ async function main() {
       ["leave AND 6h since last run", { down: { trigger: { kind: "leave", bufferPct: 1 }, trigger2: { kind: "timer", hours: 6 }, combine: "and", actions: [{ kind: "withdraw", pct: 100 }], repeat: false }, up: off() }],
       ["price OR daily, 3 runs", { down: off(), up: { trigger: { kind: "price", price: price * 1.03 }, trigger2: { kind: "timer", hours: 24 }, combine: "or", actions: [{ kind: "withdraw", pct: 20 }], repeat: true, stepPct: 3, maxRuns: 3 } }],
       ["trail AND 1h, averaged 15 min", { down: off(), up: { trigger: { kind: "trail", trailPct: 4 }, trigger2: { kind: "timer", hours: 1 }, combine: "and", actions: [{ kind: "withdraw", pct: 100 }], repeat: false, holdMinutes: 15 } }],
-      ["Chainlink stop, converts", { down: { trigger: { kind: "oracle", price: price * 0.95 }, actions: [{ kind: "withdraw", pct: 100 }, { kind: "convert", to: "quote" }], repeat: false }, up: off() }],
-      ["Chainlink ladder, 4 runs", { down: off(), up: { trigger: { kind: "oracle", price: price * 1.03 }, actions: [{ kind: "withdraw", pct: 25 }], repeat: true, stepPct: 3, maxRuns: 4 } }],
+      ["stop, converts, held 30 min", { down: { trigger: { kind: "price", price: price * 0.95 }, actions: [{ kind: "withdraw", pct: 100 }, { kind: "convert", to: "quote" }], repeat: false, holdMinutes: 30 }, up: off() }],
+      ["re-centre ±3% on leaving, repeats", { down: { trigger: { kind: "leave" }, actions: [{ kind: "follow", widthPct: 3 }], repeat: true }, up: { trigger: { kind: "leave" }, actions: [{ kind: "follow", widthPct: 3 }], repeat: true } }],
       ["fees 1% then send out", { down: off(), up: { trigger: { kind: "fees", feesPct: 1 }, actions: [{ kind: "collect" }], repeat: true } }],
       ["wait in quote, back on a level, 2 runs", { down: { trigger: { kind: "leave" }, actions: [{ kind: "move", to: "quote" }], repeat: false, maxRuns: 2 }, up: off(), plan: { where: "wait", returnTo: "same", back: { down: off(), up: move({ kind: "price", price: low }) } } }],
       ["wait as is, back after 6h", { down: off(), up: { trigger: { kind: "leave" }, actions: [{ kind: "move" }], repeat: false }, plan: { where: "wait", returnTo: "recentre", back: { down: move({ kind: "timer", hours: 6 }), up: off() } } }],
@@ -95,7 +95,7 @@ async function main() {
           ...c,
           account: FROM,
           functionName: "createOrder",
-          args: [createParams(pool, range, { liquidity: BigInt(Math.floor(L * 0.999)), amount0Max: max0, amount1Max: max1 }, { keeperFeeBps: 10, slippagePct: 1, expiryDays: 1 }, rules)],
+          args: [createParams(pool, range, { liquidity: BigInt(Math.floor(L * 0.999)), amount0Max: max0, amount1Max: max1 }, { keeperFeeBps: 10, slippagePct: 1, expiryDays: 30 }, rules)],
           value: pool.token0.native ? max0 : 0n,
         });
         // what the contract would store, decoded and encoded again, must be the same words

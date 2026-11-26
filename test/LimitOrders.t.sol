@@ -206,7 +206,7 @@ contract LimitOrdersTest is RuleSetup {
         p.tickLower = -120;
         p.tickUpper = 120;
         p.liquidity = 150e18;
-        p.maxKeeperFeeBps = 10;
+        p.keeperFeeBps = 10;
         p.maxSlippage = 100; // 1,000 ticks
         vm.prank(bob);
         uint256 orderId = orders.createOrder(p);

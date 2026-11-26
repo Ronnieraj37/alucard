@@ -15,7 +15,7 @@ Two audiences, equally important:
 
 ## Product Purpose
 
-Alucard runs the LP's own strategy on a Uniswap v4 position: conditions (pool price, another pool's price, Chainlink price, time, fees earned, fee rate, trailing, averaged over a hold) and steps (move everything into any other pool sharing a token and come back by the LP's own rule, withdraw, swap to one token, follow the price, compound, repeat). Any keeper can run a step on-chain when its condition holds and is paid per run from the position, never above the owner's cap. The money stays inside Uniswap v4 until the owner withdraws. Alucard is not a strategy maker: it does not pick, rate or promise returns for strategies; it gives more options and runs them faithfully. Success: an LP builds their strategy in a minute, replays it on history, and it runs exactly as the replay said.
+Alucard runs the LP's own strategy on a Uniswap v4 position: conditions (pool price, another pool's price, time, fees earned, fee rate, trailing, true for N minutes) and steps (move everything into any other pool sharing a token and come back by the LP's own rule, withdraw, swap to one token, follow the price, compound, repeat). A pool's price counts only near Chainlink's, so nobody can push a pool to fire a strategy; strategies work on any v4 pool of listed tokens. Any keeper can run a step on-chain when its condition holds and is paid the owner's keeper fee. The money stays inside Uniswap v4 until the owner withdraws. Alucard is not a strategy maker: it does not pick, rate or promise returns for strategies; it gives more options and runs them faithfully. Success: an LP builds their strategy in a minute, replays it on history, and it runs exactly as the replay said.
 
 ## Positioning
 
@@ -43,7 +43,7 @@ Alucard runs the LP's own strategy on a Uniswap v4 position: conditions (pool pr
 
 ## Evidence on Hand
 
-- 150 Foundry tests (81% of branches), 39,146 editor-vs-contract parity cases with 0 mismatches, 2,000 engine-vs-contract replays identical, every template dry-run against Sepolia.
+- 134 Foundry tests, 35,126 editor-vs-contract parity cases with 0 mismatches, 2,000 engine-vs-contract replays identical, every template dry-run against Sepolia, an end-to-end market test on a fork.
 - Live Sepolia deployment (addresses in `deployments/`).
 - No users, testimonials, TVL or partners yet: never invent them.
 

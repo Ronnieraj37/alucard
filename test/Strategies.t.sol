@@ -32,7 +32,7 @@ contract StrategiesTest is RuleSetup {
         usdcIs0InStable = currency1 < currency2;
         (Currency a, Currency b) = usdcIs0InStable ? (currency1, currency2) : (currency2, currency1);
         stable = _newPool(a, b, Constants.SQRT_PRICE_1_1);
-        stableIndex = hook.poolIndexOf(stable.toId());
+        stableIndex = rules.poolIndexOf(stable.toId());
         _wait(1 hours);
     }
 
@@ -94,10 +94,11 @@ contract StrategiesTest is RuleSetup {
         _swap(false, 2e18);
         _settle();
         assertGe(_avg(), low + 300);
+        int24 before = _tick(); // the new range is centred on the price before the run's own swap
         _run(id, true);
         assertEq(_kind(id), OrderState.LEG_CENTERED);
         (OrderState.Side memory lo2, OrderState.Side memory up2) = _state(id);
-        int24 mid = _avg() < 0 && _avg() % 60 != 0 ? (_avg() / 60 - 1) * 60 : (_avg() / 60) * 60;
+        int24 mid = before < 0 && before % 60 != 0 ? (before / 60 - 1) * 60 : (before / 60) * 60;
         assertEq(lo2.edge, mid - 600);
         assertEq(up2.edge, mid + 600);
         assertGt(_liquidity(id), 0);
@@ -154,7 +155,7 @@ contract StrategiesTest is RuleSetup {
 
         ConditionalOrders.UpdateParams memory u = ConditionalOrders.UpdateParams({
             expiry: uint32(_now() + 7 days),
-            maxKeeperFeeBps: 100,
+            keeperFeeBps: 100,
             maxSlippage: 50,
             lower: 0,
             upper: _w(_exit(OrderState.CHECK_TIME, 5))
@@ -237,18 +238,20 @@ contract StrategiesTest is RuleSetup {
         assertEq(lo.checker, OrderState.CHECK_EDGE);
     }
 
-    /// In a crash the price of the moment is far below the average; selling there would be past the slippage limit.
-    /// The move waits (the position stays where it is) and runs once the average has caught up.
-    function test_moveWaitsWhenItsSwapIsPastTheLimit() public {
+    /// The pool's price far from Chainlink (pushed, or a pool not yet arbitraged after a crash): the move waits, the
+    /// position stays where it is, and it runs once the two agree again.
+    function test_moveWaitsWhilePoolAndChainlinkDisagree() public {
+        _band(200);
         uint256 id = _park();
         _swap(true, 5e18);
+        _market();
         _settle();
-        _swap(true, 20e18); // a crash in this block: far past the 5% limit
-        vm.expectRevert(Rules.PriceMoved.selector);
+        _swap(true, 20e18); // far past Chainlink
+        vm.expectRevert(ConditionalOrders.ConditionNotMet.selector);
         _run(id, false);
         assertEq(orders.getOrder(id).poolIndex, 1);
 
-        _settle(); // the average catches up
+        _market(); // the market follows
         _run(id, false);
         assertEq(orders.getOrder(id).poolIndex, stableIndex);
         assertGt(_liquidity(id), 0);
@@ -268,11 +271,10 @@ contract StrategiesTest is RuleSetup {
         assertGt(bps, 0);
     }
 
-    /// Parking keeps the money's value: in deep pools, what arrives in the stable pool plus what is paid back to the
-    /// owner is worth what left the range less the 0.3% swap fee (the stable pool's own swap is a few bps more).
-    /// What is paid back is mostly the unused part of the keeper's ceiling: it is set aside before the move and
-    /// returned to the wallet, not into the parked position. (In a thin pool the sale also moves the price; the
-    /// order's slippage limit caps that, see test_moveWaitsWhenItsSwapIsPastTheLimit.)
+    /// A move keeps the money's value: in deep pools, what arrives in the other pool (plus the little change paid
+    /// back) is worth what left the range less the 0.3% swap fee (the stable pool's own swap a few bps more) and the
+    /// keeper's fee (1% here), and the keeper gets exactly that fee. (In a thin pool the sale also moves the price;
+    /// the order's slippage limit caps that.)
     function test_parkingKeepsTheValue() public {
         uint256 id = _park();
         _swap(true, 5e18);
@@ -287,15 +289,18 @@ contract StrategiesTest is RuleSetup {
         uint256 w0 = _bal(currency0, alice);
         uint256 w1 = _bal(currency1, alice);
         uint256 w2 = _bal(currency2, alice);
+        uint256 k1 = _bal(currency1, keeper);
 
         _run(id, false);
+        uint256 fee = _bal(currency1, keeper) - k1; // paid in USDC, the token the sale produced
         (uint256 s0, uint256 s1) = rules.orderAmounts(orders, id);
         uint256 parked = s0 + s1; // both stablecoins are worth 1 token1
         uint256 paidBack =
             (_bal(currency1, alice) - w1) + (_bal(currency2, alice) - w2) + _in1(_bal(currency0, alice) - w0, sqrtP);
-        assertGe((parked + paidBack) * 10_000, before * 9_960, "lost more than the fees");
-        assertLe(parked + paidBack, before, "value from nowhere");
-        assertLe(paidBack * 10_000, before * 130, "more than the keeper ceiling (1%) and swap change left the strategy");
+        assertApproxEqRel(fee, before / 100, 0.01e18, "the keeper's fee is 1% of what moved");
+        assertGe((parked + paidBack + fee) * 10_000, before * 9_960, "lost more than the swap fees");
+        assertLe(parked + paidBack + fee, before, "value from nowhere");
+        assertLe(paidBack * 10_000, before * 30, "more than the swap's change left the strategy");
     }
 
     function _in1(uint256 amount0, uint160 sqrtP) internal pure returns (uint256) {
@@ -305,8 +310,10 @@ contract StrategiesTest is RuleSetup {
     /// The pool a move goes into must be at a believable price too: a pushed USDC/USDT price would set the new
     /// range and the swap there.
     function test_noMoveIntoAPushedPool() public {
+        _band(200);
         uint256 id = _park();
         _swap(true, 5e18);
+        _market();
         _settle();
         _swapIn(stable, true, 3e18); // the stable pool pushed off its peg in this block
         vm.expectRevert(Rules.PriceMoved.selector);

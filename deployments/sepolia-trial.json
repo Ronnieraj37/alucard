@@ -7,8 +7,8 @@
   "F_nativeTakeProfit": 6,
   "limitBuy": 2,
   "limitSell": 1,
-  "startTickEth": -202015,
-  "startTickNoHook": -198880,
-  "startTickWbtc": 64074,
-  "startTickWeth": -202015
+  "startTickEth": -201911,
+  "startTickNoHook": -201911,
+  "startTickWbtc": 64098,
+  "startTickWeth": -201911
 }

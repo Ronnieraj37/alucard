@@ -68,42 +68,17 @@ contract FeedsTest is Test {
         assertFalse(ok);
         (ok,) = feeds.pairTick(address(0), address(usdcToken));
         assertFalse(ok);
-        (ok,) = feeds.usdValue(address(0), 1 ether);
-        assertFalse(ok);
     }
 
     function test_anUnlistedTokenHasNoPrice() public view {
         (bool ok,,) = feeds.priceOf(address(wbtcToken));
         assertFalse(ok);
-        (ok,) = feeds.quote(address(wbtcToken), 1 ether);
+        (ok,) = feeds.pairTick(address(wbtcToken), address(usdcToken));
         assertFalse(ok);
         assertFalse(feeds.isListed(address(wbtcToken)));
     }
 
     // ---------------------------------------------------------------- the numbers
-
-    /// 1 ETH at $2,000 is 2,000 USDC (6 decimals). Keeper pay uses this, and an old price is fine there (capped).
-    function test_quoteConvertsGasIntoTokens() public {
-        (bool ok, uint256 amount) = feeds.quote(address(usdcToken), 1 ether);
-        assertTrue(ok);
-        assertEq(amount, 2000e6);
-        vm.warp(block.timestamp + 2 days);
-        (ok, amount) = feeds.quote(address(usdcToken), 1 ether);
-        assertTrue(ok);
-        assertEq(amount, 2000e6);
-        (ok, amount) = feeds.quote(address(0), 123);
-        assertTrue(ok);
-        assertEq(amount, 123);
-    }
-
-    function test_usdValueKnowsTheDecimals() public view {
-        (bool ok, uint256 usd) = feeds.usdValue(address(usdcToken), 5e6);
-        assertTrue(ok);
-        assertEq(usd, 5e18);
-        (ok, usd) = feeds.usdValue(address(0), 0.5 ether);
-        assertTrue(ok);
-        assertEq(usd, 1000e18);
-    }
 
     /// ETH (18 decimals) against USDC (6): 2,000 USDC per ETH is 2000e6 / 1e18 raw, which is tick -198_082ish, the
     /// tick of a real ETH/USDC pool at that price.
@@ -177,7 +152,7 @@ contract FeedsTest is Test {
         vm.expectRevert(PriceFeeds.NotOwner.selector);
         feeds.queueFeed(address(0), address(0), 1 hours);
         vm.expectRevert(PriceFeeds.NotOwner.selector);
-        feeds.setMinOrderUsd(1);
+        feeds.setMaxDeviationTicks(1);
         vm.expectRevert(PriceFeeds.NotOwner.selector);
         feeds.transferOwnership(address(0xBAD));
         vm.stopPrank();

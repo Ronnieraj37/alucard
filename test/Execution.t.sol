@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {RuleSetup} from "./utils/RuleSetup.sol";
+import {Rules} from "../src/Rules.sol";
 import {ConditionalOrders} from "../src/ConditionalOrders.sol";
 import {OrderState} from "../src/libraries/OrderState.sol";
 
@@ -44,7 +45,7 @@ contract ExecutionTest is RuleSetup {
         _wait(1 hours);
         ConditionalOrders.UpdateParams memory u = ConditionalOrders.UpdateParams({
             expiry: uint32(_now() + 7 days),
-            maxKeeperFeeBps: 50,
+            keeperFeeBps: 50,
             maxSlippage: 20,
             lower: _w(_exit(OrderState.CHECK_TICK, -900)),
             upper: _w(_exit(OrderState.CHECK_EDGE, 0))
@@ -56,7 +57,7 @@ contract ExecutionTest is RuleSetup {
         assertEq(lo.edge, -600);
         assertEq(up.edge, 600);
         assertEq(lo.lastRun, before.lastRun);
-        assertEq(orders.getOrder(id).maxKeeperFeeBps, 50);
+        assertEq(orders.getOrder(id).keeperFeeBps, 50);
 
         vm.expectRevert(ConditionalOrders.NotOwner.selector);
         orders.updateOrder(id, u);
@@ -161,22 +162,23 @@ contract ExecutionTest is RuleSetup {
         assertTrue(_closed(id));
     }
 
-    /// The position follows the price up: each time it leaves the top, it is put back just below the new price.
+    /// The position follows the price up: each time it leaves the top, it is re-centred around the new price.
     function test_followThePriceUp() public {
         OrderState.Side memory f = _exit(OrderState.CHECK_EDGE, 60);
         f.actions |= OrderState.ACT_ADD;
-        f.addMode = OrderState.ADD_ONE_SIDED;
-        f.shape = 5; // 5 spacings below the price
+        f.addMode = OrderState.ADD_CENTERED;
+        f.shape = 5 | (5 << 11); // 5 spacings below and above the price
         f.repeat = true;
         uint256 id = _create(_off(), f);
 
         _swap(false, 5e18);
         _settle();
+        int24 before = _tick();
         _run(id, true);
         (OrderState.Side memory lo, OrderState.Side memory up) = _state(id);
-        int24 avg = _avg();
-        assertEq(up.edge, (avg / 60) * 60);
-        assertEq(lo.edge, up.edge - 300);
+        int24 mid = (before / 60) * 60; // the price before the run, rounded down to the spacing (it is above zero)
+        assertEq(lo.edge, mid - 300);
+        assertEq(up.edge, mid + 300);
         assertGt(_liquidity(id), 0);
 
         _swap(false, 3e18);
@@ -209,15 +211,12 @@ contract ExecutionTest is RuleSetup {
         assertTrue(_closed(id));
     }
 
-    /// Chainlink condition: fires on the feed's price of the pair, whatever the pool says.
-    function test_chainlinkLevel() public {
-        uint256 id = _create(_exit(OrderState.CHECK_ORACLE, -500), _off());
-        _wait(2 minutes);
-        vm.expectRevert(ConditionalOrders.ConditionNotMet.selector);
-        _run(id, false);
-        feed0.setAnswer(0.9e8); // token0 falls 10% on Chainlink: about -1054 ticks
-        _run(id, false);
-        assertTrue(_closed(id));
+    /// The Chainlink condition is retired: every pool condition is already checked against Chainlink.
+    function test_theRetiredChainlinkConditionIsRefused() public {
+        ConditionalOrders.CreateParams memory p = _params(_exit(5, -500), _off());
+        vm.prank(alice);
+        vm.expectRevert(Rules.InvalidSide.selector);
+        orders.createOrder(p);
     }
 
     // ---------------------------------------------------------------- general
@@ -240,12 +239,13 @@ contract ExecutionTest is RuleSetup {
     }
 
     function test_canExecuteMatchesExecute() public {
+        _band(200);
         uint256 id = _create(_exit(OrderState.CHECK_EDGE, 0), _off());
         _wait(2 minutes);
         assertFalse(rules.canExecute(orders, id, false));
         _swap(true, 5e18);
-        assertFalse(rules.canExecute(orders, id, false)); // the price of the moment is not enough
-        _settle();
+        assertFalse(rules.canExecute(orders, id, false)); // a price Chainlink does not confirm is not enough
+        _market();
         assertTrue(rules.canExecute(orders, id, false));
         _run(id, false);
         assertFalse(rules.canExecute(orders, id, false));

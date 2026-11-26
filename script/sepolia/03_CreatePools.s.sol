@@ -18,6 +18,7 @@ import {FixedPointMathLib} from "solmate/src/utils/FixedPointMathLib.sol";
 
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {RuleHook} from "../../src/RuleHook.sol";
+import {Rules} from "../../src/Rules.sol";
 
 interface IFeed {
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80);
@@ -42,6 +43,7 @@ contract CreatePools is Script {
     IPositionManager posm;
     IPermit2 permit2;
     RuleHook hook;
+    Rules rules;
     address me;
     string poolsJson;
     uint256 poolCount;
@@ -54,6 +56,7 @@ contract CreatePools is Script {
         posm = IPositionManager(vm.parseJsonAddress(core, ".positionManager"));
         permit2 = IPermit2(vm.parseJsonAddress(core, ".permit2"));
         hook = RuleHook(vm.parseJsonAddress(core, ".ruleHook"));
+        rules = Rules(vm.parseJsonAddress(core, ".rules"));
 
         // Chainlink feeds on Sepolia (8 decimals). There is no USDT feed there: USDT is priced at $1.
         uint256 ethUsd = _feed(0x694AA1769357215DE4FAC081bf1f309aDC325306);
@@ -124,12 +127,12 @@ contract CreatePools is Script {
         (uint160 existing,,,) = poolManager.getSlot0(key.toId());
         if (existing != 0) {
             require(!sp.hooked, "hook pool already exists");
-            hook.registerPool(key);
+            rules.registerPool(key);
             _record(sp.name, key);
             return;
         }
         int24 tick = poolManager.initialize(key, sqrtP);
-        if (!sp.hooked) hook.registerPool(key);
+        rules.registerPool(key); // strategies can use every pool, hooked or not
 
         if (sp.usd1 > 0) _add(key, t0, t1, sqrtP, _range(tick, sp.w1, sp.spacing), sp.usd1);
         if (sp.usd2 > 0) _add(key, t0, t1, sqrtP, _range(tick, sp.w2, sp.spacing), sp.usd2);
@@ -143,9 +146,9 @@ contract CreatePools is Script {
         vm.serializeInt(name, "tickSpacing", key.tickSpacing);
         vm.serializeAddress(name, "hooks", address(key.hooks));
         vm.serializeBytes32(name, "poolId", PoolId.unwrap(key.toId()));
-        string memory out = vm.serializeUint(name, "poolIndex", hook.poolIndexOf(key.toId()));
+        string memory out = vm.serializeUint(name, "poolIndex", rules.poolIndexOf(key.toId()));
         poolsJson = vm.serializeString("pools", name, out);
-        console.log(name, hook.poolIndexOf(key.toId()));
+        console.log(name, rules.poolIndexOf(key.toId()));
     }
 
     function _range(int24 tick, int24 halfWidth, int24 s) internal pure returns (int24[2] memory r) {

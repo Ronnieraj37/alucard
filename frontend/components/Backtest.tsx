@@ -51,10 +51,6 @@ const HISTORY = [
   { key: "eth_usdc_030", label: "Mainnet ETH/USDC 0.30%", hint: "96k real swaps" },
   { key: "eth_usdc_005", label: "Mainnet ETH/USDC 0.05%", hint: "1M real swaps" },
 ];
-const CHAINS = [
-  { id: "unichain", label: "Unichain", cost: 0.01, hint: "~$0.01 a run" },
-  { id: "ethereum", label: "Ethereum", cost: 1, hint: "~$1 a run" },
-];
 // recorded window: 2026-04-05 to 2026-10-03 (lp_study)
 const DATA_START = 1775347200;
 // our pools: the last 180 days, ending at the last full hour (so a repeated backtest within the hour is cached)
@@ -92,12 +88,11 @@ export default function Backtest({
   }, [own, days]);
   const [allWindows, setAllWindows] = useState(false);
   const [deposit, setDeposit] = useState(10_000);
-  const [chain, setChain] = useState(CHAINS[0]);
 
   const ethLike = pool.base.symbol === "WETH" || pool.base.symbol === "ETH";
 
   const q = useQuery({
-    queryKey: ["backtest", history, pool.index, dataStart, days, startMonth, allWindows, deposit, chain.id, JSON.stringify(rules), JSON.stringify(range), JSON.stringify(advanced)],
+    queryKey: ["backtest", history, pool.index, dataStart, days, startMonth, allWindows, deposit, JSON.stringify(rules), JSON.stringify(range), JSON.stringify(advanced)],
     staleTime: Infinity,
     queryFn: async () => {
       // The engine runs the exact order the contract would get (encodeRules), made at today's price. It moves the
@@ -139,7 +134,6 @@ export default function Backtest({
         keeperFeeBps: advanced.keeperFeeBps,
         slippagePct: advanced.slippagePct,
         delaySec: 12,
-        keeperCostUsd: chain.cost,
         ...(allWindows ? { mode: "windows", windowDays: 30, everyDays: 7 } : {}),
       };
       const res = await fetch(`/api/backtest?q=${encode(req)}`);
@@ -213,9 +207,6 @@ export default function Backtest({
                   onChange={(e) => setDeposit(Math.max(100, Number(e.target.value.replace(/\D/g, "")) || 0))}
                 />
               </div>
-            </Control>
-            <Control label="Gas per run">
-              <Seg value={chain.id} onChange={(v) => setChain(CHAINS.find((c) => c.id === v)!)} items={CHAINS.map((c) => ({ id: c.id, label: c.label, title: c.hint }))} />
             </Control>
           </div>
 

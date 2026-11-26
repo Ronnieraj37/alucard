@@ -73,7 +73,7 @@ const orient = (baseIs0: boolean) => {
     POOLS.length,
     OWN,
     mk(2, T0, T1, 500, 10, true, a, b, baseIs0), // #2: a hook pool of the same pair
-    mk(3, T0, T1, 100, 1, false, a, b, baseIs0), // #3: a hookless pool of the same pair (registered, no average)
+    mk(3, T0, T1, 100, 1, false, a, b, baseIs0), // #3: a hookless pool of the same pair (any pool can be used)
     PARK,
   );
 };
@@ -90,8 +90,7 @@ function triggersFor(lane: "down" | "up"): Trigger[] {
     { kind: "leave", bufferPct: 1.5 },
     { kind: "price", price: down ? 0.97 : 1.03 },
     { kind: "otherPool", poolIndex: 2, price: down ? 0.96 : 1.04 },
-    { kind: "otherPool", poolIndex: 3, price: down ? 0.96 : 1.04 }, // no average: refused by both
-    { kind: "oracle", price: down ? 0.95 : 1.05 },
+    { kind: "otherPool", poolIndex: 3, price: down ? 0.96 : 1.04 }, // a hookless pool: any pool can be watched
     { kind: "timer", hours: 1 },
     { kind: "trail", trailPct: 3 },
     { kind: "fees", feesPct: 0.5 },
@@ -202,7 +201,7 @@ function condInDomain(checker: number, value: number, pool: number): boolean {
   if (checker === 2) return Math.abs(value) < 887_272; // any pool: the editor and the contract decide
   if (checker === 3) return value >= 1 && pool === 0;
   if (checker === 4) return value >= 1 && value <= 92_108;
-  if (checker === 5) return Math.abs(value) < 887_272 && pool === 0;
+  // 5 (the retired Chainlink condition) is outside the domain: the contract refuses it, the editor never builds it
   if (checker === 6) return value >= 1 && value <= 10_000 && pool === 0;
   if (checker === 7) return value >= 1 && pool === 0;
   return false;
@@ -217,8 +216,6 @@ function sidesInDomain(words: bigint[]): boolean {
     if (encodeSide(s) !== w) return false; // not canonical
     if (s.checker !== 0 && !condInDomain(s.checker, s.value, s.checkPool)) return false;
     if (s.combine !== 0 && !condInDomain(s.checker2, s.value2, s.checkPool2)) return false;
-    const follows = (s.actions & 8) !== 0 && s.addMode === 1;
-    if (follows && s.repeat && s.checker === 1 && s.value < OWN.key.tickSpacing) return false;
   }
   return true;
 }

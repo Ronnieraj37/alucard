@@ -21,7 +21,7 @@ import {MockAggregator} from "../src/testnet/MockAggregator.sol";
 
 /// @notice The contract, the app's rule editor and the backtest engine agree on every order.
 ///
-/// 1. Acceptance: frontend/scripts/parity.ts builds every strategy the editor's blocks can make (plan B included),
+/// 1. Acceptance: frontend/scripts/parity.ts builds every strategy the editor's cards can make (moves included),
 ///    plus thousands of other encodings (mutations of real orders: their sides and their legs). The editor's own code
 ///    decides which ones it can build. The contract must accept exactly those and revert on all others.
 /// 2. Behaviour: for a sample of those orders on four synthetic price paths, the backtest engine
@@ -33,7 +33,7 @@ contract EditorParityTest is RuleSetup {
     using StateLibrary for IPoolManager;
 
     PoolSwapTest swapper;
-    MockAggregator oracle0; // token0's Chainlink price, moved together with the pool's price in the replay
+    MockAggregator oracle0; // token0's Chainlink price: it follows the pool's price in the replay, as arbitrage would
 
     function setUp() public override {
         super.setUp();
@@ -50,18 +50,20 @@ contract EditorParityTest is RuleSetup {
         MockERC20(Currency.unwrap(currency1)).approve(address(swapper), type(uint256).max);
         // the pools scripts/parity.ts assumes:
         // #2 a hook pool of the same pair, #3 a hookless pool of the same pair, #4 a hook pool of token1 and token2
-        poolManager.initialize(PoolKey(currency0, currency1, 500, 10, IHooks(hook)), Constants.SQRT_PRICE_1_1);
+        PoolKey memory two = PoolKey(currency0, currency1, 500, 10, IHooks(hook));
+        poolManager.initialize(two, Constants.SQRT_PRICE_1_1);
+        require(rules.registerPool(two) == 2, "pool #2");
         PoolKey memory bare = PoolKey(currency0, currency1, 100, 1, IHooks(address(0)));
         poolManager.initialize(bare, Constants.SQRT_PRICE_1_1);
-        require(hook.registerPool(bare) == 3, "pool #3");
+        require(rules.registerPool(bare) == 3, "pool #3");
         MockERC20 t2 = deployToken();
         while (address(t2) < Currency.unwrap(currency1)) t2 = deployToken(); // above token1, as the script assumes
         feeds.setFeed(address(t2), address(new MockAggregator(8, 1e8)), MAX_AGE);
-        poolManager.initialize(
-            PoolKey(currency1, Currency.wrap(address(t2)), 100, 1, IHooks(hook)), Constants.SQRT_PRICE_1_1
-        );
-        require(hook.poolCount() == 4, "pool #4");
-        _wait(1 hours); // average prices for the new pools
+        PoolKey memory four = PoolKey(currency1, Currency.wrap(address(t2)), 100, 1, IHooks(hook));
+        poolManager.initialize(four, Constants.SQRT_PRICE_1_1);
+        require(rules.registerPool(four) == 4, "pool #4");
+        // the Chainlink band stays off here (conditions also read pools #2-#4, whose feeds do not follow the replay);
+        // test/PriceGuard.t.sol tests the band
     }
 
     function _ffi(string memory args) internal returns (bytes memory) {
@@ -109,7 +111,7 @@ contract EditorParityTest is RuleSetup {
         p.amount0Max = type(uint128).max;
         p.amount1Max = type(uint128).max;
         p.expiry = uint32(_now() + 365 days);
-        p.maxKeeperFeeBps = 10;
+        p.keeperFeeBps = 10;
         p.maxSlippage = 50;
         p.lower = c.lower[i];
         p.upper = c.upper[i];
@@ -121,7 +123,6 @@ contract EditorParityTest is RuleSetup {
 
     function test_contractAcceptsExactlyWhatTheEditorBuilds() public {
         vm.pauseGasMetering();
-        feeds.setMinOrderUsd(0);
         uint256 total = abi.decode(_ffi("count"), (uint256));
         uint256 accepted;
         uint256 wrongAccept;
@@ -205,8 +206,8 @@ contract EditorParityTest is RuleSetup {
     /// Move the price to a point strictly inside tick `t`, as the synthetic path does (no swap if it is already there).
     function _moveTo(int24 t) internal {
         uint160 target = uint160((uint256(TickMath.getSqrtPriceAtTick(t)) + TickMath.getSqrtPriceAtTick(t + 1)) / 2);
-        // the engine has no Chainlink history and reads the pool's price for a Chainlink level, so the feed follows
-        // the pool here: token1 is $1 and token0 is the pool's price
+        // arbitrage keeps the pool on the Chainlink price: here the feed follows the pool (token1 is $1, token0 the
+        // pool's price), so the band check runs on every step and always passes
         oracle0.setAnswer(int256(FullMath.mulDiv(FullMath.mulDiv(target, target, 1 << 96), 1e18, 1 << 96)));
         (uint160 now_,,,) = poolManager.getSlot0(poolId);
         if (now_ == target) return;
@@ -263,7 +264,7 @@ contract EditorParityTest is RuleSetup {
         p.amount0Max = type(uint128).max;
         p.amount1Max = type(uint128).max;
         p.expiry = uint32(ts[0] + 365 days);
-        p.maxKeeperFeeBps = 10;
+        p.keeperFeeBps = 10;
         p.maxSlippage = 50;
         p.lower = b.lower[i];
         p.upper = b.upper[i];

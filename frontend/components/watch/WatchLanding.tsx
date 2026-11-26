@@ -488,8 +488,8 @@ function Configure() {
 function Sealed() {
   const statements = [
     ["Your money stays in Uniswap.", "In your pool, in the pool a strategy moves it to, or as tokens held inside the Uniswap v4 PoolManager, until you withdraw. Only you can take it out."],
-    ["Anyone can wind it.", "When a step's condition is true, any keeper can run it, and is paid its gas from the position, never above the cap you set."],
-    ["No one can open it.", "Nothing runs at a price someone just pushed: steps read the average price, and the price of the moment must be near it. Slippage, fee cap and run count are checked on every run. You can cancel at any time."],
+    ["Anyone can wind it.", "When a step's condition is true, any keeper can run it, and is paid the fee you set, out of what the step moves."],
+    ["No one can open it.", "Nothing runs at a price someone pushed: a pool's price counts only while it is near Chainlink's. Slippage, keeper fee and run count are checked on every run. You can cancel at any time."],
   ];
   return (
     <section id="sealed" className="border-t border-[var(--hair)]">
@@ -540,10 +540,10 @@ function Sealed() {
 
 function Certificate() {
   const rows = [
-    ["Strategy shapes the editor builds, checked against the contract", "39,146", "0 mismatches"],
+    ["Strategy shapes the editor builds, checked against the contract", "35,126", "0 mismatches"],
     ["Orders replayed by the backtest engine and the contract", "2,000", "identical runs"],
-    ["Contract tests, fuzz included", "150", "all passing"],
-    ["Branches of the contracts covered by tests", "81%", "measured"],
+    ["Contract tests, fuzz included", "134", "all passing"],
+    ["Templates on every Sepolia pool, dry-run against the contracts", "168", "all accepted"],
   ];
   const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
   return (

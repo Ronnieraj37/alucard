@@ -207,7 +207,7 @@ function MemoLine({ m, pool, lane }: { m: SideMemo; pool: Pool; lane: LaneId }) 
   if (!m.trails) return null;
   return (
     <div className="mt-1 text-[12px] text-[var(--muted)]">
-      {lane === "down" ? "Highest" : "Lowest"} {pool.base.symbol} price remembered: {fmt(m.bestPrice)} {pool.quote.symbol} (average price).
+      {lane === "down" ? "Highest" : "Lowest"} {pool.base.symbol} price remembered: {fmt(m.bestPrice)} {pool.quote.symbol}.
     </div>
   );
 }

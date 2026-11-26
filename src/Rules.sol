@@ -13,19 +13,22 @@ import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmo
 
 import {OrderState} from "./libraries/OrderState.sol";
 import {PriceMath} from "./libraries/PriceMath.sol";
-import {RuleHook} from "./RuleHook.sol";
 import {PriceFeeds} from "./PriceFeeds.sol";
 import {ConditionalOrders} from "./ConditionalOrders.sol";
 
-/// @title Rules: when a rule fires, which rules are allowed, and the price math
-/// @notice Read-only. ConditionalOrders asks it whether a side's condition is true now (`met`), what price a trailing
-/// side should remember (`trailTick`), whether a new rule is valid (`checkSide`, `checkLegs`), and for the numbers
-/// of a run: swap limits, the range a leg enters, how much to swap before adding, and liquidity for amounts. The
-/// vault itself only moves tokens and keeps state.
+/// @title Rules: the pools strategies can use, when a condition is true, which strategies are allowed, and the math
+/// @notice ConditionalOrders asks it whether a side's condition is true now (`met`), whether a pool's price can be
+/// acted on (`checkPrice`), whether a new strategy is valid (`checkSide`, `checkLegs`), and for the numbers of a run:
+/// swap limits, the range a leg enters, how much to swap before adding, and liquidity for amounts. The vault itself
+/// only moves tokens and keeps state.
 ///
-/// Every pool price a condition reads is the hook's average over at least MIN_WINDOW, or over the side's hold time
-/// when that is longer. Nothing here reads the price of the moment, so moving the price in a block cannot fire a
-/// rule. Conditions only read pools of RuleHook, which keep that average.
+/// Prices: conditions read a pool's price of the moment, but only while it is within `PriceFeeds.maxDeviationTicks`
+/// of the pair's Chainlink price. Pushing a pool's price to fire someone's strategy means pushing it away from
+/// Chainlink, and a price that far away never makes a condition true and never lets a step run. No price history is
+/// kept, so swaps pay nothing for strategies, and strategies work on any pool of listed tokens, with or without a hook.
+///
+/// Pools: a 24-bit table (a side names the pools its conditions read in 24 bits). Anyone can add a pool whose two
+/// tokens are listed, hookless or using the limit-order hook (a pool with another hook could take a cut of swaps).
 contract Rules {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -33,30 +36,29 @@ contract Rules {
     error InvalidSide();
     error InvalidLeg();
     error UnknownPool();
+    error PoolNotAllowed();
+    error TokenNotAllowed();
     error NoPrice();
     error PriceMoved();
 
     uint256 internal constant BPS = 10_000;
     uint256 internal constant Q128 = 1 << 128;
 
-    /// @notice Shortest average a pool condition reads, in seconds.
-    uint32 public constant MIN_WINDOW = 120;
-    /// @notice Longest hold, in minutes: the hook keeps about an hour of prices.
-    uint16 public constant MAX_HOLD_MINUTES = 60;
+    /// @notice Longest hold ("only if it lasts"), in minutes: a day.
+    uint16 public constant MAX_HOLD_MINUTES = 1440;
     /// @notice The APR condition needs at least this much time since the fees were last collected.
     uint256 public constant MIN_APR_TIME = 1 hours;
 
-    /// @notice Keeper pay: gas x gas price x a premium. 110% for the part paid in ETH, 120% for the part paid in a
-    /// token (the keeper still has to sell it for ETH). The gas price counted is capped so a keeper cannot inflate it.
-    uint256 public constant KEEPER_PREMIUM_BPS = 11_000;
-    uint256 public constant KEEPER_TOKEN_PREMIUM_BPS = 12_000;
-    uint256 public constant MAX_PRIORITY_FEE_WEI = 1 gwei;
-    /// @dev Gas of the call into keeperPay that its own measurement cannot see.
-    uint256 internal constant PAY_CALL_GAS = 2_000;
-
     IPoolManager public immutable poolManager;
-    RuleHook public immutable hook;
+    /// @notice The limit-order hook: the one hook a pool here may use.
+    address public immutable hook;
     PriceFeeds public immutable feeds;
+
+    uint24 public poolCount;
+    mapping(uint24 index => PoolKey) internal _pools;
+    mapping(PoolId poolId => uint24 index) public poolIndexOf;
+
+    event PoolRegistered(uint24 indexed index, PoolId indexed poolId);
 
     /// @dev What a condition needs to know about the order.
     struct Ctx {
@@ -66,27 +68,79 @@ contract Rules {
         int24 lower; // the range
         int24 upper;
         bool isUpper; // which side is checked
-        uint32 window; // seconds of average price
         uint32 feeClock; // when the position's fees were last collected
         OrderState.Side sd;
     }
 
-    constructor(IPoolManager _poolManager, RuleHook _hook, PriceFeeds _feeds) {
+    constructor(IPoolManager _poolManager, address _hook, PriceFeeds _feeds) {
         poolManager = _poolManager;
         hook = _hook;
         feeds = _feeds;
     }
 
     // ---------------------------------------------------------------
+    // Pools
+    // ---------------------------------------------------------------
+
+    /// @notice Add a pool strategies can use (or return its index if it is in already). Anyone can.
+    function registerPool(PoolKey calldata key) public returns (uint24 index) {
+        PoolId id = key.toId();
+        index = poolIndexOf[id];
+        if (index != 0) return index;
+        if (address(key.hooks) != address(0) && address(key.hooks) != hook) revert PoolNotAllowed();
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(id);
+        if (sqrtPriceX96 == 0) revert UnknownPool();
+        if (!feeds.isListed(Currency.unwrap(key.currency0)) || !feeds.isListed(Currency.unwrap(key.currency1))) {
+            revert TokenNotAllowed();
+        }
+        index = ++poolCount;
+        _pools[index] = key;
+        poolIndexOf[id] = index;
+        emit PoolRegistered(index, id);
+    }
+
+    function poolKeyAt(uint24 index) external view returns (PoolKey memory) {
+        return _pools[index];
+    }
+
+    // ---------------------------------------------------------------
+    // Prices
+    // ---------------------------------------------------------------
+
+    /// @notice A pool's tick now, and whether it can be believed: within the list's band of Chainlink.
+    function tickOf(uint24 poolIndex) public view returns (bool ok, int24 tick) {
+        PoolKey memory key = _pools[poolIndex];
+        (, tick,,) = poolManager.getSlot0(key.toId());
+        ok = _near(key, tick);
+    }
+
+    /// @notice Reverts (PriceMoved) unless `key`'s price is within `PriceFeeds.maxDeviationTicks` of the pair's
+    /// Chainlink price (no Chainlink price counts as too far). Runs swap and deposit at this price: this keeps them
+    /// from running at a price someone pushed.
+    function checkPrice(PoolKey calldata key) external view {
+        (, int24 tick,,) = poolManager.getSlot0(key.toId());
+        if (!_near(key, tick)) revert PriceMoved();
+    }
+
+    function _near(PoolKey memory key, int24 tick) internal view returns (bool) {
+        uint24 band = feeds.maxDeviationTicks();
+        if (band == 0) return true; // not checked (tests)
+        (bool ok, int24 link) = feeds.pairTick(Currency.unwrap(key.currency0), Currency.unwrap(key.currency1));
+        if (!ok) return false;
+        return (tick > link ? uint256(int256(tick) - link) : uint256(int256(link) - tick)) <= band;
+    }
+
+    // ---------------------------------------------------------------
     // Conditions
     // ---------------------------------------------------------------
 
-    /// @notice Whether a side's condition is true now.
+    /// @notice Whether a side's condition is true now. A hold ("only if it lasts") is checked by the vault, which
+    /// knows when the condition was first seen true.
     /// @param vault the contract that owns the position (ConditionalOrders)
     /// @param lowerWord the order's lower side (its edge is the range's tickLower)
     /// @param upperWord the order's upper side (its edge is the range's tickUpper)
     function met(address vault, uint256 orderId, uint24 poolIndex, uint256 lowerWord, uint256 upperWord, bool upper)
-        external
+        public
         view
         returns (bool)
     {
@@ -100,7 +154,6 @@ contract Rules {
             lower: lo.edge,
             upper: up.edge,
             isUpper: upper,
-            window: _window(sd),
             feeClock: lo.lastRun > up.lastRun ? lo.lastRun : up.lastRun,
             sd: sd
         });
@@ -110,8 +163,8 @@ contract Rules {
         return a;
     }
 
-    /// @notice The average price a side's trailing condition reads now. `trails` is false for a side without one;
-    /// `ok` is false while that pool has too little history.
+    /// @notice The price a side's trailing condition reads now. `trails` is false for a side without one; `ok` is
+    /// false while that pool's price is too far from Chainlink to be remembered.
     function trailTick(uint24 poolIndex, uint256 word) external view returns (bool trails, bool ok, int24 tick) {
         OrderState.Side memory sd = OrderState.decodeSide(word);
         uint24 pool;
@@ -120,16 +173,11 @@ contract Rules {
         } else if (sd.combine != OrderState.COMBINE_NONE && sd.checker2 == OrderState.CHECK_TRAIL) {
             (trails, pool) = (true, sd.checkPool2);
         }
-        if (trails) (ok, tick) = averageTick(pool == 0 ? poolIndex : pool, _window(sd));
-    }
-
-    /// @notice Average tick of a pool in the hook's table over at least `window` seconds.
-    function averageTick(uint24 poolIndex, uint32 window) public view returns (bool ok, int24 tick) {
-        return hook.averageTick(hook.poolKeyAt(poolIndex).toId(), window);
+        if (trails) (ok, tick) = tickOf(pool == 0 ? poolIndex : pool);
     }
 
     /// @notice Fees the order's position has earned since they were last collected, in bps of the position's value,
-    /// both valued at the average price. `ok` is false without a position or a price.
+    /// both valued at the pool's price. `ok` is false without a position, or with a price too far from Chainlink.
     function feeBps(address vault, uint256 orderId, uint24 poolIndex, int24 lower, int24 upper)
         public
         view
@@ -140,13 +188,13 @@ contract Rules {
         return (true, FullMath.mulDiv(fees, BPS, base));
     }
 
-    /// @dev The position's uncollected fees and its value, both in token1 at the average price.
+    /// @dev The position's uncollected fees and its value, both in token1 at the pool's price.
     function _fees(address vault, uint256 orderId, uint24 poolIndex, int24 lower, int24 upper)
         internal
         view
         returns (bool ok, uint256 fees, uint256 base)
     {
-        PoolId id = hook.poolKeyAt(poolIndex).toId();
+        PoolId id = _pools[poolIndex].toId();
         (uint128 liq, uint256 g0Last, uint256 g1Last) =
             poolManager.getPositionInfo(id, vault, lower, upper, bytes32(orderId));
         if (liq == 0) return (false, 0, 0);
@@ -159,7 +207,7 @@ contract Rules {
             f1 = FullMath.mulDiv(g1 - g1Last, liq, Q128);
         }
         int24 t;
-        (ok, t) = averageTick(poolIndex, MIN_WINDOW);
+        (ok, t) = tickOf(poolIndex);
         if (!ok) return (false, 0, 0);
         uint160 p = TickMath.getSqrtPriceAtTick(t);
         (uint256 a0, uint256 a1) =
@@ -174,12 +222,6 @@ contract Rules {
         if (checker == OrderState.CHECK_TIME) {
             return block.timestamp >= uint256(c.sd.lastRun) + uint256(uint24(value)) * 60;
         }
-        if (checker == OrderState.CHECK_ORACLE) {
-            // the pair's Chainlink price, as a tick. A missing or stale price never fires the condition.
-            PoolKey memory key = hook.poolKeyAt(c.poolIndex);
-            (bool live, int24 t) = feeds.pairTick(Currency.unwrap(key.currency0), Currency.unwrap(key.currency1));
-            return live && (c.isUpper ? t >= value : t < value);
-        }
         if (checker == OrderState.CHECK_FEES || checker == OrderState.CHECK_APR) {
             (bool ok, uint256 fees, uint256 base) = _fees(c.vault, c.orderId, c.poolIndex, c.lower, c.upper);
             if (!ok) return false;
@@ -192,24 +234,18 @@ contract Rules {
                 elapsed >= MIN_APR_TIME
                     && FullMath.mulDiv(fees, BPS * 365 days, elapsed) < base * uint256(uint24(value));
         }
-        // the pool price conditions: EDGE, TICK, TRAIL
-        (bool live2, int24 avg) = averageTick(pool == 0 ? c.poolIndex : pool, c.window);
-        if (!live2) return false;
-        int256 t2 = avg;
+        // the pool price conditions: EDGE, TICK, TRAIL. A price too far from Chainlink never makes them true.
+        (bool live, int24 tick) = tickOf(pool == 0 ? c.poolIndex : pool);
+        if (!live) return false;
+        int256 t = tick;
         if (checker == OrderState.CHECK_EDGE) {
-            return c.isUpper ? t2 >= int256(c.upper) + value : t2 < int256(c.lower) - value;
+            return c.isUpper ? t >= int256(c.upper) + value : t < int256(c.lower) - value;
         }
-        if (checker == OrderState.CHECK_TICK) return c.isUpper ? t2 >= value : t2 < value;
+        if (checker == OrderState.CHECK_TICK) return c.isUpper ? t >= value : t < value;
         if (checker == OrderState.CHECK_TRAIL) {
-            return c.isUpper ? t2 >= int256(c.sd.best) + value : t2 < int256(c.sd.best) - value;
+            return c.isUpper ? t >= int256(c.sd.best) + value : t < int256(c.sd.best) - value;
         }
         return false;
-    }
-
-    /// @dev Seconds of average price a side reads: its hold, but never less than MIN_WINDOW.
-    function _window(OrderState.Side memory sd) internal pure returns (uint32) {
-        uint32 hold = uint32(sd.holdMinutes) * 60;
-        return hold > MIN_WINDOW ? hold : MIN_WINDOW;
     }
 
     // ---------------------------------------------------------------
@@ -228,7 +264,7 @@ contract Rules {
 
     /// @notice Current price and active liquidity of a pool in the table.
     function poolState(uint24 poolIndex) external view returns (uint160 sqrtPriceX96, int24 tick, uint128 liquidity) {
-        PoolId id = hook.poolKeyAt(poolIndex).toId();
+        PoolId id = _pools[poolIndex].toId();
         (sqrtPriceX96, tick,,) = poolManager.getSlot0(id);
         liquidity = poolManager.getLiquidity(id);
     }
@@ -242,13 +278,14 @@ contract Rules {
         if (plan.here.kind == OrderState.LEG_IDLE) return (plan.held0, plan.held1);
         int24 lower = OrderState.decodeSide(o.lowerState).edge;
         int24 upper = OrderState.decodeSide(o.upperState).edge;
-        PoolKey memory key = hook.poolKeyAt(o.poolIndex);
+        PoolKey memory key = _pools[o.poolIndex];
         (uint128 liq,,) = poolManager.getPositionInfo(key.toId(), address(vault), lower, upper, bytes32(orderId));
         (uint160 p,,,) = poolManager.getSlot0(key.toId());
         return PriceMath.amountsFor(p, TickMath.getSqrtPriceAtTick(lower), TickMath.getSqrtPriceAtTick(upper), liq);
     }
 
-    /// @notice Whether `vault.execute(orderId, upper)` would pass its checks now (for keepers).
+    /// @notice Whether `vault.execute(orderId, upper)` would pass its checks now (for keepers). A side with a hold
+    /// needs `poke` first, then the hold to pass.
     function canExecute(ConditionalOrders vault, uint256 orderId, bool upper) external view returns (bool) {
         ConditionalOrders.Order memory o = vault.getOrder(orderId);
         if (o.owner == address(0) || block.timestamp > o.expiry) return false;
@@ -256,77 +293,45 @@ contract Rules {
         if (sd.checker == OrderState.CHECK_OFF || block.timestamp < uint256(sd.lastRun) + vault.MIN_GAP()) {
             return false;
         }
-        return this.met(address(vault), orderId, o.poolIndex, o.lowerState, o.upperState, upper);
+        if (sd.holdMinutes != 0) {
+            uint32 armed = vault.armedAt(orderId, upper);
+            if (armed == 0 || block.timestamp < uint256(armed) + uint256(sd.holdMinutes) * 60) return false;
+        }
+        (bool ok,) = tickOf(o.poolIndex);
+        return ok && met(address(vault), orderId, o.poolIndex, o.lowerState, o.upperState, upper);
     }
 
     // ---------------------------------------------------------------
-    // Price math for runs (all on the average price; reverts NoPrice without one)
+    // Price math for runs (the price of the moment: the vault checks it is near Chainlink first)
     // ---------------------------------------------------------------
 
-    /// @notice Average tick of `key`'s pool over MIN_WINDOW.
-    function price(PoolKey memory key) public view returns (int24 tick) {
-        bool ok;
-        (ok, tick) = hook.averageTick(key.toId(), MIN_WINDOW);
-        if (!ok) revert NoPrice();
-    }
-
-    /// @notice Reverts (PriceMoved) when the pool's price is not believable for a run: the price of the moment is
-    /// more than the order's slippage (in steps of 10 ticks) away from the average, or the average is further from
-    /// the pair's Chainlink price than the list allows (PriceFeeds.maxDeviationTicks; 0 = not checked, and a missing
-    /// Chainlink price is not checked either). A run deposits and swaps at the price of the moment: this stops a
-    /// keeper or a swapper from running an order at a price they pushed, in this block or held over a few.
-    function checkPrice(PoolKey calldata key, uint8 slippage) external view {
-        int256 avg = price(key);
-        (, int24 spot,,) = poolManager.getSlot0(key.toId());
-        if (_dist(spot, avg) > uint256(slippage) * 10) revert PriceMoved();
-        uint24 maxDev = feeds.maxDeviationTicks();
-        if (maxDev == 0) return;
-        (bool ok, int24 link) = feeds.pairTick(Currency.unwrap(key.currency0), Currency.unwrap(key.currency1));
-        if (ok && _dist(link, avg) > maxDev) revert PriceMoved();
-    }
-
-    function _dist(int256 a, int256 b) internal pure returns (uint256) {
-        return a > b ? uint256(a - b) : uint256(b - a);
-    }
-
-    /// @notice Price limit for a swap: `slippage` steps of 10 ticks past the average price.
+    /// @notice Price limit for a swap: `slippage` steps of 10 ticks past the price before it.
     function swapLimit(PoolKey calldata key, bool zeroForOne, uint8 slippage) external view returns (uint160) {
-        int256 ref = price(key);
+        (, int24 tick,,) = poolManager.getSlot0(key.toId());
         int256 slip = int256(uint256(slippage)) * 10;
-        int256 t = zeroForOne ? ref - slip : ref + slip;
+        int256 t = zeroForOne ? int256(tick) - slip : int256(tick) + slip;
         if (t <= TickMath.MIN_TICK) t = TickMath.MIN_TICK + 1;
         if (t >= TickMath.MAX_TICK) t = TickMath.MAX_TICK - 1;
         return TickMath.getSqrtPriceAtTick(int24(t));
     }
 
-    /// @notice The range a leg enters: its fixed range, or `a` ticks below to `b` ticks above the average price
-    /// (rounded down to the spacing, kept inside the usable ticks).
+    /// @notice The range a leg enters: its fixed range, or `a` ticks below to `b` ticks above the price (rounded down
+    /// to the spacing, kept inside the usable ticks).
     function rangeOf(PoolKey calldata key, OrderState.Leg calldata leg) external view returns (int24, int24) {
         if (leg.kind == OrderState.LEG_RANGE) return (leg.a, leg.b);
-        int256 mid = _floor(price(key), key.tickSpacing);
-        return (_usable(mid - leg.a, key.tickSpacing), _usable(mid + leg.b, key.tickSpacing));
+        return _around(key, leg.a, leg.b);
     }
 
-    /// @notice A one-sided range of `width` spacings next to the price: below it for the upper side (which holds
-    /// token1 after the price rose out), above it for the lower side. "The price" is the lower of the average and the
-    /// price of the moment for the upper side, the higher for the lower side, so the range is always entirely on the
-    /// side the one token can fill (otherwise it would get no liquidity). `ok` is false without room for it.
-    function besidePrice(PoolKey calldata key, bool upper, uint24 width)
-        external
-        view
-        returns (bool ok, int24 tickLower, int24 tickUpper)
-    {
+    /// @notice A re-centred range: `below` spacings under the price to `above` spacings over it.
+    function centeredRange(PoolKey calldata key, uint24 below, uint24 above) external view returns (int24, int24) {
         int256 s = key.tickSpacing;
-        int24 avg = price(key);
-        (, int24 spot,,) = poolManager.getSlot0(key.toId());
-        int24 ref = upper ? (spot < avg ? spot : avg) : (spot > avg ? spot : avg);
-        int256 floorTick = _floor(ref, key.tickSpacing);
-        int256 lo = upper ? floorTick - int256(uint256(width)) * s : floorTick + s;
-        int256 hi = upper ? floorTick : lo + int256(uint256(width)) * s;
-        if (lo < TickMath.minUsableTick(key.tickSpacing) || hi > TickMath.maxUsableTick(key.tickSpacing)) {
-            return (false, 0, 0);
-        }
-        return (true, int24(lo), int24(hi));
+        return _around(key, int256(uint256(below)) * s, int256(uint256(above)) * s);
+    }
+
+    function _around(PoolKey calldata key, int256 below, int256 above) internal view returns (int24, int24) {
+        (, int24 tick,,) = poolManager.getSlot0(key.toId());
+        int256 mid = _floor(tick, key.tickSpacing);
+        return (_usable(mid - below, key.tickSpacing), _usable(mid + above, key.tickSpacing));
     }
 
     /// @notice The swap that turns holdings (h0, h1) into the mix the range needs: which token to sell, how much at
@@ -410,43 +415,6 @@ contract Rules {
         );
     }
 
-    /// @notice What a keeper is paid for a run that used `gasUsed` (measured by the vault, plus its allowances): the
-    /// cost in wei with the premium, paid from reserve0 in token0 first and from reserve1 in token1 for what token0
-    /// did not cover, never more than either reserve. ETH is paid as it is; a token amount comes from the Chainlink
-    /// feeds (wei -> USD -> token), read here with their gas counted. A token without a price pays nothing: the
-    /// cost is then paid in the other token. Without any price the keeper is not paid (anyone can still run the order,
-    /// the owner too); paying the ceiling instead would let a repeating rule drain it while a feed is down.
-    function keeperPay(PoolKey calldata key, uint256 gasUsed, uint256 reserve0, uint256 reserve1)
-        external
-        view
-        returns (uint256 pay0, uint256 pay1)
-    {
-        uint256 start = gasleft();
-        address t0 = Currency.unwrap(key.currency0);
-        address t1 = Currency.unwrap(key.currency1);
-        (bool ok0, uint256 per0) = feeds.quote(t0, 1 ether); // token units per 1 ETH
-        (bool ok1, uint256 per1) = feeds.quote(t1, 1 ether);
-        if (!ok0) reserve0 = 0; // no price: nothing is paid in that token
-        if (!ok1) reserve1 = 0;
-        uint256 cost = gasWei(gasUsed + start - gasleft() + PAY_CALL_GAS);
-        uint256 want0 = (FullMath.mulDiv(cost, per0, 1 ether) * _premium(t0)) / BPS;
-        pay0 = want0 < reserve0 ? want0 : reserve0;
-        // the share of the cost token0 did not cover, paid in token1
-        uint256 rest = want0 == 0 ? cost : cost - FullMath.mulDiv(cost, pay0, want0);
-        uint256 want1 = (FullMath.mulDiv(rest, per1, 1 ether) * _premium(t1)) / BPS;
-        pay1 = want1 < reserve1 ? want1 : reserve1;
-    }
-
-    /// @notice Cost in wei of `gasUsed` at this transaction's gas price, capped at base fee + MAX_PRIORITY_FEE_WEI.
-    function gasWei(uint256 gasUsed) public view returns (uint256) {
-        uint256 maxPrice = block.basefee + MAX_PRIORITY_FEE_WEI;
-        return gasUsed * (tx.gasprice < maxPrice ? tx.gasprice : maxPrice);
-    }
-
-    function _premium(address token) internal pure returns (uint256) {
-        return token == address(0) ? KEEPER_PREMIUM_BPS : KEEPER_TOKEN_PREMIUM_BPS;
-    }
-
     function _floor(int24 tick, int24 spacing) internal pure returns (int256) {
         int256 c = int256(tick) / spacing;
         if (tick < 0 && int256(tick) % spacing != 0) c--;
@@ -472,15 +440,15 @@ contract Rules {
     ///  - otherwise: without remove only "compound" (keep fees + add); remove 0% means "send fees out" (no keep, no
     ///    swap); swap needs a real withdrawal and no add; swapToToken1 only with swap; addMode only with add.
     ///  - repeat needs something left to run on: a side that removes everything and adds nothing cannot repeat.
-    ///  - one-sided re-range ("follow"): condition A leaves the range (B only with AND), removes 100%, and `shape`
-    ///    holds the one width that side uses (upper: below the price, lower: above it).
+    ///  - re-centre ("follow the price"): removes 100% and adds into a new range around the price; `shape` holds its
+    ///    width below and above the price, in tick spacings (both at least one).
     ///  - `shape` is otherwise the step of a repeating price level, and zero when nothing steps.
     ///  - a repeating side must stop being true after a run, or it would fire again and again.
     ///  - APR only on the lower side ("earns less than"), and only to leave: move, or remove everything.
     /// @param poolIndex the pool of the leg the side belongs to
     /// @param legKind that leg's kind (LEG_IDLE has no position)
     /// @param twoLegs whether the order has a second leg to move to
-    function checkSide(uint256 word, bool upper, uint24 poolIndex, uint8 legKind, bool twoLegs) external view {
+    function checkSide(uint256 word, bool upper, uint24 poolIndex, uint8 legKind, bool twoLegs) public view {
         OrderState.Side memory d = OrderState.decodeSide(word);
         if (d.edge != 0 || d.lastRun != 0 || d.best != 0) revert InvalidSide();
         if (d.checker == OrderState.CHECK_OFF) {
@@ -519,8 +487,8 @@ contract Rules {
             if (d.repeat && leaves) revert InvalidSide(); // nothing would be left to run again
         }
         if (d.swapToToken1 && !swap) revert InvalidSide();
-        if (d.addMode > (add ? OrderState.ADD_ONE_SIDED : 0)) revert InvalidSide();
-        bool oneSided = add && d.addMode == OrderState.ADD_ONE_SIDED; // the range moves after a run
+        if (d.addMode > (add ? OrderState.ADD_CENTERED : 0)) revert InvalidSide();
+        bool recentre = add && d.addMode == OrderState.ADD_CENTERED; // the range moves after a run
 
         // ---- conditions
         _checkCond(d.checker, d.value, d.checkPool, poolIndex, upper, idle, leaves);
@@ -537,16 +505,13 @@ contract Rules {
         if (d.runsLeft != 0 && !d.repeat) revert InvalidSide(); // a run limit only means something with repeat
 
         // ---- shape
-        if (oneSided) {
-            if (d.checker != OrderState.CHECK_EDGE || d.removeBps != BPS) revert InvalidSide();
-            // the new range goes next to the price on this side's side, so the price must have left the range that
-            // way: with OR, condition B alone could fire it while the price is still in range or past the other edge
-            if (d.combine == OrderState.COMBINE_OR) revert InvalidSide();
-            uint24 used = upper ? d.shape & OrderState.MAX_WIDTH : (d.shape >> 11) & OrderState.MAX_WIDTH;
-            uint24 unused = upper ? (d.shape >> 11) & OrderState.MAX_WIDTH : d.shape & OrderState.MAX_WIDTH;
-            if (used == 0 || unused != 0 || d.shape > OrderState.MAX_SHAPE) revert InvalidSide();
-            // the new range sits next to the price, so a repeating trigger needs at least one spacing of room
-            if (d.repeat && d.value < hook.poolKeyAt(poolIndex).tickSpacing) revert InvalidSide();
+        if (recentre) {
+            // the whole position moves into a new range around the price: both widths, in spacings
+            if (
+                d.removeBps != BPS || d.shape & OrderState.MAX_WIDTH == 0 || (d.shape >> 11) & OrderState.MAX_WIDTH == 0
+            ) {
+                revert InvalidSide();
+            }
         } else if (!move) {
             bool steps = d.repeat && (_isLevel(d.checker) || (hasB && _isLevel(d.checker2)));
             if (steps ? (d.shape == 0 || d.shape > OrderState.MAX_SHAPE) : d.shape != 0) revert InvalidSide();
@@ -554,17 +519,18 @@ contract Rules {
 
         // ---- a repeating side must stop being true after it runs (a move side leaves the leg, so it stops)
         if (d.repeat && !move) {
-            if (d.checker == OrderState.CHECK_EDGE && !oneSided) revert InvalidSide(); // the range does not move
+            if (d.checker == OrderState.CHECK_EDGE && !recentre) revert InvalidSide(); // the range does not move
+            if (_isLevel(d.checker) && recentre) revert InvalidSide(); // its level cannot step (shape holds widths)
             if (d.combine == OrderState.COMBINE_OR) {
                 // either condition alone fires, so B must stop being true as well
-                if (d.checker2 == OrderState.CHECK_EDGE && !oneSided) revert InvalidSide();
-                if (_isLevel(d.checker2) && oneSided) revert InvalidSide(); // its level cannot step
+                if (d.checker2 == OrderState.CHECK_EDGE && !recentre) revert InvalidSide();
+                if (_isLevel(d.checker2) && recentre) revert InvalidSide();
             }
         }
     }
 
     /// @notice Reverts (InvalidLeg) unless an order can move between a leg in pool `from` and the leg `to`.
-    /// A range leg needs a RuleHook pool (its prices are averaged) of listed tokens, with a valid range. A waiting leg
+    /// A range leg needs a registered pool (both tokens listed), with a valid range. A waiting leg
     /// names the pool it came from and keeps that pair's tokens. Two pools must share a token; when they differ in the other one,
     /// every move side leaving each leg must first swap into the shared token, so no token is carried into a pool
     /// that cannot take it.
@@ -576,12 +542,9 @@ contract Rules {
             return;
         }
         if (to.kind != OrderState.LEG_RANGE && to.kind != OrderState.LEG_CENTERED) revert InvalidLeg();
-        if (!_hookPool(to.poolIndex)) revert UnknownPool();
-        PoolKey memory a = hook.poolKeyAt(from);
-        PoolKey memory b = hook.poolKeyAt(to.poolIndex);
-        if (!feeds.isListed(Currency.unwrap(b.currency0)) || !feeds.isListed(Currency.unwrap(b.currency1))) {
-            revert InvalidLeg();
-        }
+        if (!_known(to.poolIndex)) revert UnknownPool();
+        PoolKey memory a = _pools[from];
+        PoolKey memory b = _pools[to.poolIndex];
         checkRange(to, b.tickSpacing);
 
         bool same0 = a.currency0 == b.currency0 || a.currency0 == b.currency1;
@@ -621,7 +584,7 @@ contract Rules {
         internal
         view
     {
-        if (checker == OrderState.CHECK_OFF || checker > OrderState.CHECK_APR) revert InvalidSide();
+        if (checker == OrderState.CHECK_OFF || checker > OrderState.CHECK_APR || checker == 5) revert InvalidSide(); // 5: retired
         if (_isLevel(checker) && (value <= TickMath.MIN_TICK || value >= TickMath.MAX_TICK)) revert InvalidSide();
         if (checker == OrderState.CHECK_TIME && value <= 0) revert InvalidSide();
         // a trailing distance is a fall of less than 99.99% (or the same number of ticks up)
@@ -632,23 +595,20 @@ contract Rules {
         if (checker == OrderState.CHECK_APR && (value <= 0 || idle || upper || !leaves)) revert InvalidSide();
 
         if (checker == OrderState.CHECK_TICK || checker == OrderState.CHECK_TRAIL) {
-            // 0 = the leg's own pool; another pool is named by its index, never by the own pool's index, and must
-            // be a pool of the hook (only those have an average price)
-            if (pool == own || (pool != 0 && !_hookPool(pool))) revert InvalidSide();
+            // 0 = the leg's own pool; another pool is named by its index (never by the own pool's index)
+            if (pool == own || (pool != 0 && !_known(pool))) revert InvalidSide();
         } else if (pool != 0) {
-            revert InvalidSide(); // the other conditions read the leg's own pool or pair
+            revert InvalidSide(); // the other conditions read the leg's own pool
         }
     }
 
-    /// @dev A price level: the pool's price or the Chainlink price against a fixed tick. A repeating level steps.
+    /// @dev A price level: the pool's price against a fixed tick. A repeating level steps.
     function _isLevel(uint8 checker) internal pure returns (bool) {
-        return checker == OrderState.CHECK_TICK || checker == OrderState.CHECK_ORACLE;
+        return checker == OrderState.CHECK_TICK;
     }
 
-    /// @dev A pool of RuleHook (it keeps an average price), not an outside pool registered for swaps.
-    function _hookPool(uint24 index) internal view returns (bool) {
-        if (index == 0 || index > hook.poolCount()) return false;
-        (,,, uint8 count) = hook.oracles(hook.poolKeyAt(index).toId());
-        return count != 0;
+    /// @dev A pool in the table.
+    function _known(uint24 index) internal view returns (bool) {
+        return index != 0 && index <= poolCount;
     }
 }

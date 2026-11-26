@@ -39,7 +39,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReadContract } from "wagmi";
 import Backtest, { type BacktestRange } from "@/components/Backtest";
 import { Field, Suffix } from "@/components/ui";
-import { conditionalOrdersAbi, priceFeedsAbi, rulesAbi } from "@/lib/generated/abis";
+import { rulesAbi } from "@/lib/generated/abis";
 import { CORE, type Pool, fmt, poolByIndex, priceAtTick } from "@/lib/pools";
 import {
   type Action,
@@ -85,8 +85,6 @@ const cardKey = (c: CardId) => `${c.lane}:${c.part}${"kind" in c ? `:${c.kind}` 
 /** One entry of the Add menu. Its label already names the tokens and direction of this column. */
 type Option = { id: string; label: string; hint: string; icon: LucideIcon; apply: (r: Rules) => Rules; open?: CardId; second?: boolean; why?: string };
 
-/** Price conditions are read on an average: by default over 10 minutes, so a short push or wick does not fire them. */
-const HOLD_BY_DEFAULT: TriggerKind[] = ["leave", "price", "otherPool", "trail"];
 
 const ICONS: Record<string, LucideIcon> = {
   leave: LogOut,
@@ -95,7 +93,6 @@ const ICONS: Record<string, LucideIcon> = {
   timer: Clock,
   fees: Percent,
   apr: Coins,
-  oracle: Link2,
   otherPool: Crosshair,
   withdraw: ArrowDownRight,
   convert: Shuffle,
@@ -110,7 +107,6 @@ const TITLES: Record<string, string> = {
   timer: "On a timer",
   fees: "Fees earned",
   apr: "Fee rate falls",
-  oracle: "Chainlink price",
   otherPool: "Price in another pool",
   withdraw: "Withdraw",
   convert: "Swap",
@@ -151,8 +147,7 @@ function triggerOptions(pool: Pool, lane: LaneId, price: number, range: [number,
     (r: Rules): Rules => {
       const l = r[lane];
       if (second) return { ...r, [lane]: { ...l, trigger2: t, combine: l.combine ?? "and" } };
-      const hold = l.holdMinutes ?? (HOLD_BY_DEFAULT.includes(t.kind) ? 10 : undefined);
-      return { ...r, [lane]: { ...l, trigger: t, holdMinutes: hold } };
+      return { ...r, [lane]: { ...l, trigger: t } };
     };
   const t = (k: TriggerKind) => defaultTrigger(k, pool, lane, price, watchable(pool), range);
   const part = second ? "trigger2" : "trigger";
@@ -168,7 +163,6 @@ function triggerOptions(pool: Pool, lane: LaneId, price: number, range: [number,
     },
     { id: "timer", label: "Every few hours or days", hint: "On a timer", icon: Clock, apply: set(t("timer")) },
     { id: "fees", label: "Fees reach a share of the position", hint: "When enough fees have built up", icon: Percent, apply: set(t("fees")) },
-    { id: "oracle", label: `${b} on Chainlink ${down ? "drops below" : "rises above"} a price`, hint: "Chainlink's market price instead of this pool's", icon: Link2, apply: set(t("oracle")) },
     { id: "otherPool", label: `${b} in another pool ${down ? "drops below" : "rises above"} a price`, hint: "Watch a bigger pool's price", icon: Crosshair, apply: set(t("otherPool")) },
   ];
   // "fee rate falls" uses the contract's lower slot: offer it in the lane that maps there
@@ -225,7 +219,7 @@ function moreOptions(rules: Rules, lane: LaneId): Option[] {
   const out: Option[] = [];
   if (!L.trigger2) out.push({ id: "second", label: "And another condition", hint: "Both must be true, or either one", icon: GitMerge, apply: (r) => r, second: true });
   if (!L.holdMinutes)
-    out.push({ id: "hold", label: "Only if it lasts", hint: "Read the average price over up to an hour", icon: Timer, apply: (r) => ({ ...r, [lane]: { ...r[lane], holdMinutes: 10 } }), open: { lane, part: "hold" } });
+    out.push({ id: "hold", label: "Only if it lasts", hint: "The condition must stay true for some minutes first", icon: Timer, apply: (r) => ({ ...r, [lane]: { ...r[lane], holdMinutes: 10 } }), open: { lane, part: "hold" } });
   const allOut = (get(L, "withdraw")?.pct ?? 0) >= 100;
   if (!L.repeat && !has(L, "move") && !allOut)
     out.push({ id: "repeat", label: "Repeat it", hint: "Run again the next time", icon: Repeat, apply: (r) => ({ ...r, [lane]: { ...r[lane], repeat: true, stepPct: r[lane].stepPct ?? 5 } }), open: { lane, part: "repeat" } });
@@ -427,8 +421,8 @@ export default function StrategyEditor(p: StrategyEditorProps) {
             </section>
             <AdvancedBox value={advanced} onChange={setAdvanced} />
             <p className="px-1 text-[11px] leading-relaxed text-[var(--muted)]">
-              Price conditions read this pool's average price (at least 2 minutes, longer with “Only if it lasts”), so a swap cannot push them to fire. Chainlink conditions read Chainlink. Any keeper can run a step once its
-              condition is true; it is paid its gas, never more than your cap.
+              A price counts only while it is within about 2% of Chainlink's, so nobody can push a pool's price to fire your strategy. Any keeper can
+              run a step once its condition is true; it is paid your keeper fee, set under Settings.
             </p>
           </aside>
         </div>
@@ -521,15 +515,15 @@ function Column(c: ColumnProps) {
     cards.push({
       id: { lane, part: "hold" },
       kicker: "Only if it lasts",
-      title: `Average over ${L.holdMinutes} min`,
-      sub: "A short move or a push does not count",
+      title: `${L.holdMinutes} min in a row`,
+      sub: "A short move or a wick does not count",
       icon: Timer,
       tone: "when",
       remove: () => update((l) => ({ ...l, holdMinutes: undefined })),
       body: (
-        <Field label="Average over" hint="1 to 60 minutes. Without it, conditions still read a 2-minute average.">
+        <Field label="True for" hint="Minutes in a row (up to a day), counted from when a keeper first sees it true.">
           <Suffix value={L.holdMinutes} suffix="minutes" onChange={(x) => update((l) => ({ ...l, holdMinutes: num(x) }))} />
-          <Chips values={[5, 10, 30, 60]} current={L.holdMinutes} label={(m) => `${m} min`} onPick={(m) => update((l) => ({ ...l, holdMinutes: m }))} />
+          <Chips values={[5, 15, 60, 240]} current={L.holdMinutes} label={(m) => (m >= 60 ? `${m / 60} h` : `${m} min`)} onPick={(m) => update((l) => ({ ...l, holdMinutes: m }))} />
         </Field>
       ),
     });
@@ -593,7 +587,7 @@ function Column(c: ColumnProps) {
     });
   }
   if (L.trigger && L.repeat && !move) {
-    const level = [L.trigger, L.trigger2].some((t) => t?.kind === "price" || t?.kind === "otherPool" || t?.kind === "oracle");
+    const level = [L.trigger, L.trigger2].some((t) => t?.kind === "price" || t?.kind === "otherPool");
     cards.push({
       id: { lane, part: "repeat" },
       kicker: "Finally",
@@ -886,7 +880,7 @@ function StepFields({ pool, a, set, num }: { pool: Pool; a: Action; set: (patch:
           value={a.to ?? "quote"}
           onChange={(x) => set({ to: x as "base" | "quote" })}
         />
-        <p className="text-[12px] text-[var(--muted)]">Swapped at once, never worse than your slippage limit. If the price is far from its average, it waits until it settles.</p>
+        <p className="text-[12px] text-[var(--muted)]">Swapped at once, never worse than your slippage limit. If the pool's price is far from Chainlink's, it waits.</p>
       </>
     );
   if (a.kind === "follow")
@@ -899,7 +893,7 @@ function StepFields({ pool, a, set, num }: { pool: Pool; a: Action; set: (patch:
   return <p className="text-[13px] text-[var(--muted)]">Fees go back into the same range.</p>;
 }
 
-/** Where a move takes the money: any other Alucard pool sharing a token, or holding one token. */
+/** Where a move takes the money: any other pool sharing a token, or holding one token. */
 function MoveFields({
   pool,
   lane,
@@ -1012,24 +1006,7 @@ function TriggerFields({ pool, price, lane, t, onChange }: { pool: Pool; price: 
   const { data: wState } = useReadContract({ address: CORE.rules, abi: rulesAbi, functionName: "poolState", args: [w.index] });
   const wPrice = wState ? priceAtTick(w, Number(wState[1])) : price;
 
-  // The pair's Chainlink price, for a Chainlink condition: it can differ from the pool's price (on a testnet by a lot),
-  // so the default level and the quick buttons start from it.
-  const isLink = t.kind === "oracle";
-  const feedsAddr = useReadContract({ address: CORE.conditionalOrders, abi: conditionalOrdersAbi, functionName: "feeds", query: { enabled: isLink, retry: false } });
-  const linkTick = useReadContract({
-    address: feedsAddr.data,
-    abi: priceFeedsAbi,
-    functionName: "pairTick",
-    args: [pool.key.currency0, pool.key.currency1],
-    query: { enabled: isLink && !!feedsAddr.data, retry: false },
-  });
-  const linkPrice = linkTick.data?.[0] ? priceAtTick(pool, Number(linkTick.data[1])) : undefined;
-  const linkSettled = feedsAddr.isError || linkTick.isError || linkTick.isFetched;
-  const from = isLink ? (linkPrice ?? wPrice) : wPrice;
-  useEffect(() => {
-    if (isLink && t.price === undefined && linkSettled) onChange({ ...t, price: from * (lane === "down" ? 0.95 : 1.05) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkSettled, isLink]);
+  const from = wPrice;
   useEffect(() => {
     if (t.kind === "otherPool" && t.price === undefined && wState) onChange({ ...t, price: wPrice * (lane === "down" ? 0.95 : 1.05) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1053,15 +1030,8 @@ function TriggerFields({ pool, price, lane, t, onChange }: { pool: Pool; price: 
           </select>
         </Field>
       )}
-      {(t.kind === "price" || t.kind === "otherPool" || t.kind === "oracle") && !t.backIn && (
-        <Field
-          label={t.kind === "oracle" ? `${w.base.symbol} price on Chainlink` : `${w.base.symbol} price`}
-          hint={
-            t.kind === "oracle"
-              ? `${linkPrice !== undefined ? `Chainlink now ${fmt(linkPrice)} ${w.quote.symbol}` : "No Chainlink price right now"}.`
-              : `Now ${fmt(wPrice)} ${w.quote.symbol}${t.kind === "otherPool" ? ` in ${w.label}` : ""}`
-          }
-        >
+      {(t.kind === "price" || t.kind === "otherPool") && !t.backIn && (
+        <Field label={`${w.base.symbol} price`} hint={`Now ${fmt(wPrice)} ${w.quote.symbol}${t.kind === "otherPool" ? ` in ${w.label}` : ""}`}>
           <Suffix value={t.price === undefined ? undefined : round(t.price)} suffix={w.quote.symbol} onChange={(x) => onChange({ ...t, price: num(x) })} />
           <Chips values={[-10, -5, 5, 10]} current={undefined} label={(d) => `${d > 0 ? "+" : ""}${d}%`} onPick={(d) => onChange({ ...t, price: from * (1 + d / 100) })} />
         </Field>
@@ -1125,17 +1095,17 @@ function AdvancedBox({ value, onChange }: { value: Advanced; onChange: (a: Advan
       <button className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="label">Settings</span>
         <span className="flex items-center gap-2 text-[12px] text-[var(--muted)]">
-          keeper ≤{value.keeperFeeBps / 100}% · slippage {value.slippagePct}% · {value.expiryDays}d
+          keeper {value.keeperFeeBps / 100}% · slippage {value.slippagePct}% · {value.expiryDays}d
           <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
         </span>
       </button>
       <div className={`grid transition-[grid-template-rows] duration-200 ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
         <div className="min-h-0 overflow-hidden">
           <div className="flex flex-col gap-3 border-t border-[var(--line2)] p-4">
-            <Field label="Most a keeper can take per run" hint="Keepers are paid their gas; this is only the cap">
+            <Field label="Keeper fee per run" hint="Paid to whoever runs a step, out of what the step moves. 0 = you run it yourself">
               <Suffix value={value.keeperFeeBps / 100} suffix="%" onChange={(x) => onChange({ ...value, keeperFeeBps: Math.min(100, Math.round(Number(x) * 100)) })} />
             </Field>
-            <Field label="Swap slippage limit" hint="Also how far the price may be from its average for a step to run">
+            <Field label="Swap slippage limit" hint="How far a swap may move the price">
               <Suffix value={value.slippagePct} suffix="%" onChange={(x) => onChange({ ...value, slippagePct: Number(x) })} />
             </Field>
             <Field label="Strategy expires after">

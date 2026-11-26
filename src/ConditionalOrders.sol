@@ -16,22 +16,20 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {Position} from "@uniswap/v4-core/src/libraries/Position.sol";
 
 import {OrderState} from "./libraries/OrderState.sol";
-import {RuleHook} from "./RuleHook.sol";
-import {PriceFeeds} from "./PriceFeeds.sol";
 import {Rules} from "./Rules.sol";
 
-/// @title ConditionalOrders: LP positions on autopilot
+/// @title ConditionalOrders: LP positions that run their owner's strategy
 /// @notice An LP adds liquidity through this contract together with a strategy. This contract owns the position in
-/// the PoolManager (owner = this contract, salt = orderId), in pools that use RuleHook. Anyone may call `execute`;
-/// the contract asks `Rules` whether the condition is true (on average prices, never the price of the moment), runs
-/// the actions, pays the caller its measured gas out of the order's tokens (capped by the owner), and sends
-/// everything else to the owner. The owner can cancel at any time.
+/// the PoolManager (owner = this contract, salt = orderId), in any pool `Rules` knows (two listed tokens, no hook or
+/// the limit-order hook). Anyone may call `execute`; the contract asks `Rules` whether the condition is true and
+/// whether the pool's price is near Chainlink (so nobody can push it to fire a strategy), runs the steps, pays the
+/// caller the owner's keeper fee out of what the run moved, and sends everything else to the owner. The owner can
+/// cancel at any time.
 ///
 /// A strategy is one leg or two. A leg is where the tokens are: a position (in a fixed range, or one centred on the
-/// price when it is entered) or waiting, with the tokens held for the order. Each leg has its own two sides (rules).
-/// A side with ACT_MOVE takes everything out of the leg it is in and puts it into the other leg, which then becomes
-/// the live one: for example "below my range, swap to USDC and wait in a USDC/USDT position; once ETH is back in
-/// my range, come back".
+/// price when it is entered) or waiting, with the tokens held for the order. Each leg has its own two sides. A side
+/// with ACT_MOVE takes everything out of the leg it is in and puts it into the other leg, which then becomes the live
+/// one: for example "below my range, swap to USDC and add it to USDC/USDT; once ETH is back in my range, come back".
 ///
 /// Payouts never block an order: if sending to the owner fails (a contract that cannot take ETH, a blacklisted
 /// address), the amount is kept here as `owed` and the owner withdraws it later to any address.
@@ -43,14 +41,13 @@ contract ConditionalOrders is IUnlockCallback {
     using OrderState for OrderState.Side;
 
     error NotPoolManager();
-    error PoolNotAllowed();
-    error UnknownPool();
     error InvalidOrder();
     error NotOwner();
     error UnknownOrder();
     error Expired();
     error SideOff();
     error ConditionNotMet();
+    error NotHeldLongEnough();
     error TooSoon();
     error NoPrice();
     error NothingToEnter();
@@ -59,31 +56,16 @@ contract ConditionalOrders is IUnlockCallback {
     error BadMsgValue();
     error RefundFailed();
     error NothingOwed();
-    error TokenNotAllowed();
-    error OrderTooSmall();
-    error OnlySelf();
-    error BatchOutOfGas();
 
     uint256 internal constant BPS = 10_000;
     uint8 public constant MAX_KEEPER_FEE_BPS = 100;
     /// @notice A side runs at most once in this many seconds after its last run (kept to the minute, rounded up, so
     /// in practice one to two minutes). A run that leaves its condition true (a ladder the price jumped past) runs
-    /// again then, and no transaction can loop a side to drain keeper pay.
+    /// again then, and no transaction can loop a side.
     uint256 public constant MIN_GAP = 60;
 
-    /// @dev Keeper pay is the gas a run used, priced by Rules.keeperPay, taken from the tokens the run took out and
-    /// never more than maxKeeperFeeBps of them. The gas is measured up to the final transfers. What the measurement
-    /// cannot see is added as fixed amounts: KEEPER_GAS_OVERHEAD for the transaction's base cost, its calldata, the
-    /// call into the PoolManager and the keeper's own transfer, and TRANSFER_GAS for each token sent to the owner.
-    uint256 public constant KEEPER_GAS_OVERHEAD = 36_000;
-    /// @dev In `executeMany` the orders share one KEEPER_GAS_OVERHEAD, and each adds these smaller amounts: after the
-    /// first order the tokens and accounts are already loaded in the transaction, so its transfers cost less.
-    uint256 public constant BATCH_ORDER_GAS = 6_000;
-    uint256 public constant BATCH_TRANSFER_GAS = 8_000;
-    /// @dev Gas counted for each token sent to the owner after the measurement.
-    uint256 public constant TRANSFER_GAS = 20_000;
     /// @dev Gas given to the owner's address when sending it ETH. Enough for a smart wallet's receive; a contract that
-    /// needs more gets its ETH as `owed`. Kept near TRANSFER_GAS, which is all the keeper is paid for it.
+    /// needs more gets its ETH as `owed`.
     uint256 public constant PAYOUT_GAS = 30_000;
 
     /// @dev Three storage slots per order.
@@ -92,8 +74,8 @@ contract ConditionalOrders is IUnlockCallback {
         address owner;
         uint24 poolIndex; // pool of the live leg: positions and swaps are in it
         uint32 expiry;
-        uint8 maxKeeperFeeBps; // ceiling on the keeper's pay per run, in bps of the tokens the run takes out
-        uint8 maxSlippage; // swaps stop this far past the average price, in steps of 10 ticks (~0.1%)
+        uint8 keeperFeeBps; // what the keeper is paid per run, in bps of the tokens the run takes out
+        uint8 maxSlippage; // swaps stop this far past the price before them, in steps of 10 ticks (~0.1%)
         // slots 1 and 2, rewritten when the order runs: the live leg's sides, one OrderState word each
         uint256 lowerState;
         uint256 upperState;
@@ -117,7 +99,7 @@ contract ConditionalOrders is IUnlockCallback {
         uint128 amount0Max;
         uint128 amount1Max;
         uint32 expiry;
-        uint8 maxKeeperFeeBps;
+        uint8 keeperFeeBps;
         uint8 maxSlippage; // steps of 10 ticks
         uint256 lower; // the sides, each packed in one word (Rules.encode packs a Side)
         uint256 upper;
@@ -131,7 +113,7 @@ contract ConditionalOrders is IUnlockCallback {
     /// @dev New rule for the live leg of an order. Its position and the other leg stay as they are.
     struct UpdateParams {
         uint32 expiry;
-        uint8 maxKeeperFeeBps;
+        uint8 keeperFeeBps;
         uint8 maxSlippage;
         uint256 lower; // packed sides (Rules.encode)
         uint256 upper;
@@ -140,8 +122,7 @@ contract ConditionalOrders is IUnlockCallback {
     enum Op {
         Create,
         Execute,
-        Cancel,
-        ExecuteMany
+        Cancel
     }
 
     /// @dev Working data for one execution, kept in memory to avoid stack limits.
@@ -149,9 +130,6 @@ contract ConditionalOrders is IUnlockCallback {
         uint256 orderId;
         bool upper;
         address keeper;
-        uint256 gasStart;
-        uint256 overhead; // gas allowance for what the measurement cannot see
-        uint256 transferGas; // gas allowance per token sent to the owner
         Order order;
         OrderState.State st;
         PoolKey key; // the pool the run starts in: the keeper is paid in its tokens
@@ -159,20 +137,21 @@ contract ConditionalOrders is IUnlockCallback {
         bytes32 salt;
         uint256 w0; // tokens the actions may use
         uint256 w1;
-        uint256 reserve0; // set aside for the keeper (the fee ceiling); the unused part goes to the owner
+        uint256 reserve0; // the keeper's fee
         uint256 reserve1;
     }
 
     IPoolManager public immutable poolManager;
-    RuleHook public immutable hook; // the pool table and the average prices
-    PriceFeeds public immutable feeds; // the token list: Chainlink prices for keeper pay, order size and conditions
-    Rules public immutable rules; // conditions and rule checks
+    Rules public immutable rules; // the pool table, conditions, price checks and strategy checks
 
     uint256 public nextOrderId = 1;
     mapping(uint256 orderId => Order) internal _orders;
     mapping(uint256 orderId => Plan) internal _plans;
     /// @dev Every order id an address created (closed ones included; their owner reads as zero).
     mapping(address owner => uint256[] orderIds) internal _ordersOf;
+    /// @dev When each side's condition was first seen true by `poke` (for a side with a hold): lower side in the low
+    /// 32 bits, upper side in the high 32. 0 = not seen true yet.
+    mapping(uint256 orderId => uint64) internal _armed;
     /// @notice Payouts that could not be sent, waiting for the owner to withdraw them.
     mapping(address owner => mapping(Currency currency => uint256 amount)) public owed;
 
@@ -181,7 +160,7 @@ contract ConditionalOrders is IUnlockCallback {
         address indexed owner,
         uint24 indexed poolIndex,
         uint32 expiry,
-        uint8 maxKeeperFeeBps,
+        uint8 keeperFeeBps,
         uint8 maxSlippage,
         uint256 lowerState,
         uint256 upperState
@@ -205,10 +184,8 @@ contract ConditionalOrders is IUnlockCallback {
     event PayoutHeld(address indexed owner, Currency indexed currency, uint256 amount);
     event Withdrawn(address indexed owner, Currency indexed currency, address to, uint256 amount);
 
-    constructor(IPoolManager _poolManager, RuleHook _hook, PriceFeeds _feeds, Rules _rules) {
+    constructor(IPoolManager _poolManager, Rules _rules) {
         poolManager = _poolManager;
-        hook = _hook;
-        feeds = _feeds;
         rules = _rules;
     }
 
@@ -229,16 +206,11 @@ contract ConditionalOrders is IUnlockCallback {
     /// @notice Add liquidity with a strategy attached. Approve this contract for both tokens first (for native ETH as
     /// currency0, send it as msg.value; anything not used is refunded).
     function createOrder(CreateParams calldata p) external payable returns (uint256 orderId) {
-        if (address(p.key.hooks) != address(hook)) revert PoolNotAllowed();
-        uint24 poolIndex = hook.poolIndexOf(p.key.toId());
-        if (poolIndex == 0) revert UnknownPool();
-        // only pairs of listed tokens: each has a Chainlink price, so the keeper can be paid its gas in either one
-        if (!feeds.isListed(Currency.unwrap(p.key.currency0)) || !feeds.isListed(Currency.unwrap(p.key.currency1))) {
-            revert TokenNotAllowed();
-        }
+        // any pool of two listed tokens (registered here if new): their Chainlink prices guard every run
+        uint24 poolIndex = rules.registerPool(p.key);
         if (
             p.liquidity == 0 || p.tickLower >= p.tickUpper || p.expiry <= block.timestamp
-                || p.maxKeeperFeeBps > MAX_KEEPER_FEE_BPS
+                || p.keeperFeeBps > MAX_KEEPER_FEE_BPS
         ) revert InvalidOrder();
         if (!p.key.currency0.isAddressZero() && msg.value != 0) revert BadMsgValue();
 
@@ -258,7 +230,7 @@ contract ConditionalOrders is IUnlockCallback {
             owner: msg.sender,
             poolIndex: poolIndex,
             expiry: p.expiry,
-            maxKeeperFeeBps: p.maxKeeperFeeBps,
+            keeperFeeBps: p.keeperFeeBps,
             maxSlippage: p.maxSlippage,
             lowerState: lo,
             upperState: up
@@ -267,15 +239,14 @@ contract ConditionalOrders is IUnlockCallback {
         bytes memory res = poolManager.unlock(
             abi.encode(Op.Create, orderId, abi.encode(p.liquidity, p.amount0Max, p.amount1Max, msg.sender))
         );
-        (uint256 paid0, uint256 paid1) = abi.decode(res, (uint256, uint256));
-        _checkOrderSize(p.key, paid0, paid1);
+        (uint256 paid0,) = abi.decode(res, (uint256, uint256));
 
         if (p.key.currency0.isAddressZero() && msg.value > paid0) {
             (bool ok,) = msg.sender.call{value: msg.value - paid0}("");
             if (!ok) revert RefundFailed();
         }
 
-        emit OrderCreated(orderId, msg.sender, poolIndex, p.expiry, p.maxKeeperFeeBps, p.maxSlippage, lo, up);
+        emit OrderCreated(orderId, msg.sender, poolIndex, p.expiry, p.keeperFeeBps, p.maxSlippage, lo, up);
     }
 
     /// @notice Change the rule of the live leg of an open order (owner only). The position, the other leg, and the
@@ -284,7 +255,7 @@ contract ConditionalOrders is IUnlockCallback {
         Order storage o = _orders[orderId];
         if (o.owner == address(0)) revert UnknownOrder();
         if (msg.sender != o.owner) revert NotOwner();
-        if (p.expiry <= block.timestamp || p.maxKeeperFeeBps > MAX_KEEPER_FEE_BPS) revert InvalidOrder();
+        if (p.expiry <= block.timestamp || p.keeperFeeBps > MAX_KEEPER_FEE_BPS) revert InvalidOrder();
 
         (uint256 lo, uint256 up) = (p.lower, p.upper);
         OrderState.State memory st = _decodeWords(lo, up);
@@ -309,10 +280,11 @@ contract ConditionalOrders is IUnlockCallback {
         (lo, up) = _encode(st);
 
         o.expiry = p.expiry;
-        o.maxKeeperFeeBps = p.maxKeeperFeeBps;
+        o.keeperFeeBps = p.keeperFeeBps;
         o.maxSlippage = p.maxSlippage;
         o.lowerState = lo;
         o.upperState = up;
+        delete _armed[orderId]; // new sides: holds start again
         emit OrderUpdated(orderId, lo, up);
     }
 
@@ -324,44 +296,44 @@ contract ConditionalOrders is IUnlockCallback {
         poolManager.unlock(abi.encode(Op.Execute, orderId, abi.encode(upper, msg.sender)));
     }
 
-    /// @notice Run many sides in one transaction. An order that cannot run (condition not met, expired, closed) is
-    /// skipped and the rest still run. Each order pays for its own measured gas; the cost every transaction pays
-    /// once is shared between them, so a run costs its owner less than through `execute`.
-    /// @return ran how many of them ran
-    function executeMany(uint256[] calldata orderIds, bool[] calldata uppers) external returns (uint256 ran) {
-        if (orderIds.length == 0 || orderIds.length != uppers.length) revert InvalidOrder();
-        bytes memory res = poolManager.unlock(abi.encode(Op.ExecuteMany, 0, abi.encode(orderIds, uppers, msg.sender)));
-        ran = abi.decode(res, (uint256));
-    }
-
-    /// @dev One order of `executeMany`, as a call to this contract so a failing order undoes only itself.
-    function runOne(uint256 orderId, bool upper, address keeper, uint256 batchSize) external {
-        if (msg.sender != address(this)) revert OnlySelf();
-        uint256 gasStart = gasleft();
-        Order storage o = _orders[orderId];
-        if (o.owner == address(0)) revert UnknownOrder();
-        if (block.timestamp > o.expiry) revert Expired();
-        _execute(
-            orderId, upper, keeper, gasStart, KEEPER_GAS_OVERHEAD / batchSize + BATCH_ORDER_GAS, BATCH_TRANSFER_GAS
-        );
-    }
-
-    /// @notice Move a trailing side's remembered best price to the current average price, when that is better.
-    /// Anyone can call; it moves no tokens.
+    /// @notice Keep a side's memory up to date. Anyone can call; it moves no tokens. Keepers call it as the price moves:
+    ///  - a trailing side remembers the best price (the lower side the highest, the upper side the lowest);
+    ///  - a side with a hold remembers when its condition was first seen true, and forgets it once it is not.
     function poke(uint256 orderId, bool upper) external {
         Order storage o = _orders[orderId];
         if (o.owner == address(0)) revert UnknownOrder();
         if (block.timestamp > o.expiry) revert Expired();
         uint256 word = upper ? o.upperState : o.lowerState;
-        (bool trails, bool ok, int24 t) = rules.trailTick(o.poolIndex, word);
         OrderState.Side memory sd = OrderState.decodeSide(word);
-        // the lower side remembers the highest price seen, the upper side the lowest
-        if (!trails || !ok || (upper ? t >= sd.best : t <= sd.best)) revert NothingToPoke();
-        sd.best = t;
-        word = OrderState.encodeSide(sd);
-        if (upper) o.upperState = word;
-        else o.lowerState = word;
+        bool changed;
+        (bool trails, bool ok, int24 t) = rules.trailTick(o.poolIndex, word);
+        if (trails && ok && (upper ? t < sd.best : t > sd.best)) {
+            sd.best = t;
+            word = OrderState.encodeSide(sd);
+            if (upper) o.upperState = word;
+            else o.lowerState = word;
+            changed = true;
+        }
+        if (sd.holdMinutes != 0) {
+            bool isMet = rules.met(address(this), orderId, o.poolIndex, o.lowerState, o.upperState, upper);
+            uint32 armed = armedAt(orderId, upper);
+            if (isMet == (armed == 0)) {
+                _setArmed(orderId, upper, isMet ? uint32(block.timestamp) : 0);
+                changed = true;
+            }
+        }
+        if (!changed) revert NothingToPoke();
         emit OrderPoked(orderId, upper, word);
+    }
+
+    /// @notice When a side's condition was first seen true (0 = not now): its hold counts from then.
+    function armedAt(uint256 orderId, bool upper) public view returns (uint32) {
+        return uint32(_armed[orderId] >> (upper ? 32 : 0));
+    }
+
+    function _setArmed(uint256 orderId, bool upper, uint32 t) internal {
+        uint64 a = _armed[orderId];
+        _armed[orderId] = upper ? (a & 0xFFFFFFFF) | (uint64(t) << 32) : (a & ~uint64(0xFFFFFFFF)) | uint64(t);
     }
 
     /// @notice Close the order and send all tokens to the owner. The owner can do this at any time,
@@ -406,31 +378,11 @@ contract ConditionalOrders is IUnlockCallback {
     // ---------------------------------------------------------------
 
     function unlockCallback(bytes calldata data) external onlyPoolManager returns (bytes memory) {
-        // Gas is measured inside this one call frame. Measuring across the call into the PoolManager would count
-        // the 1/64 of gas the EVM holds back, which grows with the gas limit the keeper picks.
-        uint256 gasStart = gasleft();
         (Op op, uint256 orderId, bytes memory args) = abi.decode(data, (Op, uint256, bytes));
         if (op == Op.Create) return _create(orderId, args);
         if (op == Op.Execute) {
             (bool upper, address keeper) = abi.decode(args, (bool, address));
-            _execute(orderId, upper, keeper, gasStart, KEEPER_GAS_OVERHEAD, TRANSFER_GAS);
-        } else if (op == Op.ExecuteMany) {
-            (uint256[] memory ids, bool[] memory uppers, address keeper) =
-                abi.decode(args, (uint256[], bool[], address));
-            uint256 ran;
-            for (uint256 i; i < ids.length; ++i) {
-                uint256 given = gasleft();
-                try this.runOne(ids[i], uppers[i], keeper, ids.length) {
-                    ++ran;
-                } catch (bytes memory reason) {
-                    // An order that ran out of gas must not look like one that could not run: a gas estimate only
-                    // finds the gas for this transaction not to revert, and would settle on too little. Running out
-                    // of gas leaves no reason (an order that cannot run says why), and a call that used up its gas
-                    // leaves about 1/64 of it here; either way the whole batch reverts.
-                    if (reason.length == 0 || gasleft() < given / 60) revert BatchOutOfGas();
-                }
-            }
-            return abi.encode(ran);
+            _execute(orderId, upper, keeper);
         } else {
             Order memory o = _orders[orderId];
             PoolKey memory key = _key(o.poolIndex);
@@ -470,21 +422,11 @@ contract ConditionalOrders is IUnlockCallback {
     // Execution
     // ---------------------------------------------------------------
 
-    function _execute(
-        uint256 orderId,
-        bool upper,
-        address keeper,
-        uint256 gasStart,
-        uint256 overhead,
-        uint256 transferGas
-    ) internal {
+    function _execute(uint256 orderId, bool upper, address keeper) internal {
         Run memory r;
         r.orderId = orderId;
         r.upper = upper;
         r.keeper = keeper;
-        r.gasStart = gasStart;
-        r.overhead = overhead;
-        r.transferGas = transferGas;
         r.order = _orders[orderId];
         r.st = _decode(r.order);
         r.key = _key(r.order.poolIndex);
@@ -497,8 +439,15 @@ contract ConditionalOrders is IUnlockCallback {
         if (!rules.met(address(this), orderId, r.order.poolIndex, r.order.lowerState, r.order.upperState, upper)) {
             revert ConditionNotMet();
         }
-        // runs swap and deposit at the price of the moment: never at a pushed one
-        rules.checkPrice(r.key, r.order.maxSlippage);
+        if (sd.holdMinutes != 0) {
+            uint32 armed = armedAt(orderId, upper);
+            if (armed == 0 || block.timestamp < uint256(armed) + uint256(sd.holdMinutes) * 60) {
+                revert NotHeldLongEnough();
+            }
+            _setArmed(orderId, upper, 0); // a repeating side waits its hold again
+        }
+        // runs swap and deposit at the price of the moment: only while it is near Chainlink
+        rules.checkPrice(r.key);
         if (sd.actions & OrderState.ACT_MOVE != 0) return _move(r, sd);
 
         _removeAndReserve(r, sd);
@@ -514,8 +463,8 @@ contract ConditionalOrders is IUnlockCallback {
         }
         if (again) {
             _startTrail(r.order.poolIndex, sd); // a trailing stop starts again from the price after this run
-            // a repeating price level moves by `shape`, except when `shape` holds the widths of a one-sided re-range
-            if (sd.actions & OrderState.ACT_ADD == 0 || sd.addMode != OrderState.ADD_ONE_SIDED) {
+            // a repeating price level moves by `shape` (a re-centring side keeps its widths there, and has no level)
+            if (sd.actions & OrderState.ACT_ADD == 0 || sd.addMode != OrderState.ADD_CENTERED) {
                 int256 step = upper ? int256(uint256(sd.shape)) : -int256(uint256(sd.shape));
                 if (_isLevel(sd.checker)) sd.value = _clampTick(int256(sd.value) + step);
                 if (sd.combine != OrderState.COMBINE_NONE && _isLevel(sd.checker2)) {
@@ -560,6 +509,7 @@ contract ConditionalOrders is IUnlockCallback {
         OrderState.State memory next;
         next.lower = OrderState.decodeSide(plan.thereLower);
         next.upper = OrderState.decodeSide(plan.thereUpper);
+        delete _armed[r.orderId]; // the other leg's sides start fresh
         plan.here = to;
         plan.there = left;
         plan.thereLower = leftLower;
@@ -568,8 +518,8 @@ contract ConditionalOrders is IUnlockCallback {
         // 3. enter the other leg
         r.to = _key(to.poolIndex);
         (int24 tickLower, int24 tickUpper) = _enter(r, plan, to);
-        // a range entered with nothing (its swap was past the slippage limit, say in a crash): the move waits and is
-        // tried again later, when the average price has caught up
+        // a range entered with nothing (its swap stopped at the slippage limit at once): the move waits and is tried
+        // again later
         if (to.kind != OrderState.LEG_IDLE && _positionLiquidity(r.to, tickLower, tickUpper, r.salt) == 0) {
             revert NothingToEnter();
         }
@@ -601,7 +551,7 @@ contract ConditionalOrders is IUnlockCallback {
             return (0, 0);
         }
         PoolKey memory k = r.to;
-        if (to.poolIndex != r.order.poolIndex) rules.checkPrice(k, r.order.maxSlippage); // the pool it goes into
+        if (to.poolIndex != r.order.poolIndex) rules.checkPrice(k); // the pool it goes into
         uint256 h0 = _amountOf(r, k.currency0);
         uint256 h1 = _amountOf(r, k.currency1);
         (tickLower, tickUpper) = rules.rangeOf(k, to);
@@ -619,7 +569,7 @@ contract ConditionalOrders is IUnlockCallback {
     }
 
     /// @dev Swap holdings (h0, h1) of pool k to the mix the range needs (Rules.mixFor), never more than maxSlippage
-    /// past the average price. Returns the holdings after the swap.
+    /// past the price before it. Returns the holdings after the swap.
     function _zapSwap(Run memory r, PoolKey memory k, int24 tickLower, int24 tickUpper, uint256 h0, uint256 h1)
         internal
         returns (uint256, uint256)
@@ -657,7 +607,7 @@ contract ConditionalOrders is IUnlockCallback {
         }
     }
 
-    /// @dev Leaving a waiting leg: turn the held claims back into a credit, and set the keeper's ceiling aside.
+    /// @dev Leaving a waiting leg: turn the held claims back into a credit, and set the keeper's fee aside.
     function _release(Run memory r, Plan storage plan) internal {
         uint256 held0 = plan.held0;
         uint256 held1 = plan.held1;
@@ -665,12 +615,11 @@ contract ConditionalOrders is IUnlockCallback {
         _reserve(r, OrderState.decodeSide(0), held0, held1);
     }
 
-    /// @dev Set the keeper's ceiling aside from what a run took out; the rest is what the actions may use.
-    /// A run that swaps pays the keeper after the swap, out of what the swap produced (see _instantSwap), so the
-    /// unused part of the ceiling comes back in the token the owner asked for.
+    /// @dev Set the keeper's fee aside from what a run took out; the rest is what the actions may use. A run that
+    /// swaps pays the keeper after the swap, out of what the swap produced (see _instantSwap).
     function _reserve(Run memory r, OrderState.Side memory sd, uint256 out0, uint256 out1) internal pure {
-        r.reserve0 = (out0 * r.order.maxKeeperFeeBps) / BPS;
-        r.reserve1 = (out1 * r.order.maxKeeperFeeBps) / BPS;
+        r.reserve0 = (out0 * r.order.keeperFeeBps) / BPS;
+        r.reserve1 = (out1 * r.order.keeperFeeBps) / BPS;
         if (sd.actions & OrderState.ACT_SWAP != 0) {
             if (sd.swapToToken1) r.reserve0 = 0;
             else r.reserve1 = 0;
@@ -679,19 +628,13 @@ contract ConditionalOrders is IUnlockCallback {
         r.w1 = out1 - r.reserve1;
     }
 
-    /// @dev The last step of a run: pay the keeper (Rules.keeperPay prices the gas, capped by the reserve), then send
-    /// everything else this contract is owed to the owner.
+    /// @dev The last step of a run: pay the keeper its fee, then send everything else this contract is owed to the
+    /// owner.
     function _settle(Run memory r) internal {
-        // what this contract is owed in this unlock: the keeper's pay comes out of it, the owner gets the rest
         uint256 c0 = _credit(r.key.currency0);
         uint256 c1 = _credit(r.key.currency1);
-        if (r.reserve0 > c0) r.reserve0 = c0;
-        if (r.reserve1 > c1) r.reserve1 = c1;
-        // tokens still to be sent to the owner, including those of a new pair
-        uint256 transfers = (c0 > 0 ? 1 : 0) + (c1 > 0 ? 1 : 0) + _extraCredits(r);
-        (uint256 pay0, uint256 pay1) = rules.keeperPay(
-            r.key, r.gasStart - gasleft() + r.overhead + transfers * r.transferGas, r.reserve0, r.reserve1
-        );
+        uint256 pay0 = r.reserve0 < c0 ? r.reserve0 : c0;
+        uint256 pay1 = r.reserve1 < c1 ? r.reserve1 : c1;
         r.key.currency0.take(poolManager, r.keeper, pay0, false);
         r.key.currency1.take(poolManager, r.keeper, pay1, false);
         if (c0 > pay0) _send(r.key.currency0, r.order.owner, c0 - pay0);
@@ -699,30 +642,14 @@ contract ConditionalOrders is IUnlockCallback {
         _payOut(r.to, r.order.owner); // a move into another pair may leave a little of its tokens
     }
 
-    /// @dev Tokens of the run's new pair (not in its first pair) that are still owed to the owner.
-    function _extraCredits(Run memory r) internal view returns (uint256 n) {
-        if (!_inPair(r.to.currency0, r.key) && _credit(r.to.currency0) > 0) ++n;
-        if (!_inPair(r.to.currency1, r.key) && _credit(r.to.currency1) > 0) ++n;
-    }
-
     function _credit(Currency currency) internal view returns (uint256) {
         int256 d = poolManager.currencyDelta(address(this), currency);
         return d > 0 ? uint256(d) : 0;
     }
 
-    /// @dev A new order must be worth at least the list's minimum, at fresh Chainlink prices.
-    function _checkOrderSize(PoolKey memory key, uint256 paid0, uint256 paid1) internal view {
-        uint256 min = feeds.minOrderUsd();
-        if (min == 0) return;
-        (bool ok0, uint256 usd0) = feeds.usdValue(Currency.unwrap(key.currency0), paid0);
-        (bool ok1, uint256 usd1) = feeds.usdValue(Currency.unwrap(key.currency1), paid1);
-        if (!ok0 || !ok1 || usd0 + usd1 < min) revert OrderTooSmall();
-    }
-
-    /// @dev Swap everything of one token into the other in the order's pool, stopping maxSlippage past the
-    /// average price. If the price is already past that limit, the swap is skipped and the owner receives the token
-    /// unswapped. The keeper's ceiling for this run is then set on what the swap left: the bought amount, plus
-    /// anything that stayed unsold.
+    /// @dev Swap everything of one token into the other in the order's pool, stopping maxSlippage past the price
+    /// before it. Whatever that limit leaves unsold goes to the owner as it is. The keeper's fee for this run is then
+    /// taken from what the swap left: the bought amount, plus anything that stayed unsold.
     function _instantSwap(Run memory r, OrderState.Side memory sd) internal {
         bool zeroForOne = sd.swapToToken1;
         uint256 amountIn = zeroForOne ? r.w0 : r.w1;
@@ -730,7 +657,7 @@ contract ConditionalOrders is IUnlockCallback {
 
         (uint256 spent, uint256 got) =
             _swap(r.key, zeroForOne, amountIn, rules.swapLimit(r.key, zeroForOne, r.order.maxSlippage));
-        uint256 fee = r.order.maxKeeperFeeBps;
+        uint256 fee = r.order.keeperFeeBps;
         uint256 unsold = amountIn - spent;
         uint256 bought = got - (got * fee) / BPS;
         if (zeroForOne) {
@@ -756,21 +683,17 @@ contract ConditionalOrders is IUnlockCallback {
         got = _pos(zeroForOne ? d.amount1() : d.amount0());
     }
 
-    /// @dev Add the working tokens back: same range, or one-sided next to the average price.
+    /// @dev Add the working tokens back: into the same range, or into a new range around the price (re-centre),
+    /// swapped to the mix that range needs first, the same way a move enters a range.
     function _add(Run memory r, OrderState.Side memory sd) internal {
         int24 lower = r.st.lower.edge;
         int24 upper = r.st.upper.edge;
         uint256 a0 = r.w0;
         uint256 a1 = r.w1;
 
-        if (sd.addMode == OrderState.ADD_ONE_SIDED) {
-            // price rose out of the range: the upper side holds token1 and places it just below the price;
-            // price fell out: the lower side holds token0 and places it just above
-            bool room;
-            (room, lower, upper) = rules.besidePrice(r.key, r.upper, r.upper ? sd.widthBelow() : sd.widthAbove());
-            if (!room) return; // tokens go to the owner and the order closes
-            if (r.upper) a0 = 0;
-            else a1 = 0;
+        if (sd.addMode == OrderState.ADD_CENTERED) {
+            (lower, upper) = rules.centeredRange(r.key, sd.widthBelow(), sd.widthAbove());
+            (a0, a1) = _zapSwap(r, r.key, lower, upper, a0, a1);
         }
 
         uint128 liq = rules.liquidityFor(r.key, lower, upper, a0, a1);
@@ -901,7 +824,7 @@ contract ConditionalOrders is IUnlockCallback {
         _startTrail(poolIndex, st.upper);
     }
 
-    /// @dev Start a trailing condition from the current average price of the pool it reads.
+    /// @dev Start a trailing condition from the current price of the pool it reads (it must be near Chainlink).
     function _startTrail(uint24 poolIndex, OrderState.Side memory sd) internal view {
         sd.best = 0;
         (bool trails, bool ok, int24 t) = rules.trailTick(poolIndex, OrderState.encodeSide(sd));
@@ -934,7 +857,7 @@ contract ConditionalOrders is IUnlockCallback {
     }
 
     function _isLevel(uint8 checker) internal pure returns (bool) {
-        return checker == OrderState.CHECK_TICK || checker == OrderState.CHECK_ORACLE;
+        return checker == OrderState.CHECK_TICK;
     }
 
     function _positionLiquidity(PoolKey memory key, int24 tickLower, int24 tickUpper, bytes32 salt)
@@ -961,7 +884,7 @@ contract ConditionalOrders is IUnlockCallback {
     }
 
     function _key(uint24 index) internal view returns (PoolKey memory) {
-        return hook.poolKeyAt(index);
+        return rules.poolKeyAt(index);
     }
 
     function _clampTick(int256 t) internal pure returns (int24) {

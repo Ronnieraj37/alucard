@@ -152,7 +152,7 @@ export async function loadRulePosition(client: Client, id: bigint): Promise<Rule
     rules,
     liveIsHome,
     advanced: {
-      keeperFeeBps: Number(order.maxKeeperFeeBps),
+      keeperFeeBps: Number(order.keeperFeeBps),
       slippagePct: Number(order.maxSlippage) / 10,
       expiryDays: Math.max(1, Math.round((Number(order.expiry) - Date.now() / 1000) / 86400)),
     },

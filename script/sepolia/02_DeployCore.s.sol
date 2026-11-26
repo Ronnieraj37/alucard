@@ -31,6 +31,7 @@ contract DeployCore is Script {
     // how old an answer may be: the heartbeat plus slack (testnet feeds are sometimes late)
     uint32 constant HOURLY = 3 hours;
     uint32 constant DAILY = 26 hours;
+    uint24 constant MAX_DEVIATION_TICKS = 200;
 
     function run() external {
         string memory dir = vm.envOr("OUT_DIR", string("./deployments"));
@@ -41,22 +42,25 @@ contract DeployCore is Script {
         vm.startBroadcast();
         PriceFeeds feeds = new PriceFeeds(msg.sender);
         address usdtUsd = _usdtFeed();
-        feeds.setFeed(address(0), ETH_USD, HOURLY); // native ETH: gas is priced through it
+        feeds.setFeed(address(0), ETH_USD, HOURLY); // native ETH
         feeds.setFeed(vm.parseJsonAddress(toks, ".WETH"), ETH_USD, HOURLY);
         feeds.setFeed(vm.parseJsonAddress(toks, ".WBTC"), BTC_USD, HOURLY);
         feeds.setFeed(vm.parseJsonAddress(toks, ".LINK"), LINK_USD, HOURLY);
         feeds.setFeed(vm.parseJsonAddress(toks, ".USDC"), USDC_USD, DAILY);
         feeds.setFeed(vm.parseJsonAddress(toks, ".DAI"), DAI_USD, DAILY);
         feeds.setFeed(vm.parseJsonAddress(toks, ".USDT"), usdtUsd, DAILY);
+        // a pool's price must be within ~2% of Chainlink for a strategy step to run (frontend/scripts/arb.ts keeps
+        // the test pools there, as arbitrageurs do on mainnet)
+        feeds.setMaxDeviationTicks(MAX_DEVIATION_TICKS);
         vm.stopBroadcast();
 
-        bytes memory args = abi.encode(poolManager, feeds);
+        bytes memory args = abi.encode(poolManager);
         (address hookAddress, bytes32 salt) = HookMiner.find(CREATE2_FACTORY, flags, type(RuleHook).creationCode, args);
 
         vm.startBroadcast();
-        RuleHook hook = new RuleHook{salt: salt}(poolManager, feeds);
-        Rules rules = new Rules(poolManager, hook, feeds);
-        ConditionalOrders orders = new ConditionalOrders(poolManager, hook, feeds, rules);
+        RuleHook hook = new RuleHook{salt: salt}(poolManager);
+        Rules rules = new Rules(poolManager, address(hook), feeds);
+        ConditionalOrders orders = new ConditionalOrders(poolManager, rules);
         vm.stopBroadcast();
         require(address(hook) == hookAddress, "hook address mismatch");
 

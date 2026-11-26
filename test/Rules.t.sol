@@ -71,12 +71,12 @@ contract RulesTest is RuleSetup {
         _refuse(_off(), _side(OrderState.CHECK_FEES, 10_001, OrderState.ACT_KEEP_FEES | OrderState.ACT_ADD, 0));
     }
 
-    /// A hold is the averaging time, at most an hour (the hook keeps about an hour of prices).
-    function test_holdIsAtMostAnHour() public {
+    /// A hold is at most a day.
+    function test_holdIsAtMostADay() public {
         OrderState.Side memory s = _exit(OrderState.CHECK_EDGE, 0);
-        s.holdMinutes = 61;
+        s.holdMinutes = 1441;
         _refuse(s, _off());
-        s.holdMinutes = 60;
+        s.holdMinutes = 1440;
         _create(s, _off());
     }
 
@@ -95,15 +95,15 @@ contract RulesTest is RuleSetup {
         _refuse(s, _off());
     }
 
-    /// Conditions read only pools of the hook (they have an average price). A pool registered for its price alone
-    /// (no hook) cannot be read: its price of the moment is all there is.
-    function test_conditionsReadOnlyHookPools() public {
+    /// A condition can read any registered pool, with or without a hook; not one nobody registered.
+    function test_conditionsReadAnyRegisteredPool() public {
         PoolKey memory bare = PoolKey(currency0, currency1, 500, 10, IHooks(address(0)));
         poolManager.initialize(bare, Constants.SQRT_PRICE_1_1);
-        uint24 bareIndex = hook.registerPool(bare);
         OrderState.Side memory s = _exit(OrderState.CHECK_TICK, -300);
-        s.checkPool = bareIndex;
-        _refuse(s, _off());
+        s.checkPool = 2;
+        _refuse(s, _off()); // not registered yet
+        assertEq(rules.registerPool(bare), 2);
+        _create(s, _off());
     }
 
     function test_conditionCannotNameItsOwnPool() public {
@@ -160,7 +160,7 @@ contract LegRulesTest is RuleSetup {
         feeds.setFeed(address(t), address(f), MAX_AGE);
         (Currency a, Currency b) = currency1 < currency2 ? (currency1, currency2) : (currency2, currency1);
         other = _newPool(a, b, Constants.SQRT_PRICE_1_1);
-        otherIndex = hook.poolIndexOf(other.toId());
+        otherIndex = rules.poolIndexOf(other.toId());
         _wait(1 hours);
     }
 

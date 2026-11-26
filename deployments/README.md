@@ -6,16 +6,17 @@ Everything here is on **Ethereum Sepolia** (chain id 11155111). The JSON files n
 
 | Contract | Address |
 |---|---|
-| RuleHook (hook: pool table + limit orders) | [`0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0`](https://sepolia.etherscan.io/address/0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0) |
-| ConditionalOrders (LP positions with rules) | [`0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63`](https://sepolia.etherscan.io/address/0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63) |
-| PriceFeeds (token list, Chainlink USD feeds) | [`0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e`](https://sepolia.etherscan.io/address/0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e) |
+| ConditionalOrders (positions with a strategy) | [`0x6CD66E4c91635E2C7705fa2CE61Ac6df24cb12d3`](https://sepolia.etherscan.io/address/0x6CD66E4c91635E2C7705fa2CE61Ac6df24cb12d3) |
+| Rules (pool table, conditions, Chainlink check) | [`0xc2c6CC90005823829c2Cf0415D9cD30dae8705D3`](https://sepolia.etherscan.io/address/0xc2c6CC90005823829c2Cf0415D9cD30dae8705D3) |
+| RuleHook (hook: limit orders) | [`0x5F8Bfff761fE01aE2586a19036dfdC0C1220D0C0`](https://sepolia.etherscan.io/address/0x5F8Bfff761fE01aE2586a19036dfdC0C1220D0C0) |
+| PriceFeeds (token list, Chainlink USD feeds, 200-tick band) | [`0x6Ea9DCEF1EA55001E2a87FafA0F6b7D0cCe45DF6`](https://sepolia.etherscan.io/address/0x6Ea9DCEF1EA55001E2a87FafA0F6b7D0cCe45DF6) |
 | USDT mock feed ($1, no Chainlink feed on Sepolia) | [`0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4`](https://sepolia.etherscan.io/address/0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4) |
 | Uniswap v4 PoolManager | [`0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`](https://sepolia.etherscan.io/address/0xE03A1074c86CFeDd5C142C4F04F1a1536e203543) |
 | Uniswap v4 PositionManager | [`0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4`](https://sepolia.etherscan.io/address/0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4) |
 | Swap router (hookmate) | [`0xf13D190e9117920c703d79B5F33732e10049b115`](https://sepolia.etherscan.io/address/0xf13D190e9117920c703d79B5F33732e10049b115) |
 
-Hook and pools deployed at block 12048765. ConditionalOrders and PriceFeeds redeployed on 2026-11-19
-(`script/sepolia/06_DeployOrders.s.sol`); the earlier ConditionalOrders `0xf2b46cb234E2A901cb8F48e3589B4fB2F2AFcA6f` is retired.
+Deployed 2026-11-26 (`02_DeployCore`, `03_CreatePools`). Earlier deployments stay on Sepolia and are retired: see
+`DEPLOY.md`.
 
 ## Test tokens
 
@@ -35,7 +36,10 @@ Faucet (all six tokens in one transaction: 100 tWETH, 5 tWBTC, 500k tUSDC/tUSDT/
 
 ## Pools
 
-Started at the Sepolia Chainlink prices at deploy time (USDT has no feed there and starts at $1). Liquidity added by the deployer as a normal LP.
+Started at the Sepolia Chainlink prices at deploy time (USDT has no feed there and starts at $1). Liquidity added by the
+deployer as a normal LP. Every pool is in Rules' table, so strategies can use all of them (the hookless one too); limit
+orders need the hook. `frontend/scripts/arb.ts` keeps them on Chainlink: a strategy step runs only while its pool is
+within 200 ticks (~2%) of Chainlink.
 
 | Index | Pool | Fee | Spacing | Hook | Liquidity |
 |---|---|---|---|---|---|
@@ -45,7 +49,7 @@ Started at the Sepolia Chainlink prices at deploy time (USDT has no feed there a
 | 4 | USDC / USDT | 0.01% | 1 | RuleHook | ±0.2% $5M/side |
 | 5 | WETH / LINK | 1.0% | 200 | RuleHook | full range $2M/side |
 | 6 | DAI / USDC | 0.01% | 1 | RuleHook | ±0.5% $3M/side |
-| 7 | WETH / USDC | 0.05% | 10 | none (in the pool table for price checks and swaps) | full range $5M/side |
+| 7 | WETH / USDC | 0.05% | 10 | none | full range $5M/side (an older pool, reused) |
 | 8 | ETH / USDC | 0.3% | 60 | RuleHook | full range + ±5%, ~$10/side each (real Sepolia ETH) |
 
 ## Re-running
@@ -62,21 +66,17 @@ forge script script/sepolia/02_DeployCore.s.sol   --rpc-url $SEPOLIA_RPC --priva
 forge script script/sepolia/03_CreatePools.s.sol  --rpc-url $SEPOLIA_RPC --private-key $PRIVATE_KEY --broadcast --slow --gas-estimate-multiplier 1000
 ```
 
-Trial of every order type (`script/sepolia/04_Trial.s.sol`), one phase per run: `PHASE=orders`, `up`, `keep`, `down`,
-`keep`. Run the `keep` phase with `--isolate` so each execution is its own transaction (an execution right after a swap
-in the same transaction is refused on purpose).
+Trial orders: `script/sepolia/04_Trial.s.sol` with `PHASE=orders`. Its `up` / `down` phases push the pools with swaps:
+since steps only run near Chainlink, that now shows that a push alone runs nothing (the arbitrage bot then takes the push
+back). Real runs come from real market moves.
 
 After a new deployment: `cd frontend && npm run sync`.
 
-## Trial results (2026-11-02, real Sepolia)
+## Live examples (2026-11-26)
 
-| Order | Rule | Result |
-|---|---|---|
-| #1 | Take profit: exit when WETH leaves the range upward | Executed after the price rose |
-| #2 | Stop loss: exit below the range and convert to USDC | Executed after the price fell, swap within the 1% limit |
-| #3 | Follow the price: re-range just below the new price, repeating | Re-ranged once, still open |
-| #4 | Compound fees every minute | Ran three times, still open |
-| #5 | WBTC position exits when WETH drops 3% in the hookless pool | Executed (cross-pool check) |
-| #6 | Native ETH pool take profit (keeper paid exact gas) | Executed |
-| Limit sell | Sell $2,000 of WETH just above the price | Filled inside a swap, claimed 2,038 USDC |
-| Limit buy | Buy WETH with $2,000 just below the price | Filled inside a swap, claimed 0.8948 WETH |
+`04_Trial PHASE=orders` (orders #1-#6: take profit, stop loss with swap, re-centre on leaving, compound every minute, a
+WBTC exit watching the hookless WETH/USDC pool, native ETH take profit; limit orders 1 and 2) and
+`frontend/scripts/demo-orders.ts` (#7 moves into USDT/USDC below the range and comes back 0.5% inside it, #8 holds USDC
+above the range and comes back centred on a 1% turn, #9 a stop loss confirmed for 15 minutes). Their ranges are tight, so
+real ETH moves trigger them while `npx tsx scripts/arb.ts --keep` runs.
+

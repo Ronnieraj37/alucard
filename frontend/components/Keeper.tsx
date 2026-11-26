@@ -11,7 +11,7 @@ import { liveLanes, liveSide, loadRulePosition } from "@/lib/positions";
 import { type LaneId, describeLane, describeWhen } from "@/lib/rules";
 import { useTx } from "@/lib/tx";
 
-/** Anyone can run a strategy step once its condition is true, and is paid back its gas from that position. */
+/** Anyone can run a strategy step once its condition is true, and is paid its owner's keeper fee. */
 export default function Keeper() {
   const client = usePublicClient();
   const { address } = useAccount();
@@ -42,24 +42,16 @@ export default function Keeper() {
     },
   });
 
-  // All ready steps in one transaction: each pays its own gas, the cost of the transaction itself is shared.
+  // Each ready step is its own transaction: each pays you its owner's keeper fee.
   const runAll = () =>
     tx.run(async () => {
-      const ready = q.data?.ready ?? [];
-      if (ready.length === 1) {
-        await tx.send(`Run #${ready[0].id}`, { address: CORE.conditionalOrders, abi: conditionalOrdersAbi as Abi, functionName: "execute", args: [ready[0].id, ready[0].upper] });
-      } else if (ready.length > 1) {
-        await tx.send(`Run ${ready.length} step${ready.length === 1 ? "" : "s"}`, {
-          address: CORE.conditionalOrders,
-          abi: conditionalOrdersAbi as Abi,
-          functionName: "executeMany",
-          args: [ready.map((r) => r.id), ready.map((r) => r.upper)],
-        });
+      for (const r of q.data?.ready ?? []) {
+        await tx.send(`Run #${r.id}`, { address: CORE.conditionalOrders, abi: conditionalOrdersAbi as Abi, functionName: "execute", args: [r.id, r.upper] });
       }
       q.refetch();
-    }, "All ready steps ran. Your gas refund arrived in your wallet.");
+    }, "All ready steps ran. The keeper fees arrived in your wallet.");
 
-  // Pokes move trailing stops' best price. They are not paid; they keep other people's strategies up to date.
+  // Pokes move trailing stops' best price and start holds. They are not paid; they keep other people's strategies up to date.
   const pokeAll = () =>
     tx.run(async () => {
       for (const r of q.data?.pokes ?? []) {
@@ -74,7 +66,7 @@ export default function Keeper() {
         <div>
           <h1 className="text-xl font-semibold">Keeper</h1>
           <div className="text-[13px] text-[var(--muted)]">
-            A strategy step runs when someone sends the transaction. Keepers do it automatically; anyone can, and is paid back the gas from that position.
+            A strategy step runs when someone sends the transaction. Keepers do it automatically; anyone can, and is paid the owner's keeper fee from that position.
           </div>
         </div>
         <button className="btn btn-light ml-auto !p-2" onClick={() => q.refetch()} title="Refresh">
@@ -105,7 +97,7 @@ export default function Keeper() {
         <div className="card flex flex-col gap-2 p-3 text-[13px]">
           <div className="font-semibold">To update ({q.data.pokes.length})</div>
           <div className="text-[var(--muted)]">
-            Trailing stops remember the best average price; someone has to move it as the price moves. Updating moves no tokens and is not paid.
+            Trailing stops remember the best price, and “only if it lasts” needs to be seen true first: someone has to update them as the price moves. Updating moves no tokens and is not paid.
           </div>
           {q.data.pokes.map((r) => (
             <div key={`p-${r.id}-${r.upper}`} className="text-[var(--muted)]">

@@ -7,6 +7,7 @@ import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 
 import {RuleSetup} from "./utils/RuleSetup.sol";
 import {RuleHook} from "../src/RuleHook.sol";
+import {Rules} from "../src/Rules.sol";
 
 /// @notice Limit orders and the pool table, from the user's side: a limit order is only ever theirs, it is either
 /// waiting (and can be taken back) or filled (and can be claimed), never both, and nonsense is refused.
@@ -115,26 +116,19 @@ contract LimitSafetyTest is RuleSetup {
 
     // ---------------------------------------------------------------- the pool table
 
-    /// Outside pools (to watch or park in) can be added by anyone, but only hookless ones or this hook's, only
-    /// once they exist, and each gets one number for good.
-    function test_registeringOutsidePools() public {
+    /// Pools strategies can use are added by anyone, but only once they exist, only hookless ones or this hook's,
+    /// and each gets one number for good.
+    function test_registeringPools() public {
         PoolKey memory plain = PoolKey(currency0, currency1, 500, 10, IHooks(address(0)));
-        vm.expectRevert(RuleHook.UnknownPool.selector);
-        hook.registerPool(plain); // not initialized yet
+        vm.expectRevert(Rules.UnknownPool.selector);
+        rules.registerPool(plain); // not initialized yet
         poolManager.initialize(plain, Constants.SQRT_PRICE_1_1);
-        uint24 index = hook.registerPool(plain);
+        uint24 index = rules.registerPool(plain);
         assertGt(index, 0);
-        assertEq(hook.registerPool(plain), index); // again: same number
+        assertEq(rules.registerPool(plain), index); // again: same number
 
         PoolKey memory other = PoolKey(currency0, currency1, 500, 10, IHooks(address(0xBEEF)));
-        vm.expectRevert(RuleHook.PoolNotAllowed.selector);
-        hook.registerPool(other);
-    }
-
-    /// A window of zero is read as one second, not a division by zero.
-    function test_averageOverZeroSecondsIsThePrice() public view {
-        (bool ok, int24 t) = hook.averageTick(poolId, 0);
-        assertTrue(ok);
-        assertEq(t, _tick());
+        vm.expectRevert(Rules.PoolNotAllowed.selector);
+        rules.registerPool(other);
     }
 }

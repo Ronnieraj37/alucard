@@ -9,26 +9,26 @@ pragma solidity ^0.8.26;
 /// Side layout (bit offsets inside the side's word):
 ///   0-23     edge        int24  where this side of the position sits: tickLower (lower side) or tickUpper (upper
 ///                               side). Any sign. Moves only when the position is re-ranged.
-///   24-29    checker     condition A: 0 off, 1 EDGE, 2 TICK, 3 TIME, 4 TRAIL, 5 ORACLE, 6 FEES, 7 APR (up to 63)
-///   30-53    value       int24  condition A's number. EDGE: ticks past the edge; TICK, ORACLE: a price level
-///                               (tick); TIME: minutes; TRAIL: ticks back from the best price seen; FEES: fees
-///                               earned, in bps of the position; APR: fee rate per year, in bps
+///   24-29    checker     condition A: 0 off, 1 EDGE, 2 TICK, 3 TIME, 4 TRAIL, 6 FEES, 7 APR (5 is retired)
+///   30-53    value       int24  condition A's number. EDGE: ticks past the edge; TICK: a price level (tick);
+///                               TIME: minutes; TRAIL: ticks back from the best price seen; FEES: fees earned, in
+///                               bps of the position; APR: fee rate per year, in bps
 ///   54-77    checkPool   uint24 pool condition A reads (TICK, TRAIL). 0 = the order's own pool
 ///   78-83    checker2    condition B, same kinds as A (0 = no condition B)
 ///   84-107   value2      int24  condition B's number
 ///   108-131  checkPool2  uint24 pool condition B reads
 ///   132-133  combine     0 = A only, 1 = A and B, 2 = A or B
-///   134-149  holdMinutes uint16 pool prices are averaged over this many minutes (at least 2)
+///   134-149  holdMinutes uint16 the condition must have been true this long (first seen by `poke`) before it runs
 ///   150-173  lastRun     uint24 minutes since BASE_TIME, rounded up (valid until 2057). Set when the order starts
 ///                               or enters a leg, and when this side runs
 ///   174-197  best        int24  the best tick seen by a TRAIL condition
 ///   198-205  actions     bit0 keep fees in the order, bit1 remove, bit2 swap, bit3 add, bit4 move to the other leg
 ///   206-219  removeBps   0-10,000
 ///   220      swapToToken1
-///   221-223  addMode     0 same range, 1 one-sided next to the price
+///   221-223  addMode     0 same range, 1 a new range around the price (re-centre)
 ///   224      repeat
 ///   225-231  runsLeft    with repeat: runs left before the side switches off (0 = no limit)
-///   232-253  shape       with add: widthBelow (bits 0-10) + widthAbove (bits 11-21), in tick spacings
+///   232-253  shape       re-centre: width below (bits 0-10) + width above (bits 11-21) the price, in spacings
 ///                        without add: step in ticks for a repeating TICK side
 ///   254-255  spare
 library OrderState {
@@ -40,7 +40,6 @@ library OrderState {
     uint8 internal constant CHECK_TICK = 2;
     uint8 internal constant CHECK_TIME = 3;
     uint8 internal constant CHECK_TRAIL = 4;
-    uint8 internal constant CHECK_ORACLE = 5; // the pair's Chainlink price as a tick, compared like CHECK_TICK
     uint8 internal constant CHECK_FEES = 6; // fees the position has earned since it was last touched, in bps of it
     uint8 internal constant CHECK_APR = 7; // the same fees as a yearly rate (lower side only: "earns less than")
     uint8 internal constant MAX_CHECKER = 63;
@@ -53,7 +52,7 @@ library OrderState {
     uint8 internal constant MAX_ACTIONS = 31;
 
     uint8 internal constant ADD_SAME_RANGE = 0;
-    uint8 internal constant ADD_ONE_SIDED = 1;
+    uint8 internal constant ADD_CENTERED = 1;
 
     uint8 internal constant COMBINE_NONE = 0;
     uint8 internal constant COMBINE_AND = 1;
@@ -68,7 +67,7 @@ library OrderState {
     /// @dev Kinds of leg. An order has one leg (its position) or two: it then moves between them with ACT_MOVE.
     uint8 internal constant LEG_IDLE = 1; // waiting: the tokens are held for the order, no position
     uint8 internal constant LEG_RANGE = 2; // a position in a fixed range [a, b]
-    uint8 internal constant LEG_CENTERED = 3; // a position from a ticks below to b ticks above the average price
+    uint8 internal constant LEG_CENTERED = 3; // a position from a ticks below to b ticks above the price
 
     /// @notice Where an order's tokens go when it enters a leg. 80 bits.
     struct Leg {

@@ -36,6 +36,7 @@ const out = [
   `export const testTokenAbi = ${JSON.stringify(abi("TestToken"))} as const;`,
   `export const routerAbi = ${JSON.stringify(router)} as const;`,
   `export const faucetAbi = ${JSON.stringify(abi("TestFaucet"))} as const;`,
+  `export const mockAggregatorAbi = ${JSON.stringify(abi("MockAggregator"))} as const;`,
 ].join("\n\n");
 writeFileSync(new URL("../lib/generated/abis.ts", import.meta.url), out + "\n");
 console.log("synced", Object.keys(pools).length, "pools,", Object.keys(tokens).length, "tokens");

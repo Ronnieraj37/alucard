@@ -1,13 +1,11 @@
-// Keeper bot: finds every rule whose condition is met and runs them, all in executeMany transactions (each owner pays
-// less gas that way; an order that cannot run any more is skipped by the contract, the rest still run).
-// It is paid back its gas from the positions it runs, in ETH or in the pool's tokens (see Rules.keeperPay).
-// It also pokes trailing stops: it moves their remembered best price to the current average. Pokes are not paid, but
-// they cost very little and keep the rules working.
+// Keeper bot: runs every strategy step whose condition is true, one transaction each, and is paid each order's keeper
+// fee (a set share of what the step moves, chosen by its owner). It also pokes: a trailing side's best price, and a side
+// with a hold ("only if it lasts"), which needs to be seen true first. Pokes are not paid; they cost very little.
 //
 //   KEEPER_PRIVATE_KEY=0x... RPC_URL=https://... npx tsx scripts/keeper.ts
 //   DRY_RUN=1 ...   lists what it would run, sends nothing
 //
-// Runs once and exits, so a scheduler (GitHub Actions cron) can call it every few minutes.
+// Runs once and exits, so a scheduler (GitHub Actions cron, or scripts/arb.ts --keep) can call it every few minutes.
 import { createPublicClient, createWalletClient, http, parseEventLogs, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { withHeadroom } from "../lib/gas";
@@ -21,7 +19,6 @@ const RULES = (deployment.core as { rules: string }).rules as `0x${string}`;
 const RPC = process.env.RPC_URL ?? process.env.SEPOLIA_RPC ?? "https://ethereum-sepolia-rpc.publicnode.com";
 const KEY = process.env.KEEPER_PRIVATE_KEY ?? process.env.PRIVATE_KEY;
 const DRY = !!process.env.DRY_RUN;
-const BATCH = 30;
 
 export async function keep(rpc = RPC, key = KEY, dry = DRY, log = console.log) {
   const client = createPublicClient({ chain: sepolia, transport: http(rpc) });
@@ -40,14 +37,14 @@ export async function keep(rpc = RPC, key = KEY, dry = DRY, log = console.log) {
     ]);
     if (lower) ready.push({ id, upper: false });
     if (upper) ready.push({ id, upper: true });
-    // A trailing side may need a poke. Only a poke that would change something succeeds.
+    // A trailing side, or a side with a hold, may need a poke. Only a poke that would change something succeeds.
     for (const [isUpper, word, isReady] of [
       [false, order.lowerState, lower],
       [true, order.upperState, upper],
     ] as const) {
       const sd = decodeSide(word);
       const trails = sd.checker === CHECK.TRAIL || (sd.combine !== 0 && sd.checker2 === CHECK.TRAIL);
-      if (isReady || !trails) continue;
+      if (isReady || (!trails && !sd.holdMinutes)) continue;
       const ok = await client
         .simulateContract({ ...c, functionName: "poke", args: [id, isUpper] })
         .then(() => true)
@@ -64,41 +61,27 @@ export async function keep(rpc = RPC, key = KEY, dry = DRY, log = console.log) {
 
   const account = privateKeyToAccount((key.startsWith("0x") ? key : `0x${key}`) as Hex);
   const wallet = createWalletClient({ account, chain: sepolia, transport: http(rpc) });
-  let sent = 0;
-  for (const p of pokes) {
-    const label = `poke #${p.id} ${p.upper ? "upper" : "lower"}`;
+  const send = async (label: string, functionName: "poke" | "execute", id: bigint, upper: boolean) => {
     try {
-      const { request } = await client.simulateContract({ ...c, account, functionName: "poke", args: [p.id, p.upper] });
-      const hash = await wallet.writeContract(request);
-      const receipt = await client.waitForTransactionReceipt({ hash });
-      log(`${label}: ${receipt.status} ${hash}`);
-    } catch (e) {
-      log(`${label}: skipped (${(e as Error).message.split("\n")[0]})`);
-    }
-  }
-  for (let i = 0; i < ready.length; i += BATCH) {
-    const batch = ready.slice(i, i + BATCH);
-    const args = [batch.map((x) => x.id), batch.map((x) => x.upper)] as const;
-    const label = `batch of ${batch.length} (${batch.map((x) => `#${x.id}${x.upper ? "u" : "l"}`).join(" ")})`;
-    try {
-      // re-checked on the latest block: another keeper may have run some, or the price moved back
-      const { request, result } = await client.simulateContract({ ...c, account, functionName: "executeMany", args });
-      if (result === 0n) {
-        log(`${label}: nothing would run`);
-        continue;
-      }
-      // the contract reverts a batch that is given too little gas, so this estimate covers every order in it
-      const gas = await client.estimateContractGas({ ...c, account, functionName: "executeMany", args });
+      // re-checked on the latest block: another keeper may have run it, or the price moved back
+      const { request } = await client.simulateContract({ ...c, account, functionName, args: [id, upper] });
+      const gas = await client.estimateContractGas({ ...c, account, functionName, args: [id, upper] });
       const hash = await wallet.writeContract({ ...request, gas: withHeadroom(gas) });
       const receipt = await client.waitForTransactionReceipt({ hash });
-      // what really ran (the simulation ran a block earlier): one event per order that ran
-      const events = parseEventLogs({ abi: conditionalOrdersAbi, logs: receipt.logs, eventName: ["OrderExecuted", "OrderMoved", "OrderClosed"] });
-      const ran = new Set(events.filter((e) => e.address.toLowerCase() === ORDERS.toLowerCase()).map((e) => String((e.args as { orderId: bigint }).orderId))).size;
-      sent += ran;
-      log(`${label}: ${receipt.status}, ${ran} ran, ${hash}`);
+      log(`${label}: ${receipt.status} ${hash}`);
+      return receipt;
     } catch (e) {
       log(`${label}: skipped (${(e as Error).message.split("\n")[0]})`);
+      return null;
     }
+  };
+  let sent = 0;
+  for (const p of pokes) await send(`poke #${p.id} ${p.upper ? "upper" : "lower"}`, "poke", p.id, p.upper);
+  for (const x of ready) {
+    const receipt = await send(`run #${x.id} ${x.upper ? "upper" : "lower"}`, "execute", x.id, x.upper);
+    if (!receipt) continue;
+    const events = parseEventLogs({ abi: conditionalOrdersAbi, logs: receipt.logs, eventName: ["OrderExecuted", "OrderMoved", "OrderClosed"] });
+    if (events.some((e) => e.address.toLowerCase() === ORDERS.toLowerCase())) sent++;
   }
   return { ready, pokes, sent };
 }

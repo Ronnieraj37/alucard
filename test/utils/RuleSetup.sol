@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -23,12 +24,13 @@ import {PriceFeeds} from "../../src/PriceFeeds.sol";
 import {OrderState} from "../../src/libraries/OrderState.sol";
 import {MockAggregator} from "../../src/testnet/MockAggregator.sol";
 
-/// @dev Deploys the token list, the hook, Rules, ConditionalOrders and one pool (fee 0.3%, spacing 60, price 1) with
-/// 100e18 full-range liquidity from a normal LP, then lets an hour pass so the pool has average-price history.
-/// alice and bob get tokens and approve both contracts. Both pool tokens are listed at $1 and ETH at $2,000 (mock
-/// Chainlink feeds, 8 decimals, always fresh).
+/// @dev Deploys the token list, the limit-order hook, Rules, ConditionalOrders and one pool (fee 0.3%, spacing 60,
+/// price 1, using the hook) with 100e18 full-range liquidity from a normal LP, registered as pool 1. alice and bob get
+/// tokens and approve both contracts. Both pool tokens are listed at $1 and ETH at $2,000 (mock Chainlink feeds, 8
+/// decimals, always fresh).
 ///
-/// Rules fire on average prices, so a test that moves the price calls `_settle()` before expecting a rule to see it.
+/// The Chainlink band (PriceFeeds.maxDeviationTicks) is off here, so tests can move a pool's price freely with swaps;
+/// the tests of the band turn it on and move the feeds (`_band`, `_market`).
 abstract contract RuleSetup is BaseTest {
     using EasyPosm for IPositionManager;
     using PoolIdLibrary for PoolKey;
@@ -70,10 +72,10 @@ abstract contract RuleSetup is BaseTest {
         feeds.setFeed(Currency.unwrap(currency1), address(feed1), MAX_AGE);
 
         address flags = address(HOOK_FLAGS ^ (0x4444 << 144));
-        deployCodeTo("RuleHook.sol:RuleHook", abi.encode(poolManager, feeds), flags);
+        deployCodeTo("RuleHook.sol:RuleHook", abi.encode(poolManager), flags);
         hook = RuleHook(flags);
-        rules = new Rules(poolManager, hook, feeds);
-        orders = new ConditionalOrders(poolManager, hook, feeds, rules);
+        rules = new Rules(poolManager, address(hook), feeds);
+        orders = new ConditionalOrders(poolManager, rules);
 
         poolKey = _newPool(currency0, currency1, Constants.SQRT_PRICE_1_1);
         poolId = poolKey.toId();
@@ -82,11 +84,13 @@ abstract contract RuleSetup is BaseTest {
         _wait(1 hours);
     }
 
-    /// @dev A hook pool (fee 0.3%, spacing 60) with 100e18 full-range liquidity from this contract.
+    /// @dev A pool of the hook (fee 0.3%, spacing 60) with 100e18 full-range liquidity from this contract, registered
+    /// in Rules (the next index).
     function _newPool(Currency c0, Currency c1, uint160 sqrtPrice) internal returns (PoolKey memory key) {
         key = PoolKey(c0, c1, 3000, 60, IHooks(hook));
         poolManager.initialize(key, sqrtPrice);
         _addFullRange(key);
+        rules.registerPool(key);
     }
 
     /// @dev Liquidity `_addFullRange` adds (100e18 for every new pool; a test raises it for a deeper pool).
@@ -140,16 +144,26 @@ abstract contract RuleSetup is BaseTest {
         });
     }
 
-    /// @dev Let the price of the moment become the average: a minute for a fresh snapshot (a dust swap writes it),
-    /// then the averaging window.
+    /// @dev Let a few minutes pass after a price move (a side runs at most once a minute after its last run).
     function _settle() internal {
-        _settleIn(poolKey);
+        _wait(181);
     }
 
-    function _settleIn(PoolKey memory key) internal {
-        _wait(61);
-        _swapIn(key, true, 1);
-        _wait(121);
+    function _settleIn(PoolKey memory) internal {
+        _wait(181);
+    }
+
+    /// @dev Turn the Chainlink band on: a pool's price must be within `ticks` of Chainlink for steps to run.
+    function _band(uint24 ticks) internal {
+        feeds.setMaxDeviationTicks(ticks);
+    }
+
+    /// @dev Move the market: token0's Chainlink price to what the pool's price is now (token1 stays at $1), as if
+    /// the pool had followed a real move. Its feed is the token's USD price, 8 decimals; both tokens have 18.
+    function _market() internal {
+        (uint160 sqrtP,,,) = poolManager.getSlot0(poolId);
+        uint256 p = FullMath.mulDiv(uint256(sqrtP) * 1e8, sqrtP, 1 << 192); // token1 per token0, x1e8
+        feed0.setAnswer(int256(p));
     }
 
     /// @dev vm.warp by `secs`. (block.timestamp can read stale after a warp in via-IR code.)
@@ -165,8 +179,9 @@ abstract contract RuleSetup is BaseTest {
         (, t,,) = poolManager.getSlot0(poolId);
     }
 
+    /// @dev The pool's price as conditions read it.
     function _avg() internal view returns (int24 t) {
-        (, t) = hook.averageTick(poolId, 120);
+        (, t,,) = poolManager.getSlot0(poolId);
     }
 
     function _bal(Currency c, address who) internal view returns (uint256) {
@@ -213,8 +228,8 @@ abstract contract RuleSetup is BaseTest {
         return OrderState.encodeSide(s);
     }
 
-    /// @dev One-leg order of alice in the main pool: range [-600, 600], 10e18 liquidity, keeper ceiling 1%, swaps
-    /// at most 5% past the average price.
+    /// @dev One-leg order of alice in the main pool: range [-600, 600], 10e18 liquidity, keeper fee 1%, swaps
+    /// at most 5% past the price before them.
     function _params(OrderState.Side memory lower, OrderState.Side memory upper)
         internal
         view
@@ -227,7 +242,7 @@ abstract contract RuleSetup is BaseTest {
         p.amount0Max = type(uint128).max;
         p.amount1Max = type(uint128).max;
         p.expiry = uint32(_now() + 30 days);
-        p.maxKeeperFeeBps = 100;
+        p.keeperFeeBps = 100;
         p.maxSlippage = 50;
         p.lower = _w(lower);
         p.upper = _w(upper);
@@ -251,7 +266,7 @@ abstract contract RuleSetup is BaseTest {
     function _liquidity(uint256 id) internal view returns (uint128) {
         ConditionalOrders.Order memory o = orders.getOrder(id);
         (OrderState.Side memory lo, OrderState.Side memory up) = _state(id);
-        PoolKey memory key = hook.poolKeyAt(o.poolIndex);
+        PoolKey memory key = rules.poolKeyAt(o.poolIndex);
         (uint128 liq,,) = poolManager.getPositionInfo(key.toId(), address(orders), lo.edge, up.edge, bytes32(id));
         return liq;
     }

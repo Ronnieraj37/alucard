@@ -129,7 +129,7 @@ function MarketSwap() {
                 {quote.data!.map((x, i) => (
                   <option key={x.pool.index} value={x.pool.index}>
                     {x.pool.label}
-                    {x.pool.hooked ? " · rules hook" : ""}
+                    {x.pool.hooked ? " · limit orders" : ""}
                     {i === 0 ? " · best price" : ""}
                   </option>
                 ))}

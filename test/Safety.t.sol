@@ -55,13 +55,9 @@ contract SafetyTest is RuleSetup {
         p.tickUpper = upper;
         p.liquidity = liquidity;
         vm.prank(alice);
-        try orders.createOrder(p) returns (uint256 id) {
-            vm.prank(alice);
-            orders.cancel(id);
-        } catch (bytes memory reason) {
-            // the only acceptable refusal is a position worth less than the minimum order size
-            assertEq(bytes4(reason), ConditionalOrders.OrderTooSmall.selector);
-        }
+        uint256 id = orders.createOrder(p);
+        vm.prank(alice);
+        orders.cancel(id);
         assertApproxEqAbs(_bal(currency0, alice), b0, 2);
         assertApproxEqAbs(_bal(currency1, alice), b1, 2);
     }
@@ -97,13 +93,6 @@ contract SafetyTest is RuleSetup {
         assertEq(_liquidity(id), 10e18);
     }
 
-    /// The batch helper is only for the batch itself: nobody can call it to skip the checks around it.
-    function test_runOneIsOnlyForTheBatch() public {
-        uint256 id = _create(_exit(OrderState.CHECK_EDGE, 0), _off());
-        vm.expectRevert(ConditionalOrders.OnlySelf.selector);
-        orders.runOne(id, false, keeper, 1);
-    }
-
     function test_onlyThePoolManagerCallsBack() public {
         vm.expectRevert();
         orders.unlockCallback(abi.encode(uint8(0), uint256(1), bytes("")));
@@ -133,37 +122,6 @@ contract SafetyTest is RuleSetup {
         assertEq(orders.getOrder(id).owner, address(0));
         vm.expectRevert(ConditionalOrders.UnknownOrder.selector);
         _run(id, true);
-    }
-
-    // ---------------------------------------------------------------- the batch
-
-    /// A batch with one order that is ready, one that is not, and one that is closed runs the ready one and leaves
-    /// the others exactly as they were.
-    function test_batchRunsWhatIsReadyAndLeavesTheRest() public {
-        uint256 ready = _create(_off(), _exit(OrderState.CHECK_EDGE, 0));
-        uint256 waiting = _create(_exit(OrderState.CHECK_EDGE, 0), _off());
-        uint256 closed = _create(_exit(OrderState.CHECK_EDGE, 0), _off());
-        vm.prank(alice);
-        orders.cancel(closed);
-        _swap(false, 5e18);
-        _settle();
-
-        uint256[] memory ids = new uint256[](3);
-        bool[] memory uppers = new bool[](3);
-        (ids[0], ids[1], ids[2]) = (ready, waiting, closed);
-        (uppers[0], uppers[1], uppers[2]) = (true, false, false);
-        vm.prank(keeper);
-        uint256 ran = orders.executeMany(ids, uppers);
-        assertEq(ran, 1);
-        assertEq(orders.getOrder(ready).owner, address(0));
-        assertEq(_liquidity(waiting), 10e18);
-    }
-
-    function test_aBatchMustBeWellFormed() public {
-        vm.expectRevert(ConditionalOrders.InvalidOrder.selector);
-        orders.executeMany(new uint256[](0), new bool[](0));
-        vm.expectRevert(ConditionalOrders.InvalidOrder.selector);
-        orders.executeMany(new uint256[](2), new bool[](1));
     }
 
     // ---------------------------------------------------------------- refused inputs
@@ -201,21 +159,22 @@ contract SafetyTest is RuleSetup {
 
     function test_theKeeperCeilingIsCapped() public {
         ConditionalOrders.CreateParams memory p = _params(_exit(OrderState.CHECK_EDGE, 0), _off());
-        p.maxKeeperFeeBps = orders.MAX_KEEPER_FEE_BPS() + 1;
+        p.keeperFeeBps = orders.MAX_KEEPER_FEE_BPS() + 1;
         vm.prank(alice);
         vm.expectRevert(ConditionalOrders.InvalidOrder.selector);
         orders.createOrder(p);
     }
 
-    /// Only pools that use this hook: a plain pool of the same pair cannot hold rules (nothing would watch its price).
-    function test_rulesOnlyInHookPools() public {
+    /// Strategies can hold positions in any pool of listed tokens, a hookless one too.
+    function test_aHooklessPoolCanHoldAStrategy() public {
         PoolKey memory plain = PoolKey(currency0, currency1, 500, 10, IHooks(address(0)));
         poolManager.initialize(plain, Constants.SQRT_PRICE_1_1);
+        _addFullRange(plain);
         ConditionalOrders.CreateParams memory p = _params(_exit(OrderState.CHECK_EDGE, 0), _off());
         p.key = plain;
-        vm.prank(alice);
-        vm.expectRevert(ConditionalOrders.PoolNotAllowed.selector);
-        orders.createOrder(p);
+        uint256 id = _submit(alice, p);
+        assertEq(orders.getOrder(id).poolIndex, rules.poolIndexOf(plain.toId()));
+        assertEq(_liquidity(id), 10e18);
     }
 
     function test_nothingOwedNothingToWithdraw() public {
@@ -236,7 +195,7 @@ contract SafetyTest is RuleSetup {
         feeds.acceptOwnership();
         assertEq(feeds.owner(), bob);
         vm.expectRevert(PriceFeeds.NotOwner.selector);
-        feeds.setMinOrderUsd(1);
+        feeds.setMaxDeviationTicks(1);
     }
 
     function test_rangeEdgesAtTheLimitsWork() public {
@@ -250,39 +209,19 @@ contract SafetyTest is RuleSetup {
 
     // ---------------------------------------------------------------- runs happen at believable prices
 
-    /// A rule that deposits (compound) never does it at a price someone just pushed: the deposit would be traded
-    /// back through at the LP's expense.
+    /// A step that deposits (compound) never does it at a price someone just pushed: the deposit would be traded
+    /// back through at the LP's expense. Once the market really is there (Chainlink agrees), it runs.
     function test_noDepositAtAPushedPrice() public {
+        _band(200);
         OrderState.Side memory c = _side(OrderState.CHECK_TIME, 1, OrderState.ACT_KEEP_FEES | OrderState.ACT_ADD, 0);
         c.repeat = true;
         uint256 id = _create(c, _off());
         _wait(2 minutes);
-        _swap(true, 3e18); // pushed in this block, far from the average
+        _swap(true, 3e18); // pushed far from Chainlink
         vm.expectRevert(Rules.PriceMoved.selector);
         _run(id, false);
-        _settle(); // once the price has held, it runs
+        _market();
         _run(id, false);
-    }
-
-    /// With the list's band set, a pool price held away from Chainlink for minutes cannot run a rule either; when
-    /// the market really moved (Chainlink agrees), it runs.
-    function test_aPoolHeldAwayFromChainlinkCannotRunARule() public {
-        feeds.setMaxDeviationTicks(200); // about 2%
-        uint256 id = _create(_exit(OrderState.CHECK_TIME, 1), _off());
-        _swap(false, 3e18); // the pool's price up about 6%, held
-        _settle();
-        _wait(2 minutes);
-        _swap(true, 1);
-        _wait(2 minutes);
-        vm.expectRevert(Rules.PriceMoved.selector);
-        _run(id, false);
-
-        feed0.setAnswer(1.06e8); // the market agrees: token0 is worth 6% more
-        (bool ok, int24 link) = feeds.pairTick(Currency.unwrap(currency0), Currency.unwrap(currency1));
-        assertTrue(ok);
-        assertLt(_dist(link, _avg()), 200);
-        _run(id, false);
-        assertEq(orders.getOrder(id).owner, address(0));
     }
 
     /// "Leave when fees earn less than 5% a year" must not fire on a young position earning more than that, just
@@ -298,24 +237,27 @@ contract SafetyTest is RuleSetup {
         _run(id, false);
     }
 
-    /// Following the price never ends the order by itself: even when the price of the moment dipped back under
-    /// the average, the new range is placed where the held token fills it.
-    function test_followingThePriceNeverEndsTheOrder() public {
+    /// Following the price re-centres the whole position around the new price, swapping to the mix it needs; it
+    /// never ends the order, and the position is in range again afterwards.
+    function test_followingThePriceRecentresAroundIt() public {
         OrderState.Side memory f = _exit(OrderState.CHECK_EDGE, 60);
         f.actions |= OrderState.ACT_ADD;
-        f.addMode = OrderState.ADD_ONE_SIDED;
-        f.shape = 5;
+        f.addMode = OrderState.ADD_CENTERED;
+        f.shape = 5 | (5 << 11); // 5 spacings below and above
         f.repeat = true;
         uint256 id = _create(_off(), f);
         _swap(false, 5e18);
         _settle();
-        _swap(true, 0.05e18); // the price of the moment dips just under the average
-        assertLt(_tick(), _avg());
         _run(id, true);
         assertTrue(orders.getOrder(id).owner != address(0));
         assertGt(_liquidity(id), 0);
-        (, OrderState.Side memory up) = _state(id);
-        assertLe(up.edge, _tick()); // entirely below the price: all token1
+        (OrderState.Side memory lo, OrderState.Side memory up) = _state(id);
+        assertEq(up.edge - lo.edge, 600);
+        assertLt(lo.edge, _tick());
+        assertGe(up.edge, _tick()); // the price is inside the new range
+        (uint256 a0, uint256 a1) = rules.orderAmounts(orders, id);
+        assertGt(a0, 0);
+        assertGt(a1, 0); // both tokens: it was swapped to the mix
     }
 
     function _dist(int24 a, int24 b) internal pure returns (uint256) {
