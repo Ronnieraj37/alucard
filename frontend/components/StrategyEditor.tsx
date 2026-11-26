@@ -336,14 +336,14 @@ export default function StrategyEditor(p: StrategyEditorProps) {
       </header>
 
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto grid max-w-[1200px] gap-4 px-3 py-5 sm:px-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px]">
+        <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5 px-4 py-6 sm:px-6">
           {moved && (
-            <Notice className="lg:col-span-3">
+            <Notice>
               The money is moved right now. You can change when it comes back; the position's own rules run again once it is back.
             </Notice>
           )}
-          {/* template picker on small screens */}
-          <select className="input !py-2 text-[13px] md:hidden lg:col-span-3" value={template} onChange={(e) => applyTemplate(e.target.value)} disabled={moved}>
+          {/* template picker on small screens; the header already has it from md up */}
+          <select className="input !py-2 text-[13px] md:hidden" value={template} onChange={(e) => applyTemplate(e.target.value)} disabled={moved}>
             <option value="">{template ? "Custom" : "Start from a template…"}</option>
             {TEMPLATES.map((t) => (
               <option key={t.id} value={t.id} disabled={!templateFor(t.id)}>
@@ -353,8 +353,8 @@ export default function StrategyEditor(p: StrategyEditorProps) {
           </select>
 
           {empty && !moved && (
-            <div className="flex flex-wrap items-center gap-2 lg:col-span-2">
-              <span className="text-[12px] text-[var(--muted)]">Start from scratch below, or from an example:</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[13px] text-[var(--muted)]">Or start from an example</span>
               {TEMPLATES.filter((t) => templateFor(t.id))
                 .slice(0, 5)
                 .map((t) => (
@@ -364,6 +364,7 @@ export default function StrategyEditor(p: StrategyEditorProps) {
                 ))}
             </div>
           )}
+          <div className="grid items-start gap-x-6 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_340px]">
           {(["down", "up"] as LaneId[]).map((lane) => (
             <Column
               key={lane}
@@ -400,10 +401,10 @@ export default function StrategyEditor(p: StrategyEditorProps) {
           ))}
 
           {/* summary: always on the right (below on a phone) */}
-          <aside className="flex flex-col gap-3 lg:sticky lg:top-5 lg:self-start">
+          <aside className="flex flex-col gap-3 lg:sticky lg:top-0 lg:self-start">
             <section className="card p-4">
-              <div className="label mb-2">In plain words</div>
-              <div className="flex flex-col gap-2.5 text-[13px] leading-relaxed">
+              <div className="label mb-3">In plain words</div>
+              <div className="flex flex-col gap-3 text-[14px] leading-relaxed">
                 {(["down", "up"] as LaneId[]).map((lane) => (
                   <Sentence key={lane} pool={pool} lane={lane} rules={rules} rangeLabel={p.rangeLabel} />
                 ))}
@@ -420,11 +421,12 @@ export default function StrategyEditor(p: StrategyEditorProps) {
               )}
             </section>
             <AdvancedBox value={advanced} onChange={setAdvanced} />
-            <p className="px-1 text-[11px] leading-relaxed text-[var(--muted)]">
+            <p className="px-1 text-[12px] leading-relaxed text-[var(--muted)]">
               A price counts only while it is within about 2% of Chainlink's, so nobody can push a pool's price to fire your strategy. Any keeper can
               run a step once its condition is true; it is paid your keeper fee, set under Settings.
             </p>
           </aside>
+          </div>
         </div>
       </main>
 
@@ -613,7 +615,7 @@ function Column(c: ColumnProps) {
   const canAdd = !locked && !(move && L.trigger);
   return (
     <section className="flex min-w-0 flex-col">
-      <div className={`mb-3 flex items-center gap-2 rounded-full px-3 py-1.5 ${up ? "bg-[var(--sage-lt)] text-[var(--sage)]" : "bg-[var(--rose-lt)] text-[var(--rose)]"}`}>
+      <div className={`mb-3 inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 ${up ? "bg-[var(--sage-lt)] text-[var(--sage)]" : "bg-[var(--rose-lt)] text-[var(--rose)]"}`}>
         <Icon className="h-4 w-4" />
         <span className="text-[13px] font-semibold">{laneTitle(pool, lane, L)}</span>
         {locked && <span className="ml-auto text-[11px] opacity-80">waits while the money is moved</span>}
