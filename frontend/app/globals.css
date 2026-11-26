@@ -37,17 +37,25 @@
 }
 
 body {
-  background:
-    radial-gradient(1200px 600px at 85% -10%, rgba(109, 124, 255, 0.13), transparent 60%),
-    radial-gradient(900px 520px at -10% 10%, rgba(139, 108, 255, 0.12), transparent 60%),
-    var(--paper);
-  background-attachment: fixed;
+  background: var(--paper);
   color: var(--ink);
   font-family: var(--font-geist), system-ui, -apple-system, sans-serif;
   font-size: 15px;
   line-height: 1.55;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
+}
+/* The night glow sits on its own fixed layer: the GPU moves it, nothing repaints while scrolling (a fixed
+   background-attachment on body would repaint the whole screen on every scroll step). */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(109, 124, 255, 0.13), transparent 60%),
+    radial-gradient(900px 520px at -10% 10%, rgba(139, 108, 255, 0.12), transparent 60%);
 }
 ::selection {
   background: var(--accent);
@@ -79,7 +87,7 @@ h1, h2, h3, .display {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 40%), var(--white);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 20px 50px -30px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
 }
 
 .btn {

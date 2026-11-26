@@ -164,7 +164,7 @@ export function Menu<T>({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" onClick={onClose}>
       <div className="card max-h-[70vh] w-full max-w-sm overflow-y-auto p-2 shadow-xl" onClick={(e) => e.stopPropagation()}>
         {items.map((t, i) => (
           <button key={i} className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left hover:bg-[var(--line2)]" onClick={() => onPick(t)}>

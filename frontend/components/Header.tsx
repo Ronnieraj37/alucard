@@ -44,7 +44,7 @@ export default function Header() {
     }, "Added 100 tWETH, 5 tWBTC, 500k tUSDC/tUSDT/tDAI, 20k tLINK");
 
   return (
-    <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-[var(--paper)]/90 backdrop-blur-sm">
+    <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-[var(--paper)]/95">
       <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-3 px-4 sm:gap-6">
         <Link href="/" className="flex items-center gap-2.5">
           <Mark size={28} />
