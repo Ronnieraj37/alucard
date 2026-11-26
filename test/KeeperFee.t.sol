@@ -263,4 +263,32 @@ contract KeeperFeeTest is RuleSetup {
         feeds.setFeed(address(0xBEEF), address(feed1), MAX_AGE);
         vm.stopPrank();
     }
+
+    /// ETH held for an owner whose payout failed is theirs: an order in an ETH pool must bring its own ETH, so nobody
+    /// can open (and cancel) a position with it. (Found in review: createOrder used to settle from the vault's balance.)
+    function test_heldEthCannotPayForSomeoneElsesOrder() public {
+        uint256 id = _ethOrder();
+        owner.set(false, false);
+        _wait(2 minutes);
+        _run(id, true);
+        uint256 owedEth = orders.owed(address(owner), ETH);
+        assertGt(owedEth, 0);
+
+        address attacker = makeAddr("attacker");
+        MockERC20(Currency.unwrap(currency1)).transfer(attacker, 1_000e18);
+        vm.startPrank(attacker);
+        MockERC20(Currency.unwrap(currency1)).approve(address(orders), type(uint256).max);
+        ConditionalOrders.CreateParams memory p = _params(_off(), _timed());
+        p.key = ethKey;
+        p.liquidity = uint128(owedEth / 2);
+        p.amount0Max = uint128(owedEth);
+        vm.expectRevert(ConditionalOrders.BadMsgValue.selector);
+        orders.createOrder{value: 0}(p);
+        vm.stopPrank();
+
+        assertEq(address(orders).balance, owedEth);
+        address to = makeAddr("elsewhere");
+        owner.withdraw(orders, ETH, to);
+        assertEq(to.balance, owedEth);
+    }
 }

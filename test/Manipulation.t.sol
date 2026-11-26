@@ -116,6 +116,22 @@ contract ManipulationTest is RuleSetup {
         orders.poke(id, false);
     }
 
+    /// A push away from Chainlink cannot reset a hold either: it says nothing about the condition.
+    function test_aPushCannotResetAHold() public {
+        OrderState.Side memory low = _exit(OrderState.CHECK_EDGE, 0);
+        low.holdMinutes = 30;
+        uint256 id = _create(low, _off());
+        _swap(true, 5e18);
+        _market();
+        orders.poke(id, false);
+        uint256 armed = orders.armedAt(id, false);
+        _wait(10 minutes);
+        _swap(false, 9e18); // pushed far up, away from Chainlink: "back in range" here is not a price
+        vm.expectRevert(ConditionalOrders.NothingToPoke.selector);
+        orders.poke(id, false);
+        assertEq(orders.armedAt(id, false), armed);
+    }
+
     // ---------------------------------------------------------------- trailing stops
 
     /// Push the price up to set a high "best" for the stop to trail from: a pushed price is not remembered.

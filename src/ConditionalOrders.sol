@@ -241,6 +241,8 @@ contract ConditionalOrders is IUnlockCallback {
         );
         (uint256 paid0,) = abi.decode(res, (uint256, uint256));
 
+        // native ETH is paid from this contract's balance, which also holds other owners' ETH: only msg.value may pay
+        if (p.key.currency0.isAddressZero() && paid0 > msg.value) revert BadMsgValue();
         if (p.key.currency0.isAddressZero() && msg.value > paid0) {
             (bool ok,) = msg.sender.call{value: msg.value - paid0}("");
             if (!ok) revert RefundFailed();
@@ -317,7 +319,10 @@ contract ConditionalOrders is IUnlockCallback {
         if (sd.holdMinutes != 0) {
             bool isMet = rules.met(address(this), orderId, o.poolIndex, o.lowerState, o.upperState, upper);
             uint32 armed = armedAt(orderId, upper);
-            if (isMet == (armed == 0)) {
+            // a hold is forgotten only on a price that can be believed: a push away from Chainlink (or no Chainlink
+            // price) says nothing about the condition, so it can neither start nor reset a hold
+            (bool near,) = rules.tickOf(o.poolIndex);
+            if (isMet == (armed == 0) && (isMet || near)) {
                 _setArmed(orderId, upper, isMet ? uint32(block.timestamp) : 0);
                 changed = true;
             }

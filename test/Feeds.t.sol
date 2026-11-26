@@ -157,4 +157,23 @@ contract FeedsTest is Test {
         feeds.transferOwnership(address(0xBAD));
         vm.stopPrank();
     }
+
+    /// The band can be tightened at once (that only makes steps wait), but loosening or switching it off is announced
+    /// two days ahead, like a feed change.
+    function test_loosingTheBandWaitsTwoDays() public {
+        feeds.setMaxDeviationTicks(200);
+        feeds.setMaxDeviationTicks(150); // tighter: at once
+        assertEq(feeds.maxDeviationTicks(), 150);
+        vm.expectRevert(PriceFeeds.NotQueued.selector);
+        feeds.setMaxDeviationTicks(300);
+        vm.expectRevert(PriceFeeds.NotQueued.selector);
+        feeds.setMaxDeviationTicks(0);
+        feeds.queueMaxDeviation(0);
+        vm.warp(block.timestamp + 2 days - 1);
+        vm.expectRevert(PriceFeeds.NotQueued.selector);
+        feeds.setMaxDeviationTicks(0);
+        vm.warp(block.timestamp + 1);
+        feeds.setMaxDeviationTicks(0);
+        assertEq(feeds.maxDeviationTicks(), 0);
+    }
 }

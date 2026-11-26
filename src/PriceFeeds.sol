@@ -64,6 +64,7 @@ contract PriceFeeds {
     event FeedRemoved(address indexed token);
     event FeedQueued(address indexed token, address aggregator, uint32 maxAge, uint64 readyAt);
     event MaxDeviationSet(uint24 ticks);
+    event MaxDeviationQueued(uint24 ticks, uint64 readyAt);
     event OwnerChanged(address indexed owner);
 
     constructor(address _owner) {
@@ -129,9 +130,24 @@ contract PriceFeeds {
         emit FeedRemoved(token);
     }
 
+    /// @notice Set the band. The first setting (at deployment) and tightening it apply at once: a tighter band can only
+    /// make steps wait, never fire one. Loosening or switching it off waits FEED_DELAY after `queueMaxDeviation`.
     function setMaxDeviationTicks(uint24 ticks) external onlyOwner {
+        uint24 cur = maxDeviationTicks;
+        if (cur != 0 && (ticks == 0 || ticks > cur)) {
+            Queued memory q = queued[address(0)];
+            if (q.readyAt == 0 || block.timestamp < q.readyAt || q.change != keccak256(abi.encode(ticks))) revert NotQueued();
+            delete queued[address(0)];
+        }
         maxDeviationTicks = ticks;
         emit MaxDeviationSet(ticks);
+    }
+
+    /// @notice Announce a looser band (or switching it off); `setMaxDeviationTicks` can apply it FEED_DELAY from now.
+    function queueMaxDeviation(uint24 ticks) external onlyOwner {
+        uint64 readyAt = uint64(block.timestamp + FEED_DELAY);
+        queued[address(0)] = Queued(keccak256(abi.encode(ticks)), readyAt);
+        emit MaxDeviationQueued(ticks, readyAt);
     }
 
     function transferOwnership(address to) external onlyOwner {
