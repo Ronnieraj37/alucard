@@ -1,4 +1,4 @@
-// Encodes every template (and more cases, plan B included) on every hook pool with the frontend code and dry-runs
+// Encodes every template (and more cases, moves into another pool included) on every hook pool with the frontend code and dry-runs
 // createOrder (eth_call, nothing is sent). Also checks that decoding what would be stored and encoding it again gives
 // the same words.
 //   npx tsx scripts/check-rules.ts                      Sepolia, as the deployer (holds test tokens, has approved)

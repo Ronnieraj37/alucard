@@ -32,7 +32,6 @@ contract CreatePools is Script {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-
     struct Tok {
         address addr; // address(0) = native ETH
         uint8 decimals;
@@ -177,7 +176,8 @@ contract CreatePools is Script {
 
     /// @dev Mint a position NFT to the deployer: MINT_POSITION, SETTLE_PAIR, and SWEEP the unused ETH back.
     function _mint(PoolKey memory key, int24[2] memory r, uint128 liq, uint256 max0, uint256 max1) internal {
-        bytes memory actions = abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP));
+        bytes memory actions =
+            abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP));
         bytes[] memory params = new bytes[](3);
         params[0] = abi.encode(key, r[0], r[1], uint256(liq), uint128(max0), uint128(max1), me, bytes(""));
         params[1] = abi.encode(key.currency0, key.currency1);

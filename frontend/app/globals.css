@@ -150,3 +150,12 @@ h1, h2, h3, .display {
 .doc td { padding: 8px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; }
 .doc td code { white-space: nowrap; }
 .doc .lead { font-size: 17px; color: var(--muted); margin-top: 4px; }
+
+/* the strategy editor's Add menu opens in place under its button */
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-[menu-in"] { animation: none !important; }
+}

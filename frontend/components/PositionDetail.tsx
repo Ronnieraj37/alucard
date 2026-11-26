@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowLeft, Pencil, Play, RefreshCw, Sparkles, Umbrella } from "lucide-react";
+import { ArrowLeft, Clock, Pencil, Play, RefreshCw, Sparkles, Waypoints } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { type Abi } from "viem";
 import { useAccount } from "wagmi";
-import RuleEditor from "@/components/RuleEditor";
+import StrategyEditor from "@/components/StrategyEditor";
 import { Empty, PoolIcons, TxLine } from "@/components/ui";
 import { conditionalOrdersAbi } from "@/lib/generated/abis";
 import { type RulePosition, type SideMemo, liveLanes, liveSide, useRulePosition } from "@/lib/positions";
@@ -23,6 +23,7 @@ export default function PositionDetail({ id }: { id: bigint }) {
   const p = q.data;
 
   if (q.isLoading) return <Wrap><Empty text="Loading…" /></Wrap>;
+  if (q.isError) return <Wrap><Empty text="Couldn't load this position. Check your connection and try again." /></Wrap>;
   if (!p) return <Wrap><Empty text="This position is closed or does not exist." /></Wrap>;
 
   const c = { address: CORE.conditionalOrders, abi: conditionalOrdersAbi as Abi };
@@ -36,9 +37,9 @@ export default function PositionDetail({ id }: { id: bigint }) {
 
   const run = (lane: LaneId) =>
     tx.run(async () => {
-      await tx.send("Run rule", { ...c, functionName: "execute", args: [p.id, liveSide(p, lane)] });
+      await tx.send("Run this step", { ...c, functionName: "execute", args: [p.id, liveSide(p, lane)] });
       q.refetch();
-    }, "Rule ran");
+    }, "Done");
   const poke = (lane: LaneId) =>
     tx.run(async () => {
       await tx.send("Update", { ...c, functionName: "poke", args: [p.id, liveSide(p, lane)] });
@@ -51,10 +52,10 @@ export default function PositionDetail({ id }: { id: bigint }) {
     }, "Withdrawn to your wallet");
   const save = (rules: Rules, adv: Advanced) =>
     tx.run(async () => {
-      await tx.send("Save rules", { ...c, functionName: "updateOrder", args: [p.id, updateParams(p.pool, rules, p.liveIsHome, adv, [p.tickLower, p.tickUpper])] });
+      await tx.send("Save strategy", { ...c, functionName: "updateOrder", args: [p.id, updateParams(p.pool, rules, p.liveIsHome, adv, [p.tickLower, p.tickUpper])] });
       setEditor(false);
       q.refetch();
-    }, "Rules saved");
+    }, "Strategy saved");
 
   return (
     <Wrap>
@@ -73,7 +74,7 @@ export default function PositionDetail({ id }: { id: bigint }) {
 
       <div className="grid gap-3 md:grid-cols-2">
         <div className="card p-4">
-          <div className="label mb-1">{p.status === "home" ? "Liquidity" : p.status === "waiting" ? "Held while waiting" : `Parked in ${p.livePool.label}`}</div>
+          <div className="label mb-1">{p.status === "home" ? "Liquidity" : p.status === "waiting" ? "Held while moved" : `Now in ${p.livePool.label}`}</div>
           <div className="text-[15px]">
             {fmt(p.amount0)} {p.livePool.token0.symbol}
           </div>
@@ -96,10 +97,10 @@ export default function PositionDetail({ id }: { id: bigint }) {
       <div className="card p-4">
         <div className="mb-3 flex items-center gap-2">
           <Sparkles className="h-4 w-4" />
-          <div className="font-semibold">{p.liveIsHome ? "Rules" : "Plan B: coming back"}</div>
+          <div className="font-semibold">{p.liveIsHome ? "Strategy" : "Moved: coming back"}</div>
           <span className="text-[12px] text-[var(--muted)]">expire {new Date(p.expiry * 1000).toLocaleDateString()}</span>
           <button className="btn btn-light ml-auto" onClick={() => setEditor(true)}>
-            <Pencil className="h-3.5 w-3.5" /> {p.liveIsHome ? "Edit rules" : "Edit when it comes back"}
+            <Pencil className="h-3.5 w-3.5" /> {p.liveIsHome ? "Edit strategy" : "Edit when it comes back"}
           </button>
         </div>
         <div className="flex flex-col gap-2">
@@ -116,6 +117,12 @@ export default function PositionDetail({ id }: { id: bigint }) {
                   <div className={`label mb-0.5 ${lane === "up" ? "!text-[var(--sage)]" : "!text-[var(--rose)]"}`}>{laneTitle(p.pool, lane, L)}</div>
                   {text ?? <span className="text-[var(--muted)]">Nothing happens.</span>}
                   {p.memo[lane] && <MemoLine m={p.memo[lane]!} pool={p.pool} lane={lane} />}
+                  {L.trigger && (p.lastRun?.[lane] ?? 0) > 0 && (
+                    <div className="mt-1 flex items-center gap-1 text-[11px] text-[var(--muted)]">
+                      <Clock className="h-3 w-3" /> {p.status === "home" ? "Started or last ran" : "Moved"} {ago(p.lastRun[lane])}
+                    </div>
+                  )}
+                  {p.blocked?.[lane] && <div className="mt-1 text-[12px] text-[var(--amber)]">Its condition is true, but it cannot run yet: {p.blocked[lane]}</div>}
                 </div>
                 {p.memo[lane]?.pokeable && !p.ready[lane] && (
                   <button className="btn btn-light shrink-0" disabled={!owner || tx.state.busy} onClick={() => poke(lane)} title="Anyone can do this; it moves no tokens. Keepers do it too.">
@@ -123,7 +130,7 @@ export default function PositionDetail({ id }: { id: bigint }) {
                   </button>
                 )}
                 {p.ready[lane] && (
-                  <button className="btn btn-dark shrink-0" disabled={!owner || tx.state.busy} onClick={() => run(lane)} title="Anyone can run a rule whose condition is met">
+                  <button className="btn btn-dark shrink-0" disabled={!owner || tx.state.busy} onClick={() => run(lane)} title="Keepers run it on their own; anyone can, once its condition is true">
                     <Play className="h-3.5 w-3.5" /> Run now
                   </button>
                 )}
@@ -142,7 +149,7 @@ export default function PositionDetail({ id }: { id: bigint }) {
       </div>
 
       {editor && (
-        <RuleEditor
+        <StrategyEditor
           pool={p.pool}
           price={price}
           rangeLabel={rangeLabel}
@@ -151,7 +158,7 @@ export default function PositionDetail({ id }: { id: bigint }) {
           initialAdvanced={p.advanced}
           ticks={[p.tickLower, p.tickUpper]}
           existing={{ liveIsHome: p.liveIsHome }}
-          saveLabel={tx.state.busy ? "Saving…" : "Save rules"}
+          saveLabel={tx.state.busy ? "Saving…" : "Save strategy"}
           range={full ? { full: true } : { loPct: (lo / price - 1) * 100, hiPct: (hi / price - 1) * 100 }}
           busy={tx.state.busy}
           onClose={() => setEditor(false)}
@@ -163,8 +170,8 @@ export default function PositionDetail({ id }: { id: bigint }) {
 }
 
 function StatusBadge({ p, inRange }: { p: RulePosition; inRange: boolean }) {
-  if (p.status === "waiting") return <span className="text-[12px] font-semibold text-[var(--amber)]">● Waiting in plan B</span>;
-  if (p.status === "parked") return <span className="text-[12px] font-semibold text-[var(--amber)]">● Parked in {p.livePool.label}</span>;
+  if (p.status === "waiting") return <span className="text-[12px] font-semibold text-[var(--blue)]">● Moved: holding tokens</span>;
+  if (p.status === "parked") return <span className="text-[12px] font-semibold text-[var(--blue)]">● Moved to {p.livePool.label}</span>;
   return <span className={`text-[12px] font-semibold ${inRange ? "text-[var(--sage)]" : "text-[var(--amber)]"}`}>{inRange ? "● In range" : "● Out of range"}</span>;
 }
 
@@ -178,15 +185,15 @@ function ParkedRange({ pool, range, tick }: { pool: Pool; range: [number, number
   );
 }
 
-/** Plan B in words, under the live rules. */
+/** The move in words, under the live sides. */
 function PlanLines({ p }: { p: RulePosition }) {
   const plan = p.rules.plan!;
   const lines = p.liveIsHome
-    ? [`On a move: ${describePlan(p.pool, plan)}.`, ...describeBack(p.pool, plan)]
+    ? [`A move takes the money ${describePlan(p.pool, plan)}.`, ...describeBack(p.pool, plan)]
     : (["down", "up"] as LaneId[]).filter((l) => p.rules[l].trigger).map((l) => `Back in the position: ${describeLane(p.pool, l, p.rules[l], plan)}`);
   return (
     <div className="flex gap-2 rounded-[10px] border border-dashed border-[var(--line)] p-3 text-[12px] text-[var(--muted)]">
-      <Umbrella className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <Waypoints className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       <div className="flex flex-col gap-1">
         {lines.map((t) => (
           <div key={t}>{t}</div>
@@ -207,4 +214,12 @@ function MemoLine({ m, pool, lane }: { m: SideMemo; pool: Pool; lane: LaneId }) 
 
 function Wrap({ children }: { children: React.ReactNode }) {
   return <div className="mx-auto flex max-w-[760px] flex-col gap-4 px-4 py-8">{children}</div>;
+}
+
+function ago(t: number) {
+  const s = Math.max(0, Date.now() / 1000 - t);
+  if (s < 90) return "just now";
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  if (s < 172800) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
 }

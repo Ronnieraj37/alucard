@@ -51,7 +51,13 @@ export default function Positions() {
         </div>
       ))}
 
-      {!owner && <Empty text="Connect your wallet to see your positions." />}
+      {!owner && (
+        <Empty text="Connect your wallet to see your positions.">
+          <a href={`/pool?as=${EXAMPLE_OWNER}`} className="btn btn-light !rounded-full">
+            See live example positions
+          </a>
+        </Empty>
+      )}
       {owner && q.isLoading && <Empty text="Loading your positions…" />}
       {q.data && all.length === 0 && (
         <Empty text="You have no positions yet.">
@@ -69,6 +75,9 @@ export default function Positions() {
     </div>
   );
 }
+
+/** The deployer's wallet on Sepolia: it holds the live example positions (read-only view for visitors). */
+const EXAMPLE_OWNER = "0x02847D22C33f5F060Bd27e69F1a413AD44cab213";
 
 function PositionRow({ p }: { p: RulePosition | PlainPosition }) {
   const full = p.tickLower === minUsable(p.pool.key.tickSpacing) && p.tickUpper === maxUsable(p.pool.key.tickSpacing);
@@ -89,7 +98,7 @@ function PositionRow({ p }: { p: RulePosition | PlainPosition }) {
           <span className="rounded bg-[var(--line2)] px-1.5 py-0.5 text-[11px] font-semibold">{p.pool.key.fee / 10_000}%</span>
           <span className={`flex items-center gap-1 text-[11px] font-semibold ${inRange && !away ? "text-[var(--sage)]" : "text-[var(--amber)]"}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${inRange && !away ? "bg-[var(--sage)]" : "bg-[var(--amber)]"}`} />
-            {p.kind === "rules" && p.status === "waiting" ? "Waiting in plan B" : p.kind === "rules" && p.status === "parked" ? `Parked in ${p.livePool.base.symbol}/${p.livePool.quote.symbol}` : inRange ? "In range" : "Out of range"}
+            {p.kind === "rules" && p.status === "waiting" ? "Moved: holding tokens" : p.kind === "rules" && p.status === "parked" ? `Moved to ${p.livePool.base.symbol}/${p.livePool.quote.symbol}` : inRange ? "In range" : "Out of range"}
           </span>
         </div>
         <div className="text-[13px] text-[var(--muted)]">
@@ -108,10 +117,10 @@ function PositionRow({ p }: { p: RulePosition | PlainPosition }) {
         {p.kind === "rules" ? (
           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${ready ? "bg-[var(--ink)] text-white" : "bg-[var(--line2)]"}`}>
             <Sparkles className="h-3 w-3" />
-            {ready ? "Rule ready" : `${ruleCount} rule${ruleCount === 1 ? "" : "s"}`}
+            {ready ? "Step ready to run" : `Strategy · ${ruleCount} side${ruleCount === 1 ? "" : "s"}`}
           </span>
         ) : (
-          <span className="text-[11px] text-[var(--muted)]">No rules</span>
+          <span className="text-[11px] text-[var(--muted)]">No strategy</span>
         )}
       </div>
     </div>

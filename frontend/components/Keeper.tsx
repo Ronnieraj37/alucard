@@ -11,7 +11,7 @@ import { liveLanes, liveSide, loadRulePosition } from "@/lib/positions";
 import { type LaneId, describeLane, describeWhen } from "@/lib/rules";
 import { useTx } from "@/lib/tx";
 
-/** Anyone can run a rule once its condition is met, and is paid a gas refund from that position. */
+/** Anyone can run a strategy step once its condition is true, and is paid back its gas from that position. */
 export default function Keeper() {
   const client = usePublicClient();
   const { address } = useAccount();
@@ -32,7 +32,7 @@ export default function Keeper() {
         const lanes = liveLanes(p);
         for (const lane of ["down", "up"] as LaneId[]) {
           const L = lanes[lane];
-          const text = p.liveIsHome ? describeLane(p.pool, lane, L, p.rules.plan) ?? "" : L.trigger ? `Plan B: ${describeWhen(p.pool, lane, L)}, come back` : "";
+          const text = p.liveIsHome ? describeLane(p.pool, lane, L, p.rules.plan) ?? "" : L.trigger ? `${describeWhen(p.pool, lane, L)}: come back` : "";
           const item = { id, upper: liveSide(p, lane), text, label: p.pool.label };
           if (p.ready[lane]) ready.push(item);
           else if (p.memo[lane]?.pokeable) pokes.push(item);
@@ -42,14 +42,14 @@ export default function Keeper() {
     },
   });
 
-  // All ready rules in one transaction: each pays its own gas, the cost of the transaction itself is shared.
+  // All ready steps in one transaction: each pays its own gas, the cost of the transaction itself is shared.
   const runAll = () =>
     tx.run(async () => {
       const ready = q.data?.ready ?? [];
       if (ready.length === 1) {
         await tx.send(`Run #${ready[0].id}`, { address: CORE.conditionalOrders, abi: conditionalOrdersAbi as Abi, functionName: "execute", args: [ready[0].id, ready[0].upper] });
       } else if (ready.length > 1) {
-        await tx.send(`Run ${ready.length} rules`, {
+        await tx.send(`Run ${ready.length} step${ready.length === 1 ? "" : "s"}`, {
           address: CORE.conditionalOrders,
           abi: conditionalOrdersAbi as Abi,
           functionName: "executeMany",
@@ -57,9 +57,9 @@ export default function Keeper() {
         });
       }
       q.refetch();
-    }, "All ready rules ran. Your gas refund arrived in your wallet.");
+    }, "All ready steps ran. Your gas refund arrived in your wallet.");
 
-  // Pokes move trailing stops' best price. They are not paid; they keep other people's rules up to date.
+  // Pokes move trailing stops' best price. They are not paid; they keep other people's strategies up to date.
   const pokeAll = () =>
     tx.run(async () => {
       for (const r of q.data?.pokes ?? []) {
@@ -74,15 +74,15 @@ export default function Keeper() {
         <div>
           <h1 className="text-xl font-semibold">Keeper</h1>
           <div className="text-[13px] text-[var(--muted)]">
-            Rules run when someone sends the transaction. Anyone can, and is paid back the gas from that position.
+            A strategy step runs when someone sends the transaction. Keepers do it automatically; anyone can, and is paid back the gas from that position.
           </div>
         </div>
         <button className="btn btn-light ml-auto !p-2" onClick={() => q.refetch()} title="Refresh">
           <RefreshCw className={`h-4 w-4 ${q.isFetching ? "animate-spin" : ""}`} />
         </button>
       </div>
-      <div className="text-[13px] text-[var(--muted)]">{q.data ? `${q.data.open} open positions with rules, ${q.data.ready.length} ready to run.` : "Checking…"}</div>
-      {q.data && q.data.ready.length === 0 && <Empty text="Nothing to run right now. Move a price on the Swap page to trigger rules." />}
+      <div className="text-[13px] text-[var(--muted)]">{q.data ? `${q.data.open} open positions with a strategy, ${q.data.ready.length} ready to run.` : "Checking…"}</div>
+      {q.data && q.data.ready.length === 0 && <Empty text="Nothing to run right now. Move a price on the Swap page to trigger a strategy." />}
       <div className="flex flex-col gap-2">
         {q.data?.ready.map((r) => (
           <div key={`${r.id}-${r.upper}`} className="card flex items-start gap-3 p-3 text-[13px]">
@@ -98,7 +98,7 @@ export default function Keeper() {
       </div>
       {!!q.data?.ready.length && (
         <button className="btn btn-dark !rounded-[14px] !py-3" disabled={!address || tx.state.busy} onClick={runAll}>
-          <Play className="h-4 w-4" /> {address ? "Run all ready rules" : "Connect a wallet to run them"}
+          <Play className="h-4 w-4" /> {address ? "Run all ready steps" : "Connect a wallet to run them"}
         </button>
       )}
       {!!q.data?.pokes.length && (

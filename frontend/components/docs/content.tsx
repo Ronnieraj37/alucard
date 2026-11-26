@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, Bot, FlaskConical, Layers, LineChart, ShieldCheck, Sparkles, Target } from "lucide-react";
+import { ArrowLeftRight, Bot, FlaskConical, Layers, LineChart, ShieldCheck, Sparkles, Target, Waypoints } from "lucide-react";
 import Link from "next/link";
 import { CORE, POOLS, TOKENS } from "@/lib/pools";
 import { Callout, Cards, Code, Dev, Kbd, Section, Steps } from "./ui";
@@ -21,20 +21,21 @@ export const SECTIONS: DocSection[] = [
     id: "overview",
     title: "What Alucard does",
     group: "guide",
-    keywords: "intro overview hook uniswap v4 rules automate",
+    keywords: "intro overview hook uniswap v4 strategy automate move pool",
     render: () => (
-      <Section id="overview" title="What Alucard does" lead="Uniswap liquidity that follows your rules, plus limit orders. Your money stays in Uniswap the whole time.">
+      <Section id="overview" title="What Alucard does" lead="Your own strategy, running on your Uniswap v4 position. The money stays in Uniswap v4 until you withdraw.">
         <p>
-          Providing liquidity on Uniswap means watching the price: when it leaves your range you stop earning, and you have to decide whether to withdraw,
-          move the range or swap. Alucard lets you write those decisions down once, as <strong>rules</strong>, when you add liquidity. When a rule’s moment
-          comes, it runs on its own.
+          Providing liquidity means watching the price: when it leaves your range you stop earning, and you have to decide what to do. Alucard lets you write
+          that decision down once, as a <strong>strategy</strong>, when you add liquidity: your own conditions and your own steps. When a condition comes true,
+          the steps run on their own. Alucard does not pick a strategy for you or judge it; it gives you the parts and runs what you build.
         </p>
         <Cards
           items={[
-            { icon: Sparkles, title: "Rules on your liquidity", text: "Take profit, stop loss, follow the price, compound fees. Optional, and editable later.", href: "#rules" },
+            { icon: Sparkles, title: "Strategies on your liquidity", text: "Exit, swap, compound, follow the price, take profit in steps. Your conditions, your steps.", href: "#strategies" },
+            { icon: Waypoints, title: "Move to another pool and back", text: "Move the whole position into any other pool sharing a token, or hold one token, and come back by your own rule.", href: "#strategies" },
             { icon: Target, title: "Limit orders", text: "Sell at a price you choose. Filled inside other people’s swaps.", href: "#limit-orders" },
-            { icon: FlaskConical, title: "Backtests", text: "Replay six months of your pool's price against your rules before you commit.", href: "#backtest" },
-            { icon: Bot, title: "Anyone can run a rule", text: "No company in the middle. Whoever runs a rule gets its gas back from the position.", href: "#keepers" },
+            { icon: FlaskConical, title: "Backtests", text: "Replay real swap history with your strategy, exactly as the contract would run it.", href: "#backtest" },
+            { icon: Bot, title: "Anyone can run a step", text: "No company in the middle. Whoever runs a step gets its gas back from the position, never more than your cap.", href: "#keepers" },
           ]}
         />
         <Callout kind="warn" title="Testnet">
@@ -42,9 +43,10 @@ export const SECTIONS: DocSection[] = [
         </Callout>
         <Dev>
           <p>
-            Two contracts. <code>RuleHook</code> is a Uniswap v4 hook (afterInitialize, beforeSwap, afterSwap): it keeps a pool table and the limit-order
-            buckets. <code>ConditionalOrders</code> owns positions that have rules, inside the PoolManager (owner = the contract, salt = order id). Two because
-            one contract was over the 24 KB size limit Unichain still enforces. Source: <code>src/</code>, tests: <code>test/</code> (60 Foundry tests).
+            Four contracts. <code>RuleHook</code> is the Uniswap v4 hook (afterInitialize, beforeSwap, afterSwap): it keeps each pool&apos;s average price and
+            the limit-order buckets. <code>ConditionalOrders</code> holds positions that have a strategy, inside the PoolManager (owner = the contract, salt =
+            order id). <code>Rules</code> is read-only: conditions, validation and price math. <code>PriceFeeds</code> is the Chainlink token list. Each stays
+            under the 24 KB size limit. Source: <code>src/</code>, tests: <code>test/</code> (150 Foundry tests, 81% of branches).
           </p>
         </Dev>
       </Section>
@@ -67,12 +69,12 @@ export const SECTIONS: DocSection[] = [
               <strong>Get Sepolia ETH</strong> for gas from any public Sepolia faucet. Gas on Sepolia costs a tiny fraction of a cent.
             </>,
             <>
-              <strong>Get test tokens</strong> with <Kbd>Faucet</Kbd> in the header: one transaction gives 100 tWETH, 5 tWBTC, 500,000 tUSDC, tUSDT and tDAI, and
+              <strong>Get test tokens</strong> with <Kbd>Faucet</Kbd> in the header (or <Kbd>Get test tokens</Kbd> on a new position): one transaction gives 100 tWETH, 5 tWBTC, 500,000 tUSDC, tUSDT and tDAI, and
               20,000 tLINK.
             </>,
             <>
               <strong>Try it</strong>: <Link href="/swap">swap</Link>, place a <Link href="/swap">limit order</Link>, or <Link href="/pool/new">add liquidity</Link> with a
-              rule.
+              strategy.
             </>,
           ]}
         />
@@ -94,7 +96,7 @@ export const SECTIONS: DocSection[] = [
       <Section id="swap" title="Swapping" lead="Trade between test tokens in Alucard’s pools.">
         <p>
           Type an amount and the app asks Uniswap’s quoter for the best price across the pools of that pair. When a pair has more than one pool you can pick
-          the route; swaps in pools that use Alucard’s hook also fill limit orders and can trigger rules. Swaps accept up to 0.5% slippage.
+          the route; swaps in pools that use Alucard’s hook also fill limit orders and move the prices strategies watch. Swaps accept up to 0.5% slippage.
         </p>
         <Dev>
           <p>
@@ -130,7 +132,7 @@ export const SECTIONS: DocSection[] = [
         </Callout>
         <Callout kind="tip" title="Very small orders">
           Orders below 0.1% of the pool’s active liquidity are not filled inside swaps: swappers are not paid for filling, so their extra gas is kept small (at
-          most 5 fills per swap). Once crossed, anyone can fill them and is paid back its gas from the order’s proceeds, in the token the order received.
+          most 3 fills per swap). Once crossed, anyone can fill them and is paid back its gas from the order’s proceeds, in the token the order received.
         </Callout>
         <Dev>
           <p>
@@ -149,7 +151,7 @@ export const SECTIONS: DocSection[] = [
     group: "guide",
     keywords: "add liquidity position range deposit nft plain",
     render: () => (
-      <Section id="positions" title="Adding liquidity" lead="A normal Uniswap position, with optional rules.">
+      <Section id="positions" title="Adding liquidity" lead="A normal Uniswap position, with an optional strategy.">
         <Steps
           items={[
             <>
@@ -158,17 +160,17 @@ export const SECTIONS: DocSection[] = [
             <>Set a range with a preset (±2%, ±5%, ±15%, full) or type the low and high price.</>,
             <>Type one amount; the other is filled in from the price and the range.</>,
             <>
-              Leave <Kbd>Automate with rules</Kbd> off for a plain Uniswap position, or turn it on to add rules.
+              Leave <Kbd>Add a strategy</Kbd> off for a plain Uniswap position, or turn it on to build one.
             </>,
           ]}
         />
         <p>
-          Plain positions are ordinary Uniswap NFTs in your wallet. Positions with rules are held by the Alucard contract for you; you can edit their rules or
-          withdraw everything at any time from <Link href="/pool">Pool</Link>.
+          Plain positions are ordinary Uniswap NFTs in your wallet. Positions with a strategy are held by the Alucard contract for you; you can edit the
+          strategy or withdraw everything at any time from <Link href="/pool">Pool</Link>.
         </p>
         <Dev>
           <p>
-            No rules: <code>PositionManager.modifyLiquidities</code> with <code>MINT_POSITION, SETTLE_PAIR, SWEEP</code> through Permit2. With rules:{" "}
+            No strategy: <code>PositionManager.modifyLiquidities</code> with <code>MINT_POSITION, SETTLE_PAIR, SWEEP</code> through Permit2. With one:{" "}
             <code>ConditionalOrders.createOrder(CreateParams)</code>, where the app sends liquidity plus <code>amount0Max/amount1Max</code> with 2% headroom.
           </p>
         </Dev>
@@ -176,41 +178,42 @@ export const SECTIONS: DocSection[] = [
     ),
   },
   {
-    id: "rules",
-    title: "Rules",
+    id: "strategies",
+    title: "Strategies",
     group: "guide",
-    keywords: "rules trigger steps repeat side lower upper template take profit stop loss follow compound",
+    keywords: "strategy rules condition trigger steps repeat side move another pool come back template take profit stop loss follow compound",
     render: () => (
-      <Section id="rules" title="Rules" lead="Each position has two sides. Each side is: when this happens, do these steps, then stop or repeat.">
+      <Section id="strategies" title="Strategies" lead="Two sides: what happens if the price falls, and what happens if it rises. Each side is: when this is true, do these steps.">
         <RangeSides />
-        <h3>Triggers: when</h3>
+        <p>
+          The editor shows the two sides as two columns of cards, read top to bottom. A card opens in place to show its settings; <Kbd>Add</Kbd> under a column
+          only offers what fits after the cards above it, and greys out the rest with the reason. The summary on the right says the whole strategy in plain
+          words.
+        </p>
+        <h3>When: conditions</h3>
         <table>
           <thead>
             <tr>
-              <th>Trigger</th>
-              <th>Fires when</th>
+              <th>Condition</th>
+              <th>True when</th>
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td>Price leaves my range</td>
-              <td>The price moves past your range’s edge, optionally by an extra margin (e.g. 1% past it).</td>
-            </tr>
-            <tr>
-              <td>Price reaches a level</td>
-              <td>The pool’s price drops below (lower side) or rises above (upper side) a price you choose.</td>
-            </tr>
-            <tr>
-              <td>Price in another pool</td>
-              <td>The same, but watching another pool’s price (a bigger pool, or another pair).</td>
-            </tr>
-            <tr>
-              <td>On a timer</td>
-              <td>A fixed time has passed since it last ran: every few hours or days.</td>
-            </tr>
+            <tr><td>Leaves my range</td><td>The price is past your range’s edge, optionally by an extra margin.</td></tr>
+            <tr><td>Reaches a price</td><td>The price drops below (falls side) or rises above (rises side) a price you choose.</td></tr>
+            <tr><td>Turns from its best price</td><td>A trailing stop: the price falls x% from its highest (or rises x% from its lowest) since the side started.</td></tr>
+            <tr><td>Price in another pool</td><td>The same, watching another Alucard pool’s price.</td></tr>
+            <tr><td>Chainlink price</td><td>Chainlink’s price of the pair reaches a level. A missing or stale price never makes it true.</td></tr>
+            <tr><td>On a timer</td><td>A set time has passed since the side last ran.</td></tr>
+            <tr><td>Fees earned</td><td>The fees since they were last collected reach x% of the position.</td></tr>
+            <tr><td>Fee rate falls</td><td>Those fees, as a yearly rate, are below x% (after at least an hour).</td></tr>
           </tbody>
         </table>
-        <h3>Steps: what to do</h3>
+        <p>
+          Add <strong>a second condition</strong> (both, or either one), and <strong>only if it lasts</strong>: price conditions then read the average over up to
+          an hour. New price conditions start with a 10-minute average, so a short wick or a pushed price does not count; remove it if you want it faster.
+        </p>
+        <h3>Then: steps</h3>
         <table>
           <thead>
             <tr>
@@ -219,49 +222,50 @@ export const SECTIONS: DocSection[] = [
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td>Withdraw</td>
-              <td>Take some or all of the liquidity out to your wallet.</td>
-            </tr>
-            <tr>
-              <td>Convert to one token</td>
-              <td>Swap what was withdrawn into one token at once, never worse than your slippage limit.</td>
-            </tr>
-            <tr>
-              <td>Follow the price</td>
-              <td>Move the whole position to a new range right next to the price.</td>
-            </tr>
-            <tr>
-              <td>Compound</td>
-              <td>Put earned fees back into the same range.</td>
-            </tr>
-            <tr>
-              <td>Send fees to wallet</td>
-              <td>Fees go to you instead of staying in the position.</td>
-            </tr>
+            <tr><td>Move the money</td><td>Everything goes to another place until it comes back by itself: see below.</td></tr>
+            <tr><td>Withdraw</td><td>Take some or all of the liquidity out to your wallet.</td></tr>
+            <tr><td>Swap</td><td>Swap what was withdrawn into one token at once, never worse than your slippage limit.</td></tr>
+            <tr><td>Follow the price</td><td>Move the whole position to a new range right next to the price.</td></tr>
+            <tr><td>Compound</td><td>Put earned fees back into the same range.</td></tr>
+            <tr><td>Send fees to wallet</td><td>Fees go to you instead of staying in the position.</td></tr>
+            <tr><td>Repeat</td><td>Run again the next time, optionally a set number of times; a price level steps after each run.</td></tr>
           </tbody>
         </table>
+        <h3>Move to another pool, and back</h3>
+        <p>A move takes everything out of your range and puts it somewhere else until your own condition brings it back:</p>
+        <ul>
+          <li>
+            <strong>Into another pool</strong>: any Alucard pool that shares a token with yours, another pair or the same pair at another fee. The money is
+            swapped into the shared token on the way and added in a range around that pool’s price (±% you choose).
+          </li>
+          <li>
+            <strong>Hold one token</strong>: no pool; the token is kept for you inside the Uniswap PoolManager.
+          </li>
+          <li>
+            <strong>Come back when</strong>: the price is back in your range (optionally a margin inside it), turns x% from its low or high, after a time, or at
+            a price.
+          </li>
+          <li>
+            <strong>Back into</strong>: the same range, or a new range of the same width around the price then. The position’s own sides start again.
+          </li>
+        </ul>
+        <p>
+          If both sides move the money, they share the same place and both ways back watch it, so each way back must not be true the moment the money arrives
+          (the editor tells you when one would be).
+        </p>
         <h3>Templates</h3>
         <p>
-          <strong>Take profit</strong>, <strong>Stop loss</strong> (exit to the stable token), <strong>Auto re-range</strong>, <strong>Auto-compound</strong> and{" "}
-          <strong>Exit both ways</strong> fill the canvas in one click. Everything stays editable.
+          Starting points, not advice: move to another pool while out of range, hold a token and come back on a turn, take profit, stop loss, trailing stop,
+          auto re-range, compound, leave when fees dry up, take profit in steps, exit both ways. Everything stays editable.
         </p>
-        <Callout kind="note" title="A few combinations are not allowed (yet)">
-          <ul className="!my-1">
-            <li>Convert and re-add together (swapping to the right ratio before re-adding comes later).</li>
-            <li>Follow the price needs the “leaves my range” trigger.</li>
-            <li>Repeating “leaves my range” without moving the range would fire again at once, so it needs Follow the price.</li>
-            <li>A repeating price level moves its trigger by a step you set after each run.</li>
-          </ul>
-          The editor warns before you save.
-        </Callout>
         <p>
-          Rules expire (30 days by default; set under Advanced). When both sides have run and are off, the position closes and everything goes to your wallet.
+          A strategy expires (30 days by default; set under Settings). When both sides have run and are off, the position closes and everything goes to your
+          wallet.
         </p>
         <Dev>
           <p>
-            In storage each side is one 256-bit slot; the UI’s “falls/rises” lanes map to the contract’s lower/upper sides through the pool’s token order. See{" "}
-            <a href="#storage">Order storage</a> and <a href="#encoding">Encoding a rule</a>.
+            In storage each side is one 256-bit slot; the UI’s “falls/rises” sides map to the contract’s lower/upper sides through the pool’s token order. A
+            move is the order’s second leg (<code>Plan</code>): see <a href="#storage">Order storage</a> and <a href="#encoding">Encoding a strategy</a>.
           </p>
         </Dev>
       </Section>
@@ -269,37 +273,35 @@ export const SECTIONS: DocSection[] = [
   },
   {
     id: "keepers",
-    title: "Who runs the rules",
+    title: "Who runs the steps",
     group: "guide",
     keywords: "keeper execute gas refund fee bot",
     render: () => (
-      <Section id="keepers" title="Who runs the rules" lead="A blockchain does nothing by itself: someone has to send the transaction.">
+      <Section id="keepers" title="Who runs the steps" lead="A blockchain does nothing by itself: someone has to send the transaction.">
         <p>
-          Anyone can run a rule whose condition is met. The contract checks the condition again, runs the steps, and pays the caller back their gas from the
-          position, never from your wallet. ETH is paid as ETH with a 10% premium. In any other pool the gas is turned into the pool’s own tokens at
-          Chainlink prices, with a 20% premium because the keeper still has to sell them. You set a ceiling on that pay (0.1% of what a run moves, by
-          default; at most 1%). Only tokens with a Chainlink price feed can have rules, so every pool can pay this way.
+          Anyone can run a step whose condition is true. The contract checks the condition again, checks that the price is not a pushed one, runs the steps,
+          and pays the caller back their gas from the position, never from your wallet. ETH is paid as ETH with a 10% premium. Any other token is paid at
+          Chainlink prices with a 20% premium, because the keeper still has to sell it. You set a cap on that pay (0.1% of what a run moves by default; at most
+          1%); what the keeper does not take goes back to you.
         </p>
         <p>
-          Alucard runs a keeper bot every few minutes, and the <Link href="/keeper">Keeper</Link> page lets anyone run ready rules by hand.
+          Alucard runs a keeper bot every few minutes, and the <Link href="/keeper">Keeper</Link> page lets anyone run ready steps by hand.
         </p>
         <Dev>
           <p>Keeper pay, measured inside the unlock callback so the gas limit a keeper picks cannot inflate it:</p>
-          <Code lang="solidity">{`gasWei   = (gasUsed + 36_000 + 20_000 per token sent to the owner) * min(tx.gasprice, block.basefee + 0.01 gwei)
-reserve  = maxKeeperFeeBps * (tokens the run removed)   // after a Convert: of what the swap produced
+          <Code lang="solidity">{`gasWei   = (gasUsed + 36_000 + 20_000 per token sent to the owner) * min(tx.gasprice, block.basefee + 1 gwei)
+reserve  = maxKeeperFeeBps * (tokens the run removed)   // after a swap: of what the swap produced
 token0   : pays min(gasWei in token0 * premium, reserve0)        // ETH as it is, a token through PriceFeeds.quote
 token1   : pays what token0's reserve could not cover
 premium  : 110% in ETH, 120% in a token
-one feed down : that token is priced from the other one through the pool's price
-no feed at all: the keeper gets the whole reserve, so an order is never stuck
+a token without a price : pays nothing; the other token pays the cost
+no price at all         : the keeper is not paid (anyone can still run it; paying the cap instead
+                          would let a repeating step drain it while a feed is down)
 executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token (storage is already warm)`}</Code>
           <p>
-            The gas is measured after everything except the final transfers; the fixed amounts cover those and the transaction’s base cost. They were
-            fitted to real runs: counted gas stays within about 3% of what the transaction uses (<code>test/Feeds.t.sol</code>).
-          </p>
-          <p>
-            Bot: <code>frontend/scripts/keeper.ts</code>, scheduled by <code>.github/workflows/keeper.yml</code>. It re-simulates each <code>execute</code>{" "}
-            before sending, so it never pays for a run that would revert.
+            Bot: <code>frontend/scripts/keeper.ts</code>, scheduled by <code>.github/workflows/keeper.yml</code>. It batches every ready step into{" "}
+            <code>executeMany</code>, and pokes trailing stops. Apps should add room to gas estimates: <code>lib/gas.ts</code> adds 30% or at least 150k (a
+            price snapshot or a limit fill can land between the estimate and the block).
           </p>
         </Dev>
       </Section>
@@ -311,10 +313,10 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
     group: "guide",
     keywords: "backtest history replay results windows",
     render: () => (
-      <Section id="backtest" title="Backtesting" lead="See how your rules would have done on real history before you use them.">
+      <Section id="backtest" title="Backtesting" lead="See what your strategy would have done on real history before you use it.">
         <p>
-          In the rule editor, press <Kbd>Backtest</Kbd>. Every swap of the history you pick is replayed against your position and rules, the way the contract
-          would run them. Two kinds of history:
+          In the editor, press <Kbd>Backtest</Kbd>. Every swap of the history you pick is replayed against your position and strategy, the way the contract
+          would run it (the engine takes the exact words the contract would store). Two kinds of history:
         </p>
         <ul>
           <li>
@@ -329,7 +331,8 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
         </ul>
         <ul>
           <li>
-            <strong>Compared with:</strong> the same position without rules, and simply holding the tokens.
+            <strong>Shown next to:</strong> the same position without a strategy, and simply holding the tokens. The numbers are for you to judge; Alucard
+            does not rate strategies.
           </li>
           <li>
             <strong>Every 30-day window</strong> repeats the test from each week’s start, so one lucky or unlucky period cannot mislead you.
@@ -339,7 +342,8 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
           </li>
         </ul>
         <Callout kind="warn" title="What a backtest cannot tell you">
-          The past does not predict the future. Your own conversions do not move later prices in the replay, and price manipulation and MEV are not modelled.
+          The past does not predict the future. Your own swaps do not move later prices in the replay, and price manipulation and MEV are not modelled.
+          While the money is moved into another pool, the replay counts it as the shared token: that pool’s fees are not included.
           On your own pool, ordinary traders are missing, so fees are understated; on mainnet ETH/USDC, other pairs use ETH’s price path.
         </Callout>
         <Dev>
@@ -354,26 +358,29 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
     id: "safety",
     title: "Safety and limits",
     group: "guide",
-    keywords: "safety security manipulation flash loan slippage expiry payout withdraw",
+    keywords: "safety security manipulation flash loan slippage expiry payout withdraw chainlink pushed price",
     render: () => (
       <Section id="safety" title="Safety and limits" lead="What protects your position, and what to be aware of.">
         <Cards
           items={[
-            { icon: ShieldCheck, title: "Average prices, not the price of the moment", text: "Rules read the pool's average price over at least 2 minutes. A price pushed within a block counts for nothing, so nobody can borrow money to push the price and fire your rule." },
-            { icon: ArrowLeftRight, title: "Slippage from the average price", text: "Every swap stops at your slippage limit, measured from the average price, however far someone pushes the price before it." },
+            { icon: ShieldCheck, title: "Average prices, not the price of the moment", text: "Conditions read the pool's average price over at least 2 minutes (10 by default in the editor). A price pushed within a block counts for nothing." },
+            { icon: ArrowLeftRight, title: "Nothing runs at a pushed price", text: "A step runs only while the price of the moment is within your slippage of the average, in your pool and in a pool a move goes into. Swaps stop at that limit." },
             { icon: Layers, title: "Payouts are never stuck", text: "If a transfer to you fails (e.g. a contract wallet that refuses ETH), it is held for you to withdraw to any address." },
-            { icon: LineChart, title: "Always yours", text: "Withdraw everything at any time. After expiry anyone can close it, and the tokens still go to you." },
+            { icon: LineChart, title: "Always yours", text: "Withdraw everything at any time, wherever the money is. After expiry anyone can close it, and the tokens still go to you." },
           ]}
         />
         <Callout kind="warn">
-          Not audited. No admin key and no upgrades: if a bug were found, you would withdraw and move to a new version. Testnet only.
+          Not audited. No upgrades. The only admin is the token list (which tokens have a Chainlink price): its changes wait two days, and its owner can set
+          how far a pool may be from Chainlink for steps to run. Testnet only.
         </Callout>
         <Dev>
           <p>
             Average price: before the first swap of each block <code>RuleHook._beforeSwap</code> adds the tick that held since the last update to a running sum
             (tick × seconds) and keeps a snapshot about once a minute (64 snapshots). <code>averageTick(poolId, window)</code> divides two points of the sum.
-            Every pool condition, swap limit and new range in <code>Rules</code> uses it (at least 120 s, or the side&apos;s hold). Conditions read only pools of the
-            hook; pools without it have no average. A side runs at most once a minute (<code>MIN_GAP</code>), so no transaction can loop it.
+            Every pool condition, swap limit and new range in <code>Rules</code> uses it (at least 120 s, or the side&apos;s hold). <code>Rules.checkPrice</code>{" "}
+            runs before every step and before entering another pool: the current tick must be within <code>maxSlippage × 10</code> ticks of the average, and,
+            when <code>PriceFeeds.maxDeviationTicks</code> is set, the average within that many ticks of Chainlink. A side runs at most once a minute (
+            <code>MIN_GAP</code>).
           </p>
         </Dev>
       </Section>
@@ -386,18 +393,22 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
     keywords: "faq questions",
     render: () => (
       <Section id="faq" title="FAQ">
-        <h3>Can I attach rules to a position I already have?</h3>
-        <p>Not yet. A position gets rules when it is created through Alucard. You can withdraw a plain position and create a new one with rules.</p>
-        <h3>What happens if nobody runs my rule?</h3>
+        <h3>Can I add a strategy to a position I already have?</h3>
+        <p>Not yet. A position gets a strategy when it is created through Alucard. You can withdraw a plain position and create a new one with a strategy.</p>
+        <h3>What happens if nobody runs a step?</h3>
+        <p>It stays ready. When it runs later, the contract checks the condition again at that moment; if the price has moved back, it does not run.</p>
+        <h3>Why does a ready step say it cannot run yet?</h3>
         <p>
-          It stays ready. When it runs later, the contract checks the condition again at that moment; if the price has moved back, it simply does not run.
+          The price of the moment is too far from its recent average (someone may have pushed it, or the market is moving very fast). It runs once the price
+          settles. The position page shows the reason.
         </p>
-        <h3>Can I change my rules?</h3>
+        <h3>Can I change my strategy?</h3>
         <p>
-          Yes. Open the position under <Link href="/pool">Pool</Link> and press <Kbd>Edit rules</Kbd>. The liquidity and range stay; timers restart.
+          Yes. Open the position under <Link href="/pool">Pool</Link> and press <Kbd>Edit strategy</Kbd>. The liquidity and range stay. Where a move goes is
+          fixed once created; while the money is moved, you can change when it comes back.
         </p>
-        <h3>Why is the same pair listed with different fees?</h3>
-        <p>Each fee tier is a separate Uniswap pool. Rules and limit orders work in pools that use Alucard’s hook; the app labels the others.</p>
+        <h3>Which pools can a move go into?</h3>
+        <p>Any Alucard pool that shares a token with yours. On mainnet that would be any pool with the hook; on Sepolia, the eight pools listed under Addresses.</p>
       </Section>
     ),
   },
@@ -424,8 +435,8 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
                 <code>RuleHook</code>
               </td>
               <td>
-                Hook with afterInitialize (registers the pool in a 24-bit pool table), beforeSwap (tick before, flash-loan flag) and afterSwap (fills crossed
-                limit buckets). Limit orders: place, cancel, claim, fillBucket.
+                Hook with afterInitialize (registers the pool in a 24-bit pool table and starts its price record), beforeSwap (adds the price that held to the
+                running sum, a snapshot each minute) and afterSwap (fills crossed limit buckets, at most 3). Limit orders: place, cancel, claim, fillBucket.
               </td>
             </tr>
             <tr>
@@ -433,8 +444,21 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
                 <code>ConditionalOrders</code>
               </td>
               <td>
-                Owns positions with rules. createOrder, updateOrder, execute (anyone), cancel, withdraw (held payouts), plus views for the app.
+                Holds positions with a strategy, and the tokens of a move. createOrder, updateOrder, execute / executeMany (anyone), poke, cancel, withdraw
+                (held payouts).
               </td>
+            </tr>
+            <tr>
+              <td>
+                <code>Rules</code>
+              </td>
+              <td>Read-only: is a condition true (met), is a strategy valid (checkSide, checkLegs), is the price believable (checkPrice), swap limits, ranges, keeper pay.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>PriceFeeds</code>
+              </td>
+              <td>The token list: each token’s Chainlink feed (changes wait 2 days), minimum order size, allowed distance from Chainlink.</td>
             </tr>
             <tr>
               <td>
@@ -453,7 +477,7 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
             </>,
             <>
               A keeper sees <code>Rules.canExecute(vault, id, upper) == true</code> and calls <code>execute</code>; the contract asks <code>Rules.met</code>{" "}
-              again, on average prices.
+              again, on average prices, then <code>Rules.checkPrice</code>.
             </>,
             <>
               Inside <code>unlockCallback</code>: remove → reserve keeper ceiling → swap (optional) → add (optional) → update the side → close or store →
@@ -489,6 +513,8 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
               [
                 ["RuleHook", CORE.ruleHook],
                 ["ConditionalOrders", CORE.conditionalOrders],
+                ["Rules", CORE.rules],
+                ["PriceFeeds", CORE.priceFeeds],
                 ["TestFaucet", CORE.faucet],
                 ["Uniswap PoolManager", CORE.poolManager],
                 ["Uniswap PositionManager", CORE.positionManager],
@@ -580,11 +606,11 @@ executeMany   : the orders share the 36_000, each adds 6_000 and 8_000 per token
   },
   {
     id: "encoding",
-    title: "Encoding a rule",
+    title: "Encoding a strategy",
     group: "dev",
     keywords: "encoding encoderules side lane orientation baseis0 tick price checker actions validate",
     render: () => (
-      <Section dev id="encoding" title="Encoding a rule" lead="How the editor’s blocks become a contract side (lib/rules.ts).">
+      <Section dev id="encoding" title="Encoding a strategy" lead="How the editor’s cards become contract sides (lib/rules.ts).">
         <h3>Lanes and sides</h3>
         <p>
           The UI speaks in the base token’s price (“if WETH falls”). Ticks measure token1 per token0, so when the base token is token1 a falling base price is a
@@ -659,9 +685,11 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
               </td>
             </tr>
             <tr>
-              <td>Move to plan B</td>
+              <td>Move the money</td>
               <td>
-                bit 4 with remove 100% and keep fees (a waiting leg: bit 4 alone), always <code>repeat</code>; swap bit when it must sell into the shared token
+                bit 4 with remove 100% and keep fees (leaving a held token: bit 4 alone), always <code>repeat</code>; swap bit when it must sell into the shared
+                token. The place goes in <code>CreateParams.away</code> (<code>LEG_RANGE</code> / <code>LEG_CENTERED</code> in a pool, <code>LEG_IDLE</code> to hold),
+                its ways back in <code>awayLower</code> / <code>awayUpper</code>
               </td>
             </tr>
             <tr>
@@ -697,11 +725,12 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
           <li>TIME needs value &gt; 0; EDGE needs value ≥ 0; TICK and TRAIL may read another pool only if it is a pool of the hook.</li>
           <li>A repeating TICK side without add needs a step; one-sided add needs EDGE, remove 100% and a width.</li>
           <li>Holds are at most 60 minutes. APR only on the lower side of a side that leaves.</li>
-          <li>Moves need a second leg; a waiting leg only moves; a move into another pair must swap into the shared token.</li>
+          <li>Moves need a second leg; a held-token leg only moves; a move into another pair must swap into the shared token; an edit keeps a way to the other leg.</li>
         </ul>
         <p>
           <code>scripts/check-rules.ts</code> encodes every template on every pool and dry-runs <code>createOrder</code> against the contract, and{" "}
-          <code>test/EditorParity.t.sol</code> checks that the editor accepts exactly what the contract accepts.
+          <code>test/EditorParity.t.sol</code> checks that the editor accepts exactly what the contract accepts (39,146 cases) and that the backtest engine runs
+          orders exactly where the contract does (2,000 orders).
         </p>
       </Section>
     ),
@@ -716,12 +745,14 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
         <Code lang="text">{`1  side off?                                  -> revert SideOff
 2  ran less than a minute ago?                -> revert TooSoon
 3  Rules.met: condition on average prices?    -> else revert ConditionNotMet
-4  move bit? -> take everything out, swap, enter the other leg, swap legs (see above)
+3b Rules.checkPrice: price near its average?  -> else revert PriceMoved
+4  move bit? -> take everything out, swap, (checkPrice of the other pool), enter the other leg, swap legs
 5  remove removeBps of liquidity; fees collected with it
 6  reserve = maxKeeperFeeBps of everything removed; fees not kept -> owner
 7  swap (bit 2): all of one token, price limit = average -/+ maxSlippage*10,
    skipped if the price is already past the limit
-8  add (bit 3): same range, or one-sided next to the average price (follow)
+8  add (bit 3): same range, or one-sided next to the price (follow: on the side of both
+   the average and the price of the moment, so the one token fills the whole range)
 9  side: lastRun = now; repeat ? (TICK without add: value += step) : clear
 10 no liquidity left or both sides off -> remove the rest, delete
 11 pay keeper out of the reserve (Rules.keeperPay), everything else to the owner`}</Code>
@@ -763,9 +794,9 @@ struct Share { uint128 liquidity; uint128 debt0; uint128 debt1; }`}</Code>
             </tr>
             <tr>
               <td>
-                <code>MAX_FILLS_PER_SWAP = 5</code>
+                <code>MAX_FILLS_PER_SWAP = 3</code>
               </td>
-              <td>At most ~350k gas of fills per swap (swappers are not paid for them); the rest wait in a per-pool backlog that the next swaps finish first.</td>
+              <td>At most ~210k gas of fills per swap (swappers are not paid for them); the rest wait in a per-pool backlog that the next swaps finish first.</td>
             </tr>
             <tr>
               <td>
@@ -792,13 +823,16 @@ POST /api/backtest  (JSON body)            # same, not cached`}</Code>
   "start": 1775347200, "days": 90,            // or "mode": "windows" (every 30-day window, weekly)
   "depositUsd": 10000,
   "range": { "loPct": -5, "hiPct": 5 } | { "full": true },
-  "rules": { "down": Lane, "up": Lane },     // the editor's model; price triggers as pricePct
+  "order": { "lower", "upper", "home", "away", "awayLower", "awayUpper" },  // the words createOrder gets
+  "refTick": 0, "homeIndex": 1, "spacing": 60, "baseIs0": true,         // where the levels were made
   "keeperFeeBps": 10, "slippagePct": 1, "delaySec": 12,
-  "keeperCostUsd": 0.01, "keeperMode": "gas" | "ceiling"
+  "keeperCostUsd": 0.01
 }`}</Code>
         <p>
-          The engine (<code>frontend/api/_engine.py</code>, numpy only) ports <code>encodeRules</code> and runs the contract’s steps on each recorded swap. A
-          keeper executes a set delay after a condition holds, at the price after that swap, and only if it still holds. Fees follow lp_study’s validated
+          The engine (<code>frontend/api/_engine.py</code>, numpy only) decodes the order words and runs the contract’s steps on each recorded swap, with the
+          hook&apos;s average price replayed exactly. Price levels move with the history (a level x% from today stays x% from the start), mirrored when the
+          history lists the tokens the other way round; one-sided widths keep their width in price on another fee tier. A keeper runs a set delay after a
+          condition holds, at the price after that swap, and only if it still holds and the price is near its average. Fees follow lp_study’s validated
           replay:
         </p>
         <Code lang="text">{`fee earned on a swap = fee_LP × overlap_fraction × L_position / (L_pool + L_position)
@@ -816,9 +850,9 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
 Δ = change of √P (token1 in) or of 1/√P (token0 in)`}</Code>
         <p>
           Data: <code>frontend/api/_data/*.npz</code>, exported by <code>lp_study/export_backtest.py</code>. Checks:{" "}
-          <code>lp_study/tests/test_rules_backtest.py</code> (46 tests: fees equal lp_sim’s replay to 1e-9, exits at the swap the contract implies, encoding
-          equal to the frontend’s for both token orders) and <code>frontend/api/test_chain_history.py</code> (our pools: the pool stays in its fee band,
-          fees match the trades and do not depend on the pool&apos;s size).
+          <code>test/EditorParity.t.sol</code> (the engine runs 2,000 random orders exactly where the contract does, run for run) and{" "}
+          <code>frontend/api/test_chain_history.py</code> (our pools: the pool stays in its fee band, fees match the trades and do not depend on the
+          pool&apos;s size).
         </p>
       </Section>
     ),
@@ -836,7 +870,7 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
             {(
               [
                 ["createOrder(CreateParams) payable → orderId", "Add liquidity with a strategy (sides as packed words, an optional second leg). Native ETH as msg.value; extra refunded."],
-                ["updateOrder(id, UpdateParams)", "Owner only. New rules for the live leg; range, liquidity, plan B and the side clocks unchanged."],
+                ["updateOrder(id, UpdateParams)", "Owner only. New sides for where the money is now; range, liquidity, where a move goes and the side clocks unchanged."],
                 ["execute(id, upper)", "Anyone. Runs one side if its condition holds."],
                 ["executeMany(ids[], uppers[]) → ran", "Anyone. Runs many sides in one transaction; the ones that cannot run are skipped. Each order pays less than alone."],
                 ["poke(id, upper)", "Anyone. Moves a trailing side's remembered best to the current average price."],
@@ -846,6 +880,8 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
                 ["getOrder(id) / getPlan(id) / ordersOf(owner)", "Views for apps: the order (packed sides), its second leg, an owner's orders."],
                 ["Rules.canExecute(vault, id, upper) / orderAmounts(vault, id) / poolState(index)", "Views for keepers and apps."],
                 ["Rules.encode(side) / decode(word) / gasWei(gas) / averageTick(index, window)", "Helpers: pack a side, the gas price counted, a pool's average price."],
+                ["Rules.checkPrice(key, slippage)", "Reverts PriceMoved unless the pool's price is near its average (and near Chainlink, if the list sets a band)."],
+                ["PriceFeeds.setMaxDeviationTicks(ticks)", "Owner. How far a pool's average may be from Chainlink for steps to run (0 = not checked)."],
               ] as [string, string][]
             ).map(([f, d]) => (
               <tr key={f}>
@@ -865,7 +901,7 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
                 ["placeLimit(key, tickLower, sellToken0, amount) payable → epochId", "Join or open the bucket at that price."],
                 ["cancelLimit(epochId, to) / claimLimit(epochId, to)", "Before / after the fill."],
                 ["fillBucket(key, tickLower, sellToken0) → reward", "Fill a crossed bucket no swap filled."],
-                ["registerPool(key) → index", "Add a hookless pool to the table (for swaps; rules cannot read its price: it has no average)."],
+                ["registerPool(key) → index", "Add a hookless pool to the table (conditions cannot read its price: it has no average)."],
                 ["averageTick(poolId, window) view → (ok, tick)", "The pool's average price over at least `window` seconds: what every rule reads."],
               ] as [string, string][]
             ).map(([f, d]) => (
@@ -880,7 +916,7 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
         </table>
         <h3>Events</h3>
         <p>
-          <code>OrderCreated · OrderExecuted · OrderUpdated · OrderClosed · PayoutHeld · Withdrawn</code> and <code>LimitPlaced · LimitCancelled · BucketFilled · LimitClaimed · FillRewarded · PoolRegistered</code>.
+          <code>OrderCreated · OrderExecuted · OrderMoved · OrderUpdated · OrderPoked · OrderClosed · PayoutHeld · Withdrawn</code> and <code>LimitPlaced · LimitCancelled · BucketFilled · LimitClaimed · FillRewarded · PoolRegistered</code>.
         </p>
       </Section>
     ),
@@ -893,7 +929,7 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
     render: () => (
       <Section dev id="local-dev" title="Run it locally">
         <Code lang="bash">{`# contracts
-forge test                                   # 130 tests (needs the app installed below)
+forge test                                   # 150 tests (EditorParity needs the app installed below)
 
 # app + backtest API
 cd frontend && npm install && npm run setup:api
@@ -904,7 +940,7 @@ npm run dev            # terminal 2: http://localhost:3000
 npx tsx scripts/check-rules.ts               # encodings vs the live contract
 DRY_RUN=1 npx tsx scripts/keeper.ts          # what the keeper would run`}</Code>
         <p>
-          Deploying: <code>DEPLOY.md</code>. Contract deployment scripts: <code>script/sepolia/01–06</code> (Sepolia needs{" "}
+          Deploying: <code>DEPLOY.md</code>. Contract deployment scripts: <code>script/sepolia/01–05</code> (Sepolia needs{" "}
           <code>--gas-estimate-multiplier</code>; see <code>deployments/README.md</code>).
         </p>
       </Section>

@@ -3,8 +3,8 @@
     "currency0": "0x58e283AFE1Db9704EB73cFBB0032b8DEBeC9b719",
     "currency1": "0x5B7E3901456fEd7158D583FBaA9736fff611Fc5b",
     "fee": 100,
-    "hooks": "0x2AadB86eea896c8B1f1dB81c909888E1dDb990c0",
-    "poolId": "0xc5c234a09cb14ae9ef286e17ed54b842bd2f81dd23ba236c0cc61b05aaef2a04",
+    "hooks": "0xFf726A970AEab8ceCF068D86bC5Ccf0F0cb6D0C0",
+    "poolId": "0xbac7269dcb628e4d0fe46c41b657dc34a8ea345227c577838aece40aeb7a65d0",
     "poolIndex": 6,
     "tickSpacing": 1
   },
@@ -12,8 +12,8 @@
     "currency0": "0x0000000000000000000000000000000000000000",
     "currency1": "0x5B7E3901456fEd7158D583FBaA9736fff611Fc5b",
     "fee": 3000,
-    "hooks": "0x2AadB86eea896c8B1f1dB81c909888E1dDb990c0",
-    "poolId": "0xd3be2512900aa2e64e080147d3255e8be6c1f47c69912f81f9c75d933d8cb824",
+    "hooks": "0xFf726A970AEab8ceCF068D86bC5Ccf0F0cb6D0C0",
+    "poolId": "0x077ce253b1a40a09ab2e89cc9d99993a2b7f3e241a389a32ca209728269315ef",
     "poolIndex": 8,
     "tickSpacing": 60
   },
@@ -21,8 +21,8 @@
     "currency0": "0x4119A4dab16764aD6056DD6C7f744F6cd8d9B4Ca",
     "currency1": "0xCe340f6faE8c61787f4Af123a97e344b53122510",
     "fee": 10000,
-    "hooks": "0x2AadB86eea896c8B1f1dB81c909888E1dDb990c0",
-    "poolId": "0x7dab1e8cc840a3ad467b27a61250d45f39124e9f72f2e6dcc8234aadde0619a5",
+    "hooks": "0xFf726A970AEab8ceCF068D86bC5Ccf0F0cb6D0C0",
+    "poolId": "0xe7586e970e91c1278337b5bb7018f9656f293f6c4098202709a3e0aeb8e7f376",
     "poolIndex": 5,
     "tickSpacing": 200
   },
@@ -30,8 +30,8 @@
     "currency0": "0x5B7E3901456fEd7158D583FBaA9736fff611Fc5b",
     "currency1": "0x9289d26a4B38d3CBCc25471f1e69cbbc8d4a8121",
     "fee": 100,
-    "hooks": "0x2AadB86eea896c8B1f1dB81c909888E1dDb990c0",
-    "poolId": "0x85ebf6506b0a2da47d1a7c131951e512dedf5f0af8651cadfb4a744b6db8c1ca",
+    "hooks": "0xFf726A970AEab8ceCF068D86bC5Ccf0F0cb6D0C0",
+    "poolId": "0x8076ff4658bd26ed191efff6c47516c6f7086ff44a243b78cf446a8f7fed658b",
     "poolIndex": 4,
     "tickSpacing": 1
   },
@@ -39,8 +39,8 @@
     "currency0": "0x3630EEB9719BCabC532f049Ef663991f4E110E74",
     "currency1": "0x5B7E3901456fEd7158D583FBaA9736fff611Fc5b",
     "fee": 3000,
-    "hooks": "0x2AadB86eea896c8B1f1dB81c909888E1dDb990c0",
-    "poolId": "0x5f62297997725b5314529c71bcfe7cfc26eeea0ce573e59447abb81c99578adf",
+    "hooks": "0xFf726A970AEab8ceCF068D86bC5Ccf0F0cb6D0C0",
+    "poolId": "0x8eec85ef73d3eb9a4d4d81e2149a168e93f0767942c2e90ba7148dd0455f254f",
     "poolIndex": 2,
     "tickSpacing": 60
   },
@@ -48,8 +48,8 @@
     "currency0": "0x4119A4dab16764aD6056DD6C7f744F6cd8d9B4Ca",
     "currency1": "0x5B7E3901456fEd7158D583FBaA9736fff611Fc5b",
     "fee": 3000,
-    "hooks": "0x2AadB86eea896c8B1f1dB81c909888E1dDb990c0",
-    "poolId": "0x1a6e1d83ca9226438b121f3ebb5756eba693b45f6de8ec7804dce35e5badeb23",
+    "hooks": "0xFf726A970AEab8ceCF068D86bC5Ccf0F0cb6D0C0",
+    "poolId": "0x9819f4ccff6887b27995852182a8bbf1bcb7480a1f24b158793a7c80a6d8e3cb",
     "poolIndex": 1,
     "tickSpacing": 60
   },
@@ -66,8 +66,8 @@
     "currency0": "0x3630EEB9719BCabC532f049Ef663991f4E110E74",
     "currency1": "0x4119A4dab16764aD6056DD6C7f744F6cd8d9B4Ca",
     "fee": 500,
-    "hooks": "0x2AadB86eea896c8B1f1dB81c909888E1dDb990c0",
-    "poolId": "0x1bcc4ffcafa645d855eda704507a1458a9015951ce9dcf0a1b5c7c5ae93a057f",
+    "hooks": "0xFf726A970AEab8ceCF068D86bC5Ccf0F0cb6D0C0",
+    "poolId": "0xd9bf1e966918565ef03373f6ddf1ca194eb0e83b9bf7b6e29539f83ad86d0250",
     "poolIndex": 3,
     "tickSpacing": 10
   }

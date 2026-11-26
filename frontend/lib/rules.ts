@@ -1,8 +1,8 @@
 // The strategy model the UI works with, and its translation to the contract.
 //
 // A strategy is the position's rules (two lanes: what to do if the base token falls, or rises) and, optionally, a
-// plan B: where the money goes when a lane says "move to plan B" (wait holding tokens, or park in a range in another
-// pool), when it comes back (the "come back" lanes), and into what range.
+// move: where the money goes when a lane says "move" (into a range in another pool, or holding one token), when it
+// comes back (the "come back" lanes), and into what range. The contract calls the place it moves to the second leg.
 //
 // The UI talks about the BASE token's price ("if WETH falls"). The contract talks about ticks of token1 per token0
 // ("lower side" fires when the tick falls). When the base token is token1 the two point opposite ways, so every
@@ -25,7 +25,7 @@ export type Trigger = {
   trailPct?: number; // trail: how far the price turns back from its best
   feesPct?: number; // fees: fees earned, in % of the position
   aprPct?: number; // apr: the fee rate per year, in %
-  /** plan B's way back "the price is back in my range": a price level at the range's edge that follows the range */
+  /** a way back "the price is back in my range": a price level at the range's edge (bufferPct inside it) */
   backIn?: boolean;
 };
 
@@ -33,7 +33,7 @@ export type ActionKind = "collect" | "withdraw" | "convert" | "readd" | "follow"
 export type Action = {
   kind: ActionKind;
   pct?: number; // withdraw: % of the liquidity
-  to?: "base" | "quote"; // convert; move into a waiting plan B: what to hold (unset = keep the tokens as they are)
+  to?: "base" | "quote"; // convert; a move that holds a token: which one (unset = keep the tokens as they are)
   widthPct?: number; // follow: width of the new range
 };
 
@@ -53,11 +53,11 @@ export type Lane = {
   maxRuns?: number;
 };
 
-/** Where the money goes on "move to plan B", and how it comes back. */
+/** Where the money goes on "move", and how it comes back. (Called the order's second leg in the contract.) */
 export type PlanB = {
-  where: "wait" | "park";
-  parkPool?: number; // park: a pool that shares a token with this one
-  parkWidthPct?: number; // park: the range there, centred on its price when the money arrives
+  where: "wait" | "park"; // wait: hold one token, no pool; park: a position in another pool
+  parkPool?: number; // park: any Alucard pool that shares a token with this one
+  parkWidthPct?: number; // park: the range there, ±% around its price when the money arrives
   returnTo: "same" | "recentre"; // back into the same range, or one of the same width centred on the price
   back: { down: Lane; up: Lane }; // when to come back (about this pool's base price); each lane only moves back
 };
@@ -76,18 +76,31 @@ export const emptyPlan = (): PlanB => ({ where: "wait", returnTo: "recentre", ba
 /** The way back of the money a lane takes out: a fall out of the range comes back on a rise, and the other way. */
 export const backLaneOf = (exit: LaneId): LaneId => (exit === "down" ? "up" : "down");
 
-/** A new plan B for a lane that moves: wait, and come back into the same range once the price is back in it. */
-export const newPlan = (exit: LaneId): PlanB => {
-  const plan: PlanB = { where: "wait", returnTo: "same", back: { down: moveLane(null), up: moveLane(null) } };
+/** A range width that suits a pool: narrow for two stablecoins, wider otherwise. */
+export const defaultWidthPct = (q: Pool) => (STABLE.includes(q.base.symbol) && STABLE.includes(q.quote.symbol) ? 0.2 : 5);
+
+/** A new move for a lane: into the first other pool there is (or holding a token when there is none), coming back
+ * into the same range once the price is back in it. */
+export const newPlan = (exit: LaneId, home?: Pool): PlanB => {
+  const q = home ? parkable(home)[0] : undefined;
+  const plan: PlanB = q
+    ? { where: "park", parkPool: q.index, parkWidthPct: defaultWidthPct(q), returnTo: "same", back: { down: moveLane(null), up: moveLane(null) } }
+    : { where: "wait", returnTo: "same", back: { down: moveLane(null), up: moveLane(null) } };
   plan.back[backLaneOf(exit)] = moveLane({ kind: "price", backIn: true });
   return plan;
 };
 
-/** "Back in my range" ways back get their price: the range's low edge for a rise back, its high edge for a fall back. */
+/** "Back in my range" ways back get their price: the range's low edge for a rise back, its high edge for a fall back,
+ * `bufferPct` further inside the range when set (so a price hovering at the edge does not bring it straight back). */
 export function materialize(p: Pool, r: Rules, range?: [number, number]): Rules {
   if (!r.plan || !range) return r;
   const [lo, hi] = [priceAtTick(p, range[0]), priceAtTick(p, range[1])].sort((a, b) => a - b);
-  const fix = (l: Lane, id: LaneId): Lane => (l.trigger?.backIn ? { ...l, trigger: { ...l.trigger, kind: "price", price: id === "up" ? lo : hi } } : l);
+  const fix = (l: Lane, id: LaneId): Lane => {
+    const t = l.trigger;
+    if (!t?.backIn) return l;
+    const b = (t.bufferPct ?? 0) / 100;
+    return { ...l, trigger: { ...t, kind: "price", price: id === "up" ? lo * (1 + b) : hi * (1 - b) } };
+  };
   return { ...r, plan: { ...r.plan, back: { down: fix(r.plan.back.down, "down"), up: fix(r.plan.back.up, "up") } } };
 }
 
@@ -98,7 +111,12 @@ export function markBackIn(p: Pool, r: Rules, range: [number, number]): Rules {
   const mark = (l: Lane, id: LaneId): Lane => {
     const t = l.trigger;
     const edge = id === "up" ? lo : hi;
-    return t?.kind === "price" && Math.abs((t.price ?? 0) / edge - 1) < 5e-4 ? { ...l, trigger: { ...t, backIn: true } } : l;
+    if (t?.kind !== "price") return l;
+    // the level is the edge, or a whole % (0.5 steps) inside the range from it
+    const inside = id === "up" ? (t.price ?? 0) / edge - 1 : 1 - (t.price ?? 0) / edge;
+    const buf = Math.round(inside * 200) / 2;
+    if (buf < 0 || buf > 10 || Math.abs(inside * 100 - buf) > 0.05) return l;
+    return { ...l, trigger: { ...t, backIn: true, bufferPct: buf || undefined } };
   };
   return { ...r, plan: { ...r.plan, back: { down: mark(r.plan.back.down, "down"), up: mark(r.plan.back.up, "up") } } };
 }
@@ -171,7 +189,7 @@ export function withAction(lane: Lane, a: Action): Lane {
   return { ...lane, actions };
 }
 
-// ---------------------------------------------------------------- plan B pools
+// ---------------------------------------------------------------- pools a move can go into
 
 /** Pools a condition can watch: pools of the hook only (they keep the average price), same pair first. */
 export const watchable = (p: Pool) => {
@@ -189,12 +207,9 @@ export function sharedToken(a: Pool, b: Pool): "token0" | "token1" | "both" | nu
 }
 
 const STABLE = ["USDC", "USDT", "DAI"];
-/** Pools money can be parked in: hook pools sharing a token with this pool (another fee tier of the same pair too),
- * stable pairs first. */
-export const parkable = (p: Pool) =>
-  POOLS.filter((q) => q.hooked && q.index !== p.index && sharedToken(p, q)).sort(
-    (a, b) => Number(STABLE.includes(b.base.symbol) && STABLE.includes(b.quote.symbol)) - Number(STABLE.includes(a.base.symbol) && STABLE.includes(a.quote.symbol)),
-  );
+/** Pools a move can go into: every Alucard pool that shares a token with this one (another fee tier of the same pair
+ * too). The money is swapped into the shared token on the way. */
+export const parkable = (p: Pool) => POOLS.filter((q) => q.hooked && q.index !== p.index && sharedToken(p, q));
 
 // ---------------------------------------------------------------- trailing distance <-> ticks
 
@@ -375,7 +390,7 @@ export function encodeRules(p: Pool, r: Rules, range: [number, number] = [0, 0])
   return out;
 }
 
-/** Encode the live leg's lanes for updateOrder: the position's rules, or the plan B "come back" lanes. */
+/** Encode the live leg's lanes for updateOrder: the position's rules, or the "come back" lanes while it is moved. */
 export function encodeLive(home: Pool, r: Rules, liveIsHome: boolean, range?: [number, number]): { lower: bigint; upper: bigint } {
   r = materialize(home, r, range);
   const c = liveIsHome ? homeCtx(home, r.plan) : awayCtx(home, r.plan!);
@@ -545,15 +560,15 @@ function laneErrors(c: Ctx, id: LaneId, lane: Lane): string[] {
     if (lane.actions.length && !has(lane, "move")) e.push("Add a trigger, or these steps never run.");
     return e;
   }
-  if (lane.actions.length === 0) e.push("Add at least one step after the trigger.");
+  if (lane.actions.length === 0) e.push("Add a step after the condition.");
   const t = lane.trigger;
   const t2 = lane.trigger2 ?? null;
   const moves = has(lane, "move");
   const follows = has(lane, "follow");
   e.push(...triggerErrors(c, id, t, ""));
   if (t2) e.push(...triggerErrors(c, id, t2, " (second condition)"));
-  if (moves && !c.twoLegs) e.push("“Move to plan B” needs a plan B: set where the money goes.");
-  if (moves && lane.actions.length > 1) e.push("“Move to plan B” takes everything: remove the other steps.");
+  if (moves && !c.twoLegs) e.push("“Move” needs a place to go: choose a pool or a token to hold.");
+  if (moves && lane.actions.length > 1) e.push("“Move” takes everything: remove the other steps.");
   if (c.idle && !moves) e.push("While waiting, the only step is coming back.");
   if (follows && t.kind !== "leave") e.push("“Follow the price” only works when the first condition is “Leaves range”.");
   if (follows && t2 && lane.combine === "or") e.push("“Follow the price” needs the price to have left the range: use “and” for the second condition, not “or”.");
@@ -570,7 +585,7 @@ function laneErrors(c: Ctx, id: LaneId, lane: Lane): string[] {
     const priceLevel = isPrice(t) || isPrice(t2);
     if (lane.repeat && priceLevel && !follows && !(ticksForPct(lane.stepPct ?? 0) > 0)) e.push("Set how far the trigger price moves after each run.");
   }
-  if ((t.kind === "apr" || t2?.kind === "apr") && !leaves) e.push("“Fees dry up” is a reason to leave: withdraw everything, or move to plan B.");
+  if ((t.kind === "apr" || t2?.kind === "apr") && !leaves) e.push("“Fees earn less than” is a reason to leave: withdraw everything, or move the money.");
   if (t.kind === "trail" && t2?.kind === "trail") e.push("Only one trailing stop per side.");
   const hold = lane.holdMinutes ?? 0;
   if (hold && !(Number.isInteger(hold) && hold >= 1 && hold <= MAX_HOLD_MINUTES)) e.push(`The averaging time must be 1 to ${MAX_HOLD_MINUTES} whole minutes.`);
@@ -603,29 +618,29 @@ export function validate(p: Pool, r: Rules, range?: [number, number], opts: { pl
   const opposite = (c: Ctx, l: Lane) => directional(l.trigger) && directional(l.trigger2) && watchedBy(c.own, l.trigger, c.watch).baseIs0 !== watchedBy(c.own, l.trigger2, c.watch).baseIs0;
   if (opposite(hc, r.down) || opposite(hc, r.up))
     out.advice.push("The two conditions watch pools whose prices are quoted the opposite way round. Pick pools with the same base token.");
-  if (!live(r.down) && !live(r.up)) out.general.push("Add at least one trigger.");
+  if (!live(r.down) && !live(r.up)) out.general.push("Add a condition and a step on at least one side.");
   if (slotsOf(p, r).conflict)
     out.general.push(
       isApr(r.down) || isApr(r.up)
-        ? "“Fees dry up” uses the contract's lower slot, and the other lane needs it too. Move one of them to the other lane."
-        : "These two triggers watch prices that move the opposite way and would need the same slot. Move one of them to the other lane.",
+        ? "“Fees earn less than” can only be used on one side, and the other side needs that place too. Move one of them to the other side."
+        : "These two conditions watch prices quoted the opposite way round and would need the same place. Move one of them to the other side.",
     );
   if (r.plan) {
     const plan = r.plan;
-    if (!opts.planLocked && !has(r.down, "move") && !has(r.up, "move")) out.plan.push("Plan B is never used: add “Move to plan B” to a lane.");
+    if (!opts.planLocked && !has(r.down, "move") && !has(r.up, "move")) out.plan.push("Nothing moves the money: add a “Move” step to a side.");
     if (range && plan.returnTo === "recentre" && alignUp((range[1] - range[0]) / 2, p.key.tickSpacing) > MAX_TRAIL_TICKS)
-      out.plan.push("This range is too wide to re-centre: choose “the same range” to come back to.");
+      out.plan.push("This range is too wide to re-centre: come back into the same range instead.");
     if (plan.where === "park") {
       const q = plan.parkPool ? poolByIndex(plan.parkPool) : undefined;
-      if (!q) out.plan.push("Choose a pool to park in.");
-      else if (!q.hooked || !sharedToken(p, q)) out.plan.push("The parking pool must be an Alucard pool that shares a token with this one.");
-      if (!(ticksForPct(plan.parkWidthPct ?? 0) >= 1)) out.plan.push("Set how wide the parking range is.");
-      else if (q && alignUp(ticksForPct(plan.parkWidthPct!), q.key.tickSpacing) > MAX_TRAIL_TICKS) out.plan.push("The parking range is too wide.");
+      if (!q) out.plan.push("Choose the pool to move into.");
+      else if (!q.hooked || !sharedToken(p, q)) out.plan.push("The other pool must be an Alucard pool that shares a token with this one.");
+      if (!(ticksForPct(plan.parkWidthPct ?? 0) >= 1)) out.plan.push("Set the range in the other pool.");
+      else if (q && alignUp(ticksForPct(plan.parkWidthPct!), q.key.tickSpacing) > MAX_TRAIL_TICKS) out.plan.push("The range in the other pool is too wide.");
     }
     const ac = awayCtx(p, plan);
     out.backDown = laneErrors(ac, "down", plan.back.down);
     out.backUp = laneErrors(ac, "up", plan.back.up);
-    if (!live(plan.back.down) && !live(plan.back.up)) out.plan.push("Plan B needs a way back: set when the money comes back.");
+    if (!live(plan.back.down) && !live(plan.back.up)) out.plan.push("Set when the money comes back.");
     if (slotsOf(ac.own, plan.back, ac.watch).conflict)
       out.plan.push("The two ways back need the same slot. Use one of them.");
     // a way back that is already true on arrival would bring the money straight back
@@ -634,15 +649,25 @@ export function validate(p: Pool, r: Rules, range?: [number, number], opts: { pl
       const level = (l: Lane) => (l.trigger?.kind === "price" ? l.trigger.price ?? 0 : null);
       const bd = level(plan.back.down);
       const bu = level(plan.back.up);
+      // Both ways back are live whichever side moved the money out, so each must not be true the moment it arrives.
+      const both = has(r.down, "move") && has(r.up, "move");
       if (has(r.down, "move") && bd !== null && bd >= prices[0])
-        out.advice.push("After falling out of the range the price is already below this level, so it would come straight back. Pick a level below the range.");
+        out.advice.push(
+          both
+            ? `Both sides move the money, so both ways back watch it: right after a fall out of the range, “${p.base.symbol} drops below ${fmt(bd)}” is already true. Use a turn (% from the high or low) or a timer for one of them.`
+            : `After falling out of the range ${p.base.symbol} is already below ${fmt(bd)}, so the money would come straight back. Pick a level below the range.`,
+        );
       if (has(r.up, "move") && bu !== null && bu <= prices[1])
-        out.advice.push("After rising out of the range the price is already above this level, so it would come straight back. Pick a level above the range.");
+        out.advice.push(
+          both
+            ? `Both sides move the money, so both ways back watch it: right after a rise out of the range, “${p.base.symbol} rises above ${fmt(bu)}” is already true. Use a turn (% from the high or low) or a timer for one of them.`
+            : `After rising out of the range ${p.base.symbol} is already above ${fmt(bu)}, so the money would come straight back. Pick a level above the range.`,
+        );
       // and a way back in the other direction must not be one the price is already past when it arrives
       if (has(r.down, "move") && bu !== null && bu < prices[0])
-        out.advice.push("This level is below the range: right after falling out, the price can still be above it and would come straight back. Use the range's low edge or higher.");
+        out.advice.push(`${fmt(bu)} is below the range: right after falling out, ${p.base.symbol} can still be above it and the money would come straight back. Use the range's low edge or higher.`);
       if (has(r.up, "move") && bd !== null && bd > prices[1])
-        out.advice.push("This level is above the range: right after rising out, the price can still be below it and would come straight back. Use the range's high edge or lower.");
+        out.advice.push(`${fmt(bd)} is above the range: right after rising out, ${p.base.symbol} can still be below it and the money would come straight back. Use the range's high edge or lower.`);
     }
   }
   return out;
@@ -673,7 +698,7 @@ export function describeTrigger(p: Pool, id: LaneId, t: Trigger): string {
     case "leave":
       return t.bufferPct ? `${p.base.symbol} moves ${t.bufferPct}% ${dir} my range` : `${p.base.symbol} leaves my range (${dir})`;
     case "price":
-      if (t.backIn) return `${p.base.symbol} is back in my range`;
+      if (t.backIn) return t.bufferPct ? `${p.base.symbol} is ${t.bufferPct}% back inside my range` : `${p.base.symbol} is back in my range`;
       return `${p.base.symbol} ${id === "down" ? "drops below" : "rises above"} ${fmt(t.price ?? 0)} ${p.quote.symbol}`;
     case "otherPool": {
       const other = t.poolIndex ? poolByIndex(t.poolIndex) : undefined;
@@ -713,10 +738,11 @@ export function describeWhen(p: Pool, id: LaneId, lane: Lane): string {
   return when;
 }
 
-export function describePlan(p: Pool, plan: PlanB): string {
-  if (plan.where === "wait") return "wait, holding the tokens";
+/** Where a move takes the money, e.g. "into USDT / USDC · 0.01% (±0.2%)" or "hold USDC". */
+export function describePlan(p: Pool, plan: PlanB, to?: "base" | "quote"): string {
+  if (plan.where === "wait") return to ? `hold ${to === "base" ? p.base.symbol : p.quote.symbol}` : "hold the tokens as they are";
   const q = plan.parkPool ? poolByIndex(plan.parkPool) : undefined;
-  return q ? `park in ${q.label} (±${plan.parkWidthPct}%)` : "park in another pool";
+  return q ? `into ${q.label} (±${plan.parkWidthPct}%)` : "into another pool";
 }
 
 export function describeAction(p: Pool, a: Action, plan?: PlanB): string {
@@ -732,11 +758,12 @@ export function describeAction(p: Pool, a: Action, plan?: PlanB): string {
     case "follow":
       return `move the range next to the new price (${a.widthPct}% wide)`;
     case "move": {
-      if (!plan) return "move to plan B";
+      if (!plan) return "move the money";
       const q = plan.where === "park" && plan.parkPool ? poolByIndex(plan.parkPool) : undefined;
-      const shared = q ? sharedToken(p, q) : null;
-      const via = shared === "token0" ? p.token0.symbol : shared === "token1" ? p.token1.symbol : a.to ? (a.to === "base" ? p.base.symbol : p.quote.symbol) : null;
-      return `move to plan B${via ? ` as ${via}` : ""}: ${describePlan(p, plan)}`;
+      if (!q) return describePlan(p, plan, a.to);
+      const shared = sharedToken(p, q);
+      const via = shared === "token0" ? p.token0.symbol : shared === "token1" ? p.token1.symbol : null;
+      return `${via ? `swap to ${via} and ` : ""}move it ${describePlan(p, plan)}`;
     }
   }
 }
@@ -745,13 +772,13 @@ export function describeLane(p: Pool, id: LaneId, lane: Lane, plan?: PlanB): str
   if (!lane.trigger || !lane.actions.length) return null;
   const steps = lane.actions.map((a) => describeAction(p, a, plan)).join(", then ");
   const limit = lane.maxRuns ? ` up to ${lane.maxRuns} time${lane.maxRuns === 1 ? "" : "s"}` : "";
-  if (has(lane, "move")) return `${describeWhen(p, id, lane)}: ${steps}. Every time${limit}.`;
+  if (has(lane, "move")) return `${describeWhen(p, id, lane)}: ${steps}${limit ? `. At most${limit}` : ""}.`;
   const priceLevel = isPrice(lane.trigger) || isPrice(lane.trigger2);
   const tail = lane.repeat ? (priceLevel && !has(lane, "follow") ? `. Repeats${limit}, moving the trigger price ${lane.stepPct}% further each time.` : `. Repeats${limit}.`) : ". Runs once.";
   return `${describeWhen(p, id, lane)}: ${steps}${tail}`;
 }
 
-/** "Comes back when …" lines for plan B. */
+/** "Comes back when …" lines of a move. */
 export function describeBack(p: Pool, plan: PlanB): string[] {
   const into = plan.returnTo === "same" ? "the same range" : "a range of the same width around the price";
   return (["down", "up"] as LaneId[])
@@ -774,26 +801,26 @@ const leave = (bufferPct = 0): Trigger => ({ kind: "leave", bufferPct });
 
 export const TEMPLATES: Template[] = [
   {
-    id: "parkStable",
-    name: "Park in stablecoins",
-    hint: "Below the range: sell to the stablecoin and earn fees in a stable pool; come back when the price is back",
+    id: "otherPool",
+    name: "Move to another pool while out of range",
+    hint: "Below the range: move the money into another pool; come back once the price is 1% back inside the range",
     build: (p) => {
-      const q = parkable(p).find((x) => STABLE.includes(x.base.symbol) && STABLE.includes(x.quote.symbol) && sharedToken(p, x) !== "both");
-      if (!q || !STABLE.includes(p.quote.symbol)) return null;
+      const q = parkable(p)[0];
+      if (!q) return null;
       return {
         down: { trigger: leave(), actions: [{ kind: "move" }], repeat: false, holdMinutes: 10 },
         up: emptyLane(),
-        plan: { where: "park", parkPool: q.index, parkWidthPct: 0.2, returnTo: "same", back: { down: emptyLane(), up: moveLane({ kind: "price", backIn: true }) } },
+        plan: { where: "park", parkPool: q.index, parkWidthPct: defaultWidthPct(q), returnTo: "same", back: { down: emptyLane(), up: moveLane({ kind: "price", backIn: true, bufferPct: 1 }) } },
       };
     },
   },
   {
     id: "waitReenter",
-    name: "Exit, wait, re-enter",
+    name: "Hold a token, come back on a turn",
     hint: "Out of range: hold one token; come back centred on the price after a 10% turn",
     build: () => ({
-      down: { trigger: leave(), actions: [{ kind: "move", to: "quote" }], repeat: false },
-      up: { trigger: leave(), actions: [{ kind: "move", to: "base" }], repeat: false },
+      down: { trigger: leave(), actions: [{ kind: "move", to: "quote" }], repeat: false, holdMinutes: 10 },
+      up: { trigger: leave(), actions: [{ kind: "move", to: "base" }], repeat: false, holdMinutes: 10 },
       plan: {
         where: "wait",
         returnTo: "recentre",
@@ -859,29 +886,38 @@ export const TEMPLATES: Template[] = [
     id: "ladder",
     name: "Take profit in steps",
     hint: "Withdraw 25% every 5% up, at most 4 times",
-    build: (p, price) => ({
+    build: (p, price, range) => ({
       down: emptyLane(),
-      up: { trigger: { kind: "price", price: price * 1.05 }, actions: [{ kind: "withdraw", pct: 25 }], repeat: true, stepPct: 5, maxRuns: 4 },
+      up: { trigger: { kind: "price", price: outside(p, price, range, "up", 5) }, actions: [{ kind: "withdraw", pct: 25 }], repeat: true, stepPct: 5, maxRuns: 4 },
     }),
   },
   {
     id: "bracket",
     name: "Exit both ways",
     hint: "Take profit above, stop loss below",
-    build: (p, price) => ({
-      down: { trigger: { kind: "price", price: price * 0.9 }, actions: exitTo("quote"), repeat: false },
-      up: { trigger: { kind: "price", price: price * 1.1 }, actions: exitTo(null), repeat: false },
+    build: (p, price, range) => ({
+      down: { trigger: { kind: "price", price: outside(p, price, range, "down", 10) }, actions: exitTo("quote"), repeat: false },
+      up: { trigger: { kind: "price", price: outside(p, price, range, "up", 10) }, actions: exitTo(null), repeat: false },
     }),
   },
 ];
 
-/** Sensible defaults when a block is dropped, so nobody has to type every value. */
-export function defaultTrigger(kind: TriggerKind, p: Pool, lane: LaneId, price: number, otherPools: Pool[]): Trigger {
+/** A price `pct`% away from now in the lane's direction, and at least 2% past the range's edge (a level inside the
+ * range would fire at once). */
+export function outside(p: Pool, price: number, range: [number, number] | undefined, lane: LaneId, pct: number): number {
+  const away = price * (lane === "down" ? 1 - pct / 100 : 1 + pct / 100);
+  if (!range || range[0] === range[1]) return away;
+  const [lo, hi] = [priceAtTick(p, range[0]), priceAtTick(p, range[1])].sort((a, b) => a - b);
+  return lane === "down" ? Math.min(away, lo * 0.98) : Math.max(away, hi * 1.02);
+}
+
+/** Sensible defaults for a new condition, so nobody has to type every value. Price levels start outside the range. */
+export function defaultTrigger(kind: TriggerKind, p: Pool, lane: LaneId, price: number, otherPools: Pool[], range?: [number, number]): Trigger {
   switch (kind) {
     case "leave":
       return { kind, bufferPct: 0 };
     case "price":
-      return { kind, price: lane === "down" ? price * 0.95 : price * 1.05 };
+      return { kind, price: outside(p, price, range, lane, 5) };
     case "otherPool":
       return { kind, price: lane === "down" ? price * 0.95 : price * 1.05, poolIndex: otherPools[0]?.index ?? p.index };
     case "oracle":

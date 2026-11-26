@@ -70,8 +70,8 @@ contract RuleHook is BaseHook, IUnlockCallback {
     /// @notice A bucket is filled inside swaps only if its liquidity is at least this share of the pool's active
     /// liquidity (10 = 0.1%). Smaller buckets still work; they are filled with `fillBucket`.
     uint256 public constant MIN_FILL_BPS = 10;
-    /// @notice Most buckets one swap fills (~70k gas each, so ~350k gas). The rest wait in the backlog.
-    uint256 public constant MAX_FILLS_PER_SWAP = 5;
+    /// @notice Most buckets one swap fills (~70k gas each, so ~210k gas). The rest wait in the backlog.
+    uint256 public constant MAX_FILLS_PER_SWAP = 3;
 
     /// @dev fillBucket reward = measured gas x capped gas price x 110% + overhead, at most 1% of the bucket's proceeds.
     uint256 public constant FILL_GAS_OVERHEAD = 50_000;

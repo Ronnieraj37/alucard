@@ -150,7 +150,7 @@ function lanesFor(lane: "down" | "up"): Lane[] {
 
 const rulesOf = (lane: "down" | "up", l: Lane): Rules => (lane === "down" ? { down: l, up: off() } : { down: off(), up: l });
 
-/** Two-leg strategies: a lane that moves, a plan B (wait or park), and its ways back. */
+/** Two-leg strategies: a lane that moves (hold a token, or into another pool), and its ways back. */
 function plans(): Rules[] {
   const out: Rules[] = [];
   const backs: (Trigger | null)[] = [null, { kind: "price", price: 1.1 }, { kind: "price", price: 0.9 }, { kind: "trail", trailPct: 3 }, { kind: "timer", hours: 2 }, { kind: "fees", feesPct: 1 }];
@@ -418,7 +418,7 @@ function engineRules(): Rules[] {
       const r = rulesOf(lane, l);
       if (contractValid(validate(OWN, r, RANGE))) out.push(r);
     }
-  // plan B: waiting without a swap (a parked leg needs a second pool's prices)
+  // a move that holds the tokens, without a swap (moving into another pool needs a second pool's prices)
   for (const r of plans()) {
     const lanes = [r.down, r.up, r.plan!.back.down, r.plan!.back.up];
     if (r.plan!.where !== "wait" || lanes.some((l) => skip(l.trigger) || l.actions.some((a) => a.kind === "move" && a.to))) continue;
@@ -446,7 +446,7 @@ const LEG_T: AbiParameter = {
   ],
 };
 
-/** The order the editor sends, as the engine reads it (words as decimal strings, plan B's shared token). */
+/** The order the editor sends, as the engine reads it (words as decimal strings, the shared token of a move). */
 function orderJson(r: Rules) {
   const e = encOf(r);
   const park = r.plan?.where === "park" && r.plan.parkPool ? POOLS.find((q) => q.index === r.plan!.parkPool) : undefined;

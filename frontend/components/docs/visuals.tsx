@@ -70,7 +70,7 @@ export function Architecture() {
   );
   return (
     <figure className="my-6 overflow-x-auto rounded-[14px] border border-[var(--line)] bg-[var(--paper)] p-4">
-      <svg viewBox="0 0 720 330" className="min-w-[620px] w-full" role="img" aria-label="Architecture: LPs and keepers call ConditionalOrders, swappers call the router, both reach the Uniswap PoolManager, which calls RuleHook">
+      <svg viewBox="0 0 720 330" className="min-w-[620px] w-full" role="img" aria-label="Architecture: LPs and keepers call ConditionalOrders, which asks Rules (and PriceFeeds) before acting; swappers call the router; both reach the Uniswap PoolManager, which calls RuleHook">
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="var(--muted2)" />
@@ -79,20 +79,25 @@ export function Architecture() {
         {box(20, 20, 150, "LP (owner)", "create · update · cancel")}
         {box(20, 130, 150, "Keeper (anyone)", "execute when ready")}
         {box(20, 240, 150, "Swapper", "trades through a router")}
-        {box(270, 75, 190, "ConditionalOrders", "owns positions with rules", true)}
+        {box(270, 60, 190, "ConditionalOrders", "holds positions with a strategy", true)}
+        {box(270, 150, 190, "Rules", "conditions · checks · price math")}
+        {box(540, 260, 160, "PriceFeeds", "Chainlink list · 2-day timelock")}
+        {arrow("M365 116 L365 148", "asks", 382, 136)}
+        {arrow("M460 190 C 500 200, 510 250, 538 280", "Chainlink", 486, 238)}
         {box(270, 240, 190, "Router / Quoter", "Uniswap periphery")}
         {box(540, 150, 160, "PoolManager", "Uniswap v4 core")}
         {box(540, 20, 160, "RuleHook", "pool table · limit orders", true)}
-        {arrow("M170 48 C 220 48, 230 95, 268 98", "createOrder", 215, 60)}
-        {arrow("M170 158 C 220 158, 230 120, 268 118", "execute", 213, 152)}
+        {arrow("M170 48 C 220 48, 230 80, 268 84", "createOrder", 215, 56)}
+        {arrow("M170 158 C 220 158, 230 110, 268 104", "execute", 213, 152)}
         {arrow("M170 268 L268 268", "swap", 220, 262)}
-        {arrow("M460 110 C 500 110, 510 165, 538 172", "modifyLiquidity · swap", 500, 130)}
+        {arrow("M460 96 C 500 96, 510 165, 538 172", "modifyLiquidity · swap", 500, 118)}
         {arrow("M460 268 C 500 268, 510 200, 538 192", "swap", 505, 250)}
         {arrow("M620 150 L620 78", "before/afterSwap", 668, 118)}
-        {arrow("M540 48 C 500 48, 480 70, 462 85", "pool table, average price", 492, 34)}
+        {arrow("M540 48 C 500 48, 480 60, 462 72", "pool table, average price", 492, 34)}
       </svg>
       <figcaption className="mt-1 text-[12px] text-[var(--muted)]">
-        Liquidity never leaves Uniswap: ConditionalOrders owns the positions in the PoolManager, and RuleHook only runs inside swaps of the pools that use it.
+        The money stays in Uniswap v4 until the owner withdraws: ConditionalOrders holds the positions (and tokens held during a move) inside the PoolManager.
+        RuleHook runs only inside swaps of the pools that use it: it keeps their average price and fills limit orders.
       </figcaption>
     </figure>
   );
@@ -114,7 +119,7 @@ const SIDE: F[] = [
   { name: "holdMinutes", from: 134, bits: 16, color: "#9333ea", desc: "Pool price conditions read the average over this many minutes (1-60; 0 = the 2-minute minimum)." },
   { name: "lastRun", from: 150, bits: 24, color: "#a16207", desc: "Last run (or when the order started or entered this leg), minutes since 2026-01-01 (rounded up, valid until 2057). Timers count from here; a side runs at most once a minute after it." },
   { name: "best", from: 174, bits: 24, color: "#be185d", desc: "int24, the best average tick a trailing stop has seen. Moved by poke." },
-  { name: "actions", from: 198, bits: 8, color: "#2563eb", desc: "Bit 0 keep fees in the order, bit 1 remove, bit 2 swap, bit 3 add, bit 4 move to the other leg (plan B). Run in that order. Bits 5-7 spare." },
+  { name: "actions", from: 198, bits: 8, color: "#2563eb", desc: "Bit 0 keep fees in the order, bit 1 remove, bit 2 swap, bit 3 add, bit 4 move to the other leg. Run in that order. Bits 5-7 spare." },
   { name: "removeBps", from: 206, bits: 14, color: "#15803d", desc: "How much liquidity to remove, 0-10,000 (= 0-100%)." },
   { name: "swapToToken1", from: 220, bits: 1, color: "#c026d3", desc: "Swap direction: true sells token0 for token1." },
   { name: "addMode", from: 221, bits: 3, color: "#0891b2", desc: "0 = add back to the same range, 1 = one-sided range next to the price (follow the price)." },
@@ -210,7 +215,7 @@ function decodeSide(h: bigint) {
     ["holdMinutes", hold ? `${hold} min average` : "0 · 2 min average"],
     ["lastRun", when(Number(bits(h, 150, 24)))],
     ["best", checker === 4 || checker2 === 4 ? `best tick ${s24(best)}` : String(best)],
-    ["actions", `${actions} · ${["keep fees", "remove", "swap", "add", "move to plan B"].filter((_, i) => actions & (1 << i)).join(" + ") || "none"}`],
+    ["actions", `${actions} · ${["keep fees", "remove", "swap", "add", "move"].filter((_, i) => actions & (1 << i)).join(" + ") || "none"}`],
     ["removeBps", `${Number(bits(h, 206, 14))} (${Number(bits(h, 206, 14)) / 100}%)`],
     ["swapToToken1", bits(h, 220, 1) ? "true" : "false"],
     ["addMode", Number(bits(h, 221, 3)) === 1 ? "1 · one-sided (follow)" : "0 · same range"],

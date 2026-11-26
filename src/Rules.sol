@@ -34,6 +34,7 @@ contract Rules {
     error InvalidLeg();
     error UnknownPool();
     error NoPrice();
+    error PriceMoved();
 
     uint256 internal constant BPS = 10_000;
     uint256 internal constant Q128 = 1 << 128;
@@ -49,7 +50,7 @@ contract Rules {
     /// token (the keeper still has to sell it for ETH). The gas price counted is capped so a keeper cannot inflate it.
     uint256 public constant KEEPER_PREMIUM_BPS = 11_000;
     uint256 public constant KEEPER_TOKEN_PREMIUM_BPS = 12_000;
-    uint256 public constant MAX_PRIORITY_FEE_WEI = 0.01 gwei;
+    uint256 public constant MAX_PRIORITY_FEE_WEI = 1 gwei;
     /// @dev Gas of the call into keeperPay that its own measurement cannot see.
     uint256 internal constant PAY_CALL_GAS = 2_000;
 
@@ -134,10 +135,21 @@ contract Rules {
         view
         returns (bool ok, uint256 bps)
     {
+        (bool has, uint256 fees, uint256 base) = _fees(vault, orderId, poolIndex, lower, upper);
+        if (!has) return (false, 0);
+        return (true, FullMath.mulDiv(fees, BPS, base));
+    }
+
+    /// @dev The position's uncollected fees and its value, both in token1 at the average price.
+    function _fees(address vault, uint256 orderId, uint24 poolIndex, int24 lower, int24 upper)
+        internal
+        view
+        returns (bool ok, uint256 fees, uint256 base)
+    {
         PoolId id = hook.poolKeyAt(poolIndex).toId();
         (uint128 liq, uint256 g0Last, uint256 g1Last) =
             poolManager.getPositionInfo(id, vault, lower, upper, bytes32(orderId));
-        if (liq == 0) return (false, 0);
+        if (liq == 0) return (false, 0, 0);
         (uint256 g0, uint256 g1) = poolManager.getFeeGrowthInside(id, lower, upper);
         uint256 f0;
         uint256 f1;
@@ -148,13 +160,13 @@ contract Rules {
         }
         int24 t;
         (ok, t) = averageTick(poolIndex, MIN_WINDOW);
-        if (!ok) return (false, 0);
+        if (!ok) return (false, 0, 0);
         uint160 p = TickMath.getSqrtPriceAtTick(t);
         (uint256 a0, uint256 a1) =
             PriceMath.amountsFor(p, TickMath.getSqrtPriceAtTick(lower), TickMath.getSqrtPriceAtTick(upper), liq);
-        uint256 base = PriceMath.in1(a0, p) + a1;
-        if (base == 0) return (false, 0);
-        return (true, FullMath.mulDiv(PriceMath.in1(f0, p) + f1, BPS, base));
+        base = PriceMath.in1(a0, p) + a1;
+        if (base == 0) return (false, 0, 0);
+        return (true, PriceMath.in1(f0, p) + f1, base);
     }
 
     /// @dev One condition (A or B) of a side.
@@ -169,12 +181,16 @@ contract Rules {
             return live && (c.isUpper ? t >= value : t < value);
         }
         if (checker == OrderState.CHECK_FEES || checker == OrderState.CHECK_APR) {
-            (bool ok, uint256 bps) = feeBps(c.vault, c.orderId, c.poolIndex, c.lower, c.upper);
+            (bool ok, uint256 fees, uint256 base) = _fees(c.vault, c.orderId, c.poolIndex, c.lower, c.upper);
             if (!ok) return false;
-            if (checker == OrderState.CHECK_FEES) return bps >= uint256(uint24(value));
-            // APR, lower side only: the fees as a yearly rate are below `value` bps
+            // fees / base >= value bps, compared without rounding
+            if (checker == OrderState.CHECK_FEES) return fees * BPS >= base * uint256(uint24(value));
+            // APR, lower side only: the fees as a yearly rate are below `value` bps. Compared exactly: rounding the
+            // fees to whole bps first would read a young position as earning nothing.
             uint256 elapsed = block.timestamp - c.feeClock;
-            return elapsed >= MIN_APR_TIME && (bps * 365 days) / elapsed < uint256(uint24(value));
+            return
+                elapsed >= MIN_APR_TIME
+                    && FullMath.mulDiv(fees, BPS * 365 days, elapsed) < base * uint256(uint24(value));
         }
         // the pool price conditions: EDGE, TICK, TRAIL
         (bool live2, int24 avg) = averageTick(pool == 0 ? c.poolIndex : pool, c.window);
@@ -254,6 +270,25 @@ contract Rules {
         if (!ok) revert NoPrice();
     }
 
+    /// @notice Reverts (PriceMoved) when the pool's price is not believable for a run: the price of the moment is
+    /// more than the order's slippage (in steps of 10 ticks) away from the average, or the average is further from
+    /// the pair's Chainlink price than the list allows (PriceFeeds.maxDeviationTicks; 0 = not checked, and a missing
+    /// Chainlink price is not checked either). A run deposits and swaps at the price of the moment: this stops a
+    /// keeper or a swapper from running an order at a price they pushed, in this block or held over a few.
+    function checkPrice(PoolKey calldata key, uint8 slippage) external view {
+        int256 avg = price(key);
+        (, int24 spot,,) = poolManager.getSlot0(key.toId());
+        if (_dist(spot, avg) > uint256(slippage) * 10) revert PriceMoved();
+        uint24 maxDev = feeds.maxDeviationTicks();
+        if (maxDev == 0) return;
+        (bool ok, int24 link) = feeds.pairTick(Currency.unwrap(key.currency0), Currency.unwrap(key.currency1));
+        if (ok && _dist(link, avg) > maxDev) revert PriceMoved();
+    }
+
+    function _dist(int256 a, int256 b) internal pure returns (uint256) {
+        return a > b ? uint256(a - b) : uint256(b - a);
+    }
+
     /// @notice Price limit for a swap: `slippage` steps of 10 ticks past the average price.
     function swapLimit(PoolKey calldata key, bool zeroForOne, uint8 slippage) external view returns (uint160) {
         int256 ref = price(key);
@@ -272,15 +307,20 @@ contract Rules {
         return (_usable(mid - leg.a, key.tickSpacing), _usable(mid + leg.b, key.tickSpacing));
     }
 
-    /// @notice A one-sided range of `width` spacings next to the average price: below it for the upper side (which
-    /// holds token1 after the price rose out), above it for the lower side. `ok` is false without room for it.
+    /// @notice A one-sided range of `width` spacings next to the price: below it for the upper side (which holds
+    /// token1 after the price rose out), above it for the lower side. "The price" is the lower of the average and the
+    /// price of the moment for the upper side, the higher for the lower side, so the range is always entirely on the
+    /// side the one token can fill (otherwise it would get no liquidity). `ok` is false without room for it.
     function besidePrice(PoolKey calldata key, bool upper, uint24 width)
         external
         view
         returns (bool ok, int24 tickLower, int24 tickUpper)
     {
         int256 s = key.tickSpacing;
-        int256 floorTick = _floor(price(key), key.tickSpacing);
+        int24 avg = price(key);
+        (, int24 spot,,) = poolManager.getSlot0(key.toId());
+        int24 ref = upper ? (spot < avg ? spot : avg) : (spot > avg ? spot : avg);
+        int256 floorTick = _floor(ref, key.tickSpacing);
         int256 lo = upper ? floorTick - int256(uint256(width)) * s : floorTick + s;
         int256 hi = upper ? floorTick : lo + int256(uint256(width)) * s;
         if (lo < TickMath.minUsableTick(key.tickSpacing) || hi > TickMath.maxUsableTick(key.tickSpacing)) {
@@ -373,8 +413,9 @@ contract Rules {
     /// @notice What a keeper is paid for a run that used `gasUsed` (measured by the vault, plus its allowances): the
     /// cost in wei with the premium, paid from reserve0 in token0 first and from reserve1 in token1 for what token0
     /// did not cover, never more than either reserve. ETH is paid as it is; a token amount comes from the Chainlink
-    /// feeds (wei -> USD -> token), read here with their gas counted. Without a price for both tokens the keeper
-    /// gets both reserves (the owner's ceiling), so a broken feed never leaves an order without a keeper.
+    /// feeds (wei -> USD -> token), read here with their gas counted. A token without a price pays nothing: the
+    /// cost is then paid in the other token. Without any price the keeper is not paid (anyone can still run the order,
+    /// the owner too); paying the ceiling instead would let a repeating rule drain it while a feed is down.
     function keeperPay(PoolKey calldata key, uint256 gasUsed, uint256 reserve0, uint256 reserve1)
         external
         view
@@ -385,7 +426,8 @@ contract Rules {
         address t1 = Currency.unwrap(key.currency1);
         (bool ok0, uint256 per0) = feeds.quote(t0, 1 ether); // token units per 1 ETH
         (bool ok1, uint256 per1) = feeds.quote(t1, 1 ether);
-        if (!ok0 || !ok1) return (reserve0, reserve1);
+        if (!ok0) reserve0 = 0; // no price: nothing is paid in that token
+        if (!ok1) reserve1 = 0;
         uint256 cost = gasWei(gasUsed + start - gasleft() + PAY_CALL_GAS);
         uint256 want0 = (FullMath.mulDiv(cost, per0, 1 ether) * _premium(t0)) / BPS;
         pay0 = want0 < reserve0 ? want0 : reserve0;

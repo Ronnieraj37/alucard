@@ -41,7 +41,7 @@ def order(lower: e.Side | None = None, upper: e.Side | None = None) -> dict:
 
 def req(**kw):
     r = {"pool": "test", "days": 60, "depositUsd": 10_000, "range": {"loPct": -5, "hiPct": 5}, "order": {}, "refTick": 0,
-         "keeperFeeBps": 10, "slippagePct": 1, "delaySec": 12, "keeperCostUsd": 0.01, "keeperMode": "gas"}
+         "keeperFeeBps": 10, "slippagePct": 1, "delaySec": 12, "keeperCostUsd": 0.01}
     r.update(kw)
     return r
 

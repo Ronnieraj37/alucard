@@ -195,7 +195,7 @@ function Nav() {
         <Link href="/" className="w-display text-[22px] tracking-[-0.02em]">Alucard</Link>
         <div className="hidden gap-7 text-[15px] text-[var(--ink2)] md:flex">
           <a href="#replay" className="hover:text-[var(--ink)]">See it run</a>
-          <a href="#configure" className="hover:text-[var(--ink)]">Make a rule</a>
+          <a href="#configure" className="hover:text-[var(--ink)]">Build a strategy</a>
           <a href="#sealed" className="hover:text-[var(--ink)]">Safety</a>
           <Link href="/docs" className="hover:text-[var(--ink)]">Docs</Link>
         </div>
@@ -213,16 +213,16 @@ function Hero() {
   return (
     <section className="mx-auto grid max-w-6xl items-center gap-6 px-5 py-8 lg:min-h-[calc(100svh-4rem)] lg:gap-12 lg:grid-cols-[1fr_560px] lg:py-10">
       <div className="max-lg:order-2">
-        <h1 className="w-display text-[clamp(3rem,6.2vw,5.6rem)]">Wind it once. It keeps working.</h1>
+        <h1 className="w-display text-[clamp(3rem,6.2vw,5.6rem)]">Your strategy. Wound into your position.</h1>
         <p className="mt-7 max-w-[34rem] text-[19px] leading-relaxed text-[var(--ink2)]">
-          Alucard puts your own rules inside a Uniswap v4 position: when to exit, when to move the range, when to convert, when to compound. Set them once.
-          From then on they run on-chain, day and night, and your money never leaves Uniswap.
+          Alucard runs your own strategy on a Uniswap v4 position: exit, move the money into another pool and bring it back, re-range, compound. You decide
+          what happens and when; it runs on-chain, day and night, and the money stays inside Uniswap v4 until you withdraw.
         </p>
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
           <Link href="/swap" className="w-btn w-btn-ink">
             Open the app <ArrowRight className="h-4 w-4" />
           </Link>
-          <a href="#replay" className="w-btn w-btn-line">Watch a rule run</a>
+          <a href="#replay" className="w-btn w-btn-line">Watch a strategy run</a>
         </div>
       </div>
       <motion.div initial={{ opacity: 0, scale: 0.96, rotate: -6 }} animate={{ opacity: 1, scale: 1, rotate: 0 }} transition={{ duration: 1.4, ease: EASE }} className="mx-auto w-full max-w-[250px] sm:max-w-[420px] lg:max-w-[560px] max-lg:order-1">
@@ -291,10 +291,10 @@ function Replay() {
                 price={story.price[k]}
                 stop={stop}
                 showTake={false}
-                label="BACKTEST"
+                label="REPLAY"
                 status={ran ? `RAN · ${day(story.events[0].t).toUpperCase()}` : "ARMED"}
                 subs={[
-                  { label: "WITH RULE", value: usd(story.rules[k]) },
+                  { label: "WITH IT", value: usd(story.rules[k]) },
                   { label: "WITHOUT", value: usd(story.noRules[k]) },
                 ]}
               />
@@ -305,11 +305,11 @@ function Replay() {
           </motion.div>
         </div>
         <div>
-          <h2 className="w-display text-[clamp(2.4rem,4.4vw,3.8rem)]">Ninety days, one rule, no one watching.</h2>
+          <h2 className="w-display text-[clamp(2.4rem,4.4vw,3.8rem)]">Ninety days, one strategy, no one watching.</h2>
           <p className="mt-6 max-w-lg text-[18px] text-[var(--ink2)]">
-            A backtest of one rule on a $10,000 position in our Sepolia WETH/USDC pool, priced from every Chainlink round, {day(story.start)} to {day(story.end)}: if WETH
+            A replay of one strategy on a $10,000 position in our Sepolia WETH/USDC pool, priced from every Chainlink round, {day(story.start)} to {day(story.end)}: if WETH
             falls 5% from its highest price, withdraw everything and convert it to USDC. The hand is the price, the gilt arc is the position&apos;s range, the ruby
-            mark follows the high, and the two small dials show the position with and without the rule.
+            mark follows the high, and the two small dials show the position with and without it.
           </p>
           <div className="mt-9">
             <input
@@ -330,13 +330,13 @@ function Replay() {
             </div>
           </div>
           <p className="mt-6 text-[16px] text-[var(--ink2)]">
-            On {day(story.t[k])}: with the rule <b className="font-semibold text-[var(--ink)]">{usd(story.rules[k])}</b>, without it {usd(story.noRules[k])}, holding the two tokens instead {usd(story.hold[k])}.
+            On {day(story.t[k])}: with the strategy <b className="font-semibold text-[var(--ink)]">{usd(story.rules[k])}</b>, without it {usd(story.noRules[k])}, holding the two tokens instead {usd(story.hold[k])}.
           </p>
           <p className="mt-5 max-w-lg text-[14px] text-[var(--ink3)]">
             {ran
               ? k >= n - 10
-                ? `In the backtest the rule ran on ${day(story.events[0].t)}. ETH climbed for weeks afterwards, when staying in looked better, then fell to ${usd(story.endPrice)}. A rule trades upside for protection; the backtest shows you both before you choose.`
-                : `In the backtest the rule ran on ${day(story.events[0].t)}: withdrawn and converted to USDC. Keep going: ETH did not go straight down.`
+                ? `In the replay it ran on ${day(story.events[0].t)}. ETH climbed for weeks afterwards, when staying in looked better, then fell to ${usd(story.endPrice)}. Every strategy trades something for something; the backtest shows you what, on real history, before you choose.`
+                : `In the replay it ran on ${day(story.events[0].t)}: withdrawn and converted to USDC. Keep going: ETH did not go straight down.`
               : "Armed. Nothing to watch, nothing to sign."}
             {" "}Backtests use arbitrage-only fees, a lower bound.
           </p>
@@ -402,8 +402,8 @@ function Configure() {
         <div>
           <h2 className="w-display text-[clamp(2.4rem,4.4vw,3.8rem)]">Choose your complications.</h2>
           <p className="mt-6 max-w-xl text-[18px] text-[var(--ink2)]">
-            A watchmaker adds complications to a movement; you add rules to a position. Pick when, pick what happens, then turn the crown on the dial. Any
-            condition, any action, joined with and/or in the app, with repeats and limits. The hand shows the price the rule is measured from.
+            A watchmaker adds complications to a movement; you add a strategy to a position. Pick when, pick what happens, then turn the crown on the dial. Any
+            condition, any action, joined with and/or in the app, with repeats and limits. The hand shows the price it is measured from.
           </p>
 
           <div className="mt-12 grid gap-10 md:grid-cols-2">
@@ -487,9 +487,9 @@ function Configure() {
 
 function Sealed() {
   const statements = [
-    ["Your money stays in Uniswap.", "The position lives in a Uniswap v4 pool the whole time. Alucard is a hook on that pool, not a vault."],
-    ["Anyone can wind it.", "When a rule's moment comes, any keeper can run it, and is paid its gas from the position, never above the cap you set."],
-    ["No one can open it.", "Price limits, slippage, fee cap and run count are checked by the contract on every run. You can cancel at any time."],
+    ["Your money stays in Uniswap.", "In your pool, in the pool a strategy moves it to, or as tokens held inside the Uniswap v4 PoolManager, until you withdraw. Only you can take it out."],
+    ["Anyone can wind it.", "When a step's condition is true, any keeper can run it, and is paid its gas from the position, never above the cap you set."],
+    ["No one can open it.", "Nothing runs at a price someone just pushed: steps read the average price, and the price of the moment must be near it. Slippage, fee cap and run count are checked on every run. You can cancel at any time."],
   ];
   return (
     <section id="sealed" className="border-t border-[var(--hair)]">
@@ -540,10 +540,10 @@ function Sealed() {
 
 function Certificate() {
   const rows = [
-    ["Rule shapes the editor builds, checked against the contract", "79,682", "0 mismatches"],
-    ["Orders replayed by the backtest engine and the contract", "4,000", "identical runs"],
-    ["Contract tests, stress and fuzz included", "130", "all passing"],
-    ["Batched exits in one stress run", "300", "every token accounted for"],
+    ["Strategy shapes the editor builds, checked against the contract", "39,146", "0 mismatches"],
+    ["Orders replayed by the backtest engine and the contract", "2,000", "identical runs"],
+    ["Contract tests, fuzz included", "150", "all passing"],
+    ["Branches of the contracts covered by tests", "81%", "measured"],
   ];
   const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
   return (
@@ -581,7 +581,7 @@ function Close() {
   return (
     <section className="border-t border-[var(--hair)]">
       <div className="mx-auto max-w-6xl px-5 pb-10 pt-28 text-center">
-        <h2 className="w-display mx-auto max-w-3xl text-[clamp(2.6rem,5vw,4.4rem)]">Set your rules. Then put it down.</h2>
+        <h2 className="w-display mx-auto max-w-3xl text-[clamp(2.6rem,5vw,4.4rem)]">Set your strategy. Then put it down.</h2>
         <p className="mx-auto mt-5 max-w-md text-[var(--ink2)]">Free test tokens are one click away in the app.</p>
         <div className="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
           <Link href="/swap" className="w-btn w-btn-ink">

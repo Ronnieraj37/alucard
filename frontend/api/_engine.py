@@ -371,6 +371,7 @@ class Placement:
     own_entry: int
     other_ref: int = 0
     other_entry: int = 0
+    spacing_ratio: float = 1.0  # tick spacing of the pool the words were made for / the series' spacing
 
     def level(self, v: int, pool: str) -> int:
         ref, entry = (self.other_ref, self.other_entry) if pool == "other" else (self.own_ref, self.own_entry)
@@ -385,6 +386,11 @@ def place_side(d: Side, pl: Placement) -> Side:
         e.value = pl.level(e.value, e.check_pool)
     if e.combine != COMBINE_NONE and e.checker2 in LEVELS:
         e.value2 = pl.level(e.value2, e.check_pool2)
+    if e.actions & ACT_ADD and e.add_mode == ADD_ONE_SIDED and pl.spacing_ratio != 1.0:
+        # widths are counted in tick spacings: keep the same width in price on a pool of another spacing
+        def scale(w: int) -> int:
+            return min(2047, max(1, round(w * pl.spacing_ratio))) if w else 0
+        e.shape = scale(e.shape & 2047) | (scale((e.shape >> 11) & 2047) << 11)
     if pl.flip:
         if e.actions & ACT_SWAP:
             e.swap_to_token1 = not e.swap_to_token1
@@ -468,7 +474,6 @@ class Params:
     slippage_steps: int = 10  # x10 ticks, like Order.maxSlippage
     delay_s: float = 12.0
     keeper_cost_usd: float = 0.01  # gas cost of one run in USD
-    keeper_mode: str = "gas"  # "gas": the measured gas; "ceiling": the keeper takes the whole reserve
 
 
 @dataclass
@@ -595,7 +600,7 @@ class Sim:
         base = p0 * sp * sp + p1
         val = f0 * sp * sp + f1
         with np.errstate(divide="ignore", invalid="ignore"):
-            bps = np.floor(np.where(base > 0, val * BPS / base, 0.0))
+            bps = np.where(base > 0, val * BPS / base, 0.0)  # exact, like Rules (no rounding to whole bps)
         return ok & (base > 0), bps
 
     # ---- conditions
@@ -615,7 +620,7 @@ class Sim:
             clock = max(x.last_run for x in st.sides.values())
             elapsed = ts - clock
             with np.errstate(divide="ignore", invalid="ignore"):
-                rate = np.floor(np.where(elapsed > 0, bps * 365 * 86400 / np.maximum(elapsed, 1), 0.0))
+                rate = np.where(elapsed > 0, bps * 365 * 86400 / np.maximum(elapsed, 1), 0.0)
             return ok & (elapsed >= MIN_APR_TIME) & (rate < value)
         ok, t = self.avg(self._pool_of(st, pool), d.window(), i, j)
         if checker == CHECK_EDGE:
@@ -825,7 +830,7 @@ class Sim:
 
     def _pay_keeper(self, new: State, res0: float, res1: float, sp: float) -> tuple[float, float]:
         res_usd = self.usd(res0, res1, sp)
-        frac = 1.0 if self.p.keeper_mode == "ceiling" or res_usd <= 0 else min(1.0, self.p.keeper_cost_usd / res_usd)
+        frac = 1.0 if res_usd <= 0 else min(1.0, self.p.keeper_cost_usd / res_usd)
         new.keeper_usd += res_usd * frac
         return res0 * (1 - frac), res1 * (1 - frac)
 
@@ -847,9 +852,17 @@ class Sim:
         new.open = False
         note.append("closed")
 
+    def price_ok(self, k: int) -> bool:
+        """Rules.checkPrice: the price of the moment within the order's slippage of the average (the Chainlink band
+        is not modelled: no Chainlink history is recorded)."""
+        ref = self.avg_at(MIN_WINDOW, k)
+        return ref is not None and abs(int(self.s.tick[k]) - ref) <= self.p.slippage_steps * 10
+
     # ---- one run of one side at row k (None: the contract would revert, a keeper tries again later)
     def execute(self, st: State, slot: str, k: int) -> State | None:
         d = st.sides[slot]
+        if not self.price_ok(k):
+            return None  # PriceMoved: tried again later
         if d.actions & ACT_MOVE:
             return self.move(st, slot, k)
         s = self.s
@@ -862,9 +875,13 @@ class Sim:
         if d.actions & ACT_ADD:
             s_ = s.spacing
             if d.add_mode == ADD_ONE_SIDED:
-                ref = self.avg_at(MIN_WINDOW, k)
-                if ref is None:
+                avg = self.avg_at(MIN_WINDOW, k)
+                if avg is None:
                     return None
+                spot = int(s.tick[k])
+                # Rules.besidePrice: the lower of the average and the price of the moment for the upper side, the higher
+                # for the lower side, so the one token fills the whole range
+                ref = min(spot, avg) if slot == "upper" else max(spot, avg)
                 fl = floor_to(ref, s_)
                 if slot == "upper":
                     ntu, ntl = fl, fl - (d.shape & 2047) * s_
@@ -1081,7 +1098,6 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
         slippage_steps=max(1, round(float(req.get("slippagePct", 1)) * 10)),
         delay_s=float(req.get("delaySec", 12)),
         keeper_cost_usd=float(req.get("keeperCostUsd", 0.01)),
-        keeper_mode=req.get("keeperMode", "gas"),
     )
     deposit = float(req.get("depositUsd", 10_000))
 
@@ -1107,7 +1123,8 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
     flip = bool(req.get("baseIs0", s.base_is0)) != s.base_is0
     other_entry = int(other.tick[max(0, int(np.searchsorted(other.ts, start)) - 1)]) if other is not None else 0
     pl = Placement(flip=flip, own_ref=int(req.get("refTick", entry_tick)), own_entry=entry_tick,
-                   other_ref=int(req.get("otherRefTick", other_entry)), other_entry=other_entry)
+                   other_ref=int(req.get("otherRefTick", other_entry)), other_entry=other_entry,
+                   spacing_ratio=float(req.get("spacing", s.spacing)) / s.spacing)
 
     def sides_of(lo_key: str, up_key: str) -> dict:
         lo = place_side(decode_word(int(order.get(lo_key, "0") or 0), home_index), pl)
@@ -1228,7 +1245,6 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
         "assumptions": {
             "keeperDelaySec": p.delay_s,
             "keeperCostUsd": p.keeper_cost_usd,
-            "keeperMode": p.keeper_mode,
             "keeperFeeBps": p.keeper_fee_bps,
             "slippagePct": p.slippage_steps / 10,
         },

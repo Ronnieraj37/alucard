@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 import {RuleSetup} from "./utils/RuleSetup.sol";
+import {Rules} from "../src/Rules.sol";
 import {ConditionalOrders} from "../src/ConditionalOrders.sol";
 import {OrderState} from "../src/libraries/OrderState.sol";
 
@@ -113,12 +114,29 @@ contract ManipulationTest is RuleSetup {
         _wait(2 minutes);
 
         _swap(true, 5e18); // front-run: far below the average (0), past the 5% limit (-500)
-        uint256 before0 = _bal(currency0, alice);
-        uint256 before1 = _bal(currency1, alice);
+        // the run is refused: it would sell (and settle) at the pushed price
+        vm.expectRevert(Rules.PriceMoved.selector);
         _run(id, false);
-        // the swap was skipped: alice got her token0 back unsold instead of selling it at the pushed price
-        assertGt(_bal(currency0, alice) - before0, 4e17);
-        assertLt(_bal(currency1, alice) - before1, 6e17); // only her token1 side
+        assertEq(_liquidity(id), 10e18);
+    }
+
+    /// Holding a push for several blocks moves the short average, but a side with a hold reads its own longer
+    /// average: a push held for a few minutes cannot fire a rule that holds for 15.
+    function test_aHoldOutlastsAPushHeldForSeveralBlocks() public {
+        OrderState.Side memory s = _exit(OrderState.CHECK_TICK, -300); // below about -3%
+        s.holdMinutes = 15;
+        uint256 id = _create(s, _off());
+        _wait(2 minutes);
+        _swap(true, 3e18); // push far below the level
+        for (uint256 i; i < 6; ++i) {
+            _wait(12); // held for six blocks
+            _swap(true, 1);
+        }
+        _wait(60);
+        _swap(true, 1); // a snapshot of the pushed price
+        assertLt(_avg(), -300); // the 2-minute average is past the level now
+        vm.expectRevert(ConditionalOrders.ConditionNotMet.selector);
+        _run(id, false); // but its 15-minute average is not
     }
 
     function test_swapNeverFillsPastTheLimit() public {

@@ -154,7 +154,7 @@ contract ExecutionTest is RuleSetup {
         vm.expectRevert(ConditionalOrders.ConditionNotMet.selector);
         _run(id, false);
 
-        _wait(20 days); // then nothing trades for weeks: the rate since the fees were last collected falls
+        _wait(25 days); // then nothing trades for weeks: the rate since the fees were last collected falls
         _swap(true, 1);
         _wait(2 minutes);
         _run(id, false);

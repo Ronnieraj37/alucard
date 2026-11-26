@@ -10,6 +10,7 @@ import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {RuleSetup} from "./utils/RuleSetup.sol";
+import {Rules} from "../src/Rules.sol";
 import {ConditionalOrders} from "../src/ConditionalOrders.sol";
 import {OrderState} from "../src/libraries/OrderState.sol";
 import {MockAggregator} from "../src/testnet/MockAggregator.sol";
@@ -236,16 +237,16 @@ contract StrategiesTest is RuleSetup {
         assertEq(lo.checker, OrderState.CHECK_EDGE);
     }
 
-    /// In a crash the price of the moment is far below the average; the move's sale is past the slippage limit and
-    /// cannot run. The move waits instead of entering the stable pool with nothing, and runs once the average has
-    /// caught up.
+    /// In a crash the price of the moment is far below the average; selling there would be past the slippage limit.
+    /// The move waits (the position stays where it is) and runs once the average has caught up.
     function test_moveWaitsWhenItsSwapIsPastTheLimit() public {
         uint256 id = _park();
         _swap(true, 5e18);
         _settle();
         _swap(true, 20e18); // a crash in this block: far past the 5% limit
-        vm.expectRevert(ConditionalOrders.NothingToEnter.selector);
+        vm.expectRevert(Rules.PriceMoved.selector);
         _run(id, false);
+        assertEq(orders.getOrder(id).poolIndex, 1);
 
         _settle(); // the average catches up
         _run(id, false);
@@ -299,5 +300,28 @@ contract StrategiesTest is RuleSetup {
 
     function _in1(uint256 amount0, uint160 sqrtP) internal pure returns (uint256) {
         return FullMath.mulDiv(FullMath.mulDiv(amount0, sqrtP, 1 << 96), sqrtP, 1 << 96);
+    }
+
+    /// The pool a move goes into must be at a believable price too: a pushed USDC/USDT price would set the new
+    /// range and the swap there.
+    function test_noMoveIntoAPushedPool() public {
+        uint256 id = _park();
+        _swap(true, 5e18);
+        _settle();
+        _swapIn(stable, true, 3e18); // the stable pool pushed off its peg in this block
+        vm.expectRevert(Rules.PriceMoved.selector);
+        _run(id, false);
+        assertEq(orders.getOrder(id).poolIndex, 1);
+    }
+
+    /// An edit cannot leave a two-pool strategy without a way to the other pool.
+    function test_anEditKeepsTheWayToTheOtherPool() public {
+        uint256 id = _park();
+        ConditionalOrders.UpdateParams memory u;
+        u.expiry = uint32(_now() + 1 days);
+        u.lower = _w(_exit(OrderState.CHECK_EDGE, 0)); // withdraw instead of move
+        vm.prank(alice);
+        vm.expectRevert(ConditionalOrders.InvalidOrder.selector);
+        orders.updateOrder(id, u);
     }
 }

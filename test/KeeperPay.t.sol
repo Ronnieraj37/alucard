@@ -122,20 +122,32 @@ contract KeeperPayTest is RuleSetup {
         uint256 id = _create(_off(), _timed());
         _wait(2 minutes);
         vm.txGasPrice(500 gwei);
-        assertEq(rules.gasWei(1), 0.0005 gwei + 0.01 gwei);
+        assertEq(rules.gasWei(1), 0.0005 gwei + 1 gwei);
         _run(id, true);
         assertLt(_bal(currency0, keeper) + _bal(currency1, keeper), 1e16);
     }
 
-    /// Without a price for both tokens the keeper gets the ceiling: a broken feed never strands an order.
+    /// A token without a price pays nothing: the keeper's gas is paid in the other token, at its cost, never the
+    /// ceiling (a repeating rule would otherwise hand over 1% every run while a feed is down).
     /// forge-config: default.isolate = false
-    function test_brokenFeedPaysTheCeiling() public {
+    function test_brokenFeedPaysInTheOtherToken() public {
         uint256 id = _create(_off(), _timed());
         _wait(2 minutes);
         feed0.setBroken(true);
         _run(id, true);
-        uint256 paid = _bal(currency0, keeper) + _bal(currency1, keeper);
-        assertGt(paid, 0.5e16); // ~1% of ~0.6 tokens
+        assertEq(_bal(currency0, keeper), 0);
+        assertGt(_bal(currency1, keeper), 0);
+        assertLt(_bal(currency1, keeper), 0.5e16); // the gas cost, far below 1% of the position
+    }
+
+    /// With no price at all the keeper is not paid; the order still runs for whoever runs it.
+    /// forge-config: default.isolate = false
+    function test_noPriceNoPay() public {
+        uint256 id = _create(_off(), _timed());
+        _wait(2 minutes);
+        feedEth.setBroken(true);
+        _run(id, true);
+        assertEq(_bal(currency0, keeper) + _bal(currency1, keeper), 0);
     }
 
     /// In an ETH pool the part paid in ETH is the gas cost itself.

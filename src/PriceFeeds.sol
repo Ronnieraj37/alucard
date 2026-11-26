@@ -48,6 +48,9 @@ contract PriceFeeds {
     address public pendingOwner;
     /// @notice Smallest order createOrder accepts, in USD with 18 decimals. 0 = no minimum.
     uint256 public minOrderUsd;
+    /// @notice How far (in ticks) a pool's average price may be from the pair's Chainlink price for a rule to run
+    /// (Rules.checkPrice). 0 = not checked. About 100 ticks is 1%.
+    uint24 public maxDeviationTicks;
 
     mapping(address token => Feed) public feeds;
     address[] internal _tokens;
@@ -64,6 +67,7 @@ contract PriceFeeds {
     event FeedRemoved(address indexed token);
     event FeedQueued(address indexed token, address aggregator, uint32 maxAge, uint64 readyAt);
     event MinOrderUsdSet(uint256 minOrderUsd);
+    event MaxDeviationSet(uint24 ticks);
     event OwnerChanged(address indexed owner);
 
     constructor(address _owner) {
@@ -132,6 +136,11 @@ contract PriceFeeds {
     function setMinOrderUsd(uint256 usd) external onlyOwner {
         minOrderUsd = usd;
         emit MinOrderUsdSet(usd);
+    }
+
+    function setMaxDeviationTicks(uint24 ticks) external onlyOwner {
+        maxDeviationTicks = ticks;
+        emit MaxDeviationSet(ticks);
     }
 
     function transferOwnership(address to) external onlyOwner {

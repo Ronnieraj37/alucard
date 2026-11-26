@@ -163,7 +163,7 @@ async function main() {
   check(!(await open(trail.id)), "the trailing stop ran after a 3% drop from the high");
 
   // ------------------------------------------------------------ 3. park in USDC/USDT and come back
-  console.log("\n3. park in the stable pool below the range, come back when the price is back");
+  console.log("\n3. move into the stable pool below the range, come back when the price is back");
   const pBase = await price(pool);
   const [sq, tk] = await client.readContract({ ...r, functionName: "poolState", args: [pool.index] });
   void sq;
@@ -194,7 +194,7 @@ async function main() {
   pl = await plan(park.id);
   check(Number(o.poolIndex) === pool.index, "came back into the WETH / USDC pool");
   check(decodeSide(o.lowerState).edge === park.range[0] && decodeSide(o.upperState).edge === park.range[1], "into the same range as before");
-  check(pl.there.poolIndex === stable.index, "plan B is ready for next time");
+  check(pl.there.poolIndex === stable.index, "the move is ready for next time");
 
   // ------------------------------------------------------------ 4. wait, re-enter centred
   console.log("\n4. exit and wait in USDC, re-enter centred after a 3% rebound");

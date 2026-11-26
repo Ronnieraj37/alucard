@@ -11,15 +11,15 @@ web
 Two audiences, equally important:
 
 - **Hookathon judges and the Uniswap team** (UHI11). They see many hooks in a short review. Their job: grasp what Alucard does in seconds, believe it is real and tested, and try it on Sepolia.
-- **Liquidity providers on Uniswap v4.** They hold concentrated positions and cannot watch the price all day. Their job: set what should happen to a position (exit, re-range, convert, compound) once, check it against history, and trust that it runs when the condition holds, without handing over their funds.
+- **Liquidity providers on Uniswap v4.** They hold concentrated positions and cannot watch the price all day. Every LP has their own strategy. Their job: write it down once (exit, move to another pool and back, re-range, compound), replay it on history, and trust that it runs exactly as written, without handing over their funds.
 
 ## Product Purpose
 
-Alucard lets an LP attach rules to a Uniswap v4 position: conditions (pool price, Chainlink price, time, fees earned, trailing stop, holding time) and actions (withdraw, convert to one token, re-add, follow the price, repeat). Any keeper can run a rule on-chain when its condition holds and is paid per run from the position, never above the owner's cap. The money stays in Uniswap the whole time. Success: an LP sets a rule in a minute, backtests it on their own pool's history, and it runs exactly as the backtest said.
+Alucard runs the LP's own strategy on a Uniswap v4 position: conditions (pool price, another pool's price, Chainlink price, time, fees earned, fee rate, trailing, averaged over a hold) and steps (move everything into any other pool sharing a token and come back by the LP's own rule, withdraw, swap to one token, follow the price, compound, repeat). Any keeper can run a step on-chain when its condition holds and is paid per run from the position, never above the owner's cap. The money stays inside Uniswap v4 until the owner withdraws. Alucard is not a strategy maker: it does not pick, rate or promise returns for strategies; it gives more options and runs them faithfully. Success: an LP builds their strategy in a minute, replays it on history, and it runs exactly as the replay said.
 
 ## Positioning
 
-- Rules instead of a fixed menu: conditions combine with AND/OR, ladders, repeats, convert-on-exit.
+- The LP's strategy, not ours: conditions combine with AND/OR, ladders, repeats, moves between pools and back. More options, never advice.
 - No central operator: anyone can execute; limits (price, slippage, fee cap, run count) are enforced on-chain.
 - Backtest before committing: the backtest engine runs the same steps as the contract, checked run-for-run against it.
 - A Uniswap v4 hook (RuleHook) that also fills limit orders inside the swap.
@@ -27,14 +27,14 @@ Alucard lets an LP attach rules to a Uniswap v4 position: conditions (pool price
 ## Operating Context
 
 - Ethereum Sepolia testnet; test tokens from the in-app faucet; MetaMask-style injected wallet.
-- Screens: Swap and limit orders, Pool (positions, new position), rule editor (node graph, templates, plain-words summary), Backtest, Keeper (anyone can run ready orders), Docs.
+- Screens: Swap and limit orders, Pool (positions, new position), strategy editor (two columns of cards that open in place, templates as starting points, plain-words summary), Backtest, Keeper (anyone can run ready steps), Docs.
 - Built for the Uniswap Hook Incubator hookathon (UHI11).
 
 ## Capabilities and Constraints
 
-- Contracts: RuleHook, ConditionalOrders, PriceFeeds (Chainlink token list) on Sepolia. ConditionalOrders is 35 KB, Sepolia-only until split.
+- Contracts: RuleHook, ConditionalOrders, Rules, PriceFeeds (Chainlink token list) on Sepolia; each under 24 KB (Unichain-ready).
 - Backtest: the pool's own Chainlink price history (arbitrage-only fees, a lower bound) or real mainnet ETH/USDC swaps.
-- Stack: Next.js, wagmi/viem, React Flow, Tailwind; Python backtest function on Vercel.
+- Stack: Next.js, wagmi/viem, Tailwind; Python backtest function on Vercel.
 - Undecided: domain name (to be bought), mainnet launch, protocol fee.
 
 ## Brand Commitments
@@ -43,13 +43,13 @@ Alucard lets an LP attach rules to a Uniswap v4 position: conditions (pool price
 
 ## Evidence on Hand
 
-- 130 Foundry tests, 79,682 editor-vs-contract parity cases with 0 mismatches, 4,000 engine-vs-contract replays identical, stress tests (300 batched exits, 536 random runs).
+- 150 Foundry tests (81% of branches), 39,146 editor-vs-contract parity cases with 0 mismatches, 2,000 engine-vs-contract replays identical, every template dry-run against Sepolia.
 - Live Sepolia deployment (addresses in `deployments/`).
 - No users, testimonials, TVL or partners yet: never invent them.
 
 ## Product Principles
 
-1. Funds never leave Uniswap; the contract, not a server, enforces every limit.
+1. The money stays in Uniswap v4 until the owner withdraws; the contract, not a server, enforces every limit.
 2. Say exactly what will happen, in plain words, before it happens.
-3. Show the evidence (backtests, tests) instead of claims.
+3. Show the evidence (replays, tests) instead of claims. Never claim a strategy beats holding: the LP judges.
 4. Honest numbers: label estimates and lower bounds as such.

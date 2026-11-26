@@ -93,14 +93,11 @@ export default function Backtest({
   const [allWindows, setAllWindows] = useState(false);
   const [deposit, setDeposit] = useState(10_000);
   const [chain, setChain] = useState(CHAINS[0]);
-  // How the contract pays keepers: the measured gas, in any pool (Chainlink prices it in the pool's tokens); the whole
-  // fee cap only when no Chainlink price is available (Rules.keeperPay).
-  const [keeperMode, setKeeperMode] = useState<"gas" | "ceiling">("gas");
 
   const ethLike = pool.base.symbol === "WETH" || pool.base.symbol === "ETH";
 
   const q = useQuery({
-    queryKey: ["backtest", history, pool.index, dataStart, days, startMonth, allWindows, deposit, chain.id, keeperMode, JSON.stringify(rules), JSON.stringify(range), JSON.stringify(advanced)],
+    queryKey: ["backtest", history, pool.index, dataStart, days, startMonth, allWindows, deposit, chain.id, JSON.stringify(rules), JSON.stringify(range), JSON.stringify(advanced)],
     staleTime: Infinity,
     queryFn: async () => {
       // The engine runs the exact order the contract would get (encodeRules), made at today's price. It moves the
@@ -137,17 +134,23 @@ export default function Backtest({
         refTick,
         otherRefTick,
         homeIndex: pool.index,
+        spacing: pool.key.tickSpacing, // one-sided widths are in spacings: the replay keeps their width in price
         baseIs0: pool.baseIs0,
         keeperFeeBps: advanced.keeperFeeBps,
         slippagePct: advanced.slippagePct,
         delaySec: 12,
         keeperCostUsd: chain.cost,
-        keeperMode,
         ...(allWindows ? { mode: "windows", windowDays: 30, everyDays: 7 } : {}),
       };
       const res = await fetch(`/api/backtest?q=${encode(req)}`);
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? `backtest failed (${res.status})`);
+      const text = await res.text();
+      let body: { error?: string } | null = null;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        // not JSON: the backtest service itself is down (locally: `npm run dev:api` is not running)
+      }
+      if (!res.ok || !body) throw new Error(body?.error ?? "The backtest service is not available right now. Try again in a moment.");
       return body as Single | Windows;
     },
   });
@@ -213,16 +216,6 @@ export default function Backtest({
             </Control>
             <Control label="Gas per run">
               <Seg value={chain.id} onChange={(v) => setChain(CHAINS.find((c) => c.id === v)!)} items={CHAINS.map((c) => ({ id: c.id, label: c.label, title: c.hint }))} />
-            </Control>
-            <Control label="Keeper pay">
-              <Seg
-                value={keeperMode}
-                onChange={(v) => setKeeperMode(v as "gas" | "ceiling")}
-                items={[
-                  { id: "gas", label: "Gas refund", title: "What the contract pays: the gas of the run, in the pool's own tokens at Chainlink prices" },
-                  { id: "ceiling", label: "Full fee cap", title: "The most a run can cost: the whole cap. The contract pays this only when no Chainlink price is available" },
-                ]}
-              />
             </Control>
           </div>
 

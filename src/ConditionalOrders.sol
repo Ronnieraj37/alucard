@@ -294,7 +294,10 @@ contract ConditionalOrders is IUnlockCallback {
         uint8 kind = twoLegs ? plan.here.kind : OrderState.LEG_RANGE;
         rules.checkSide(lo, false, o.poolIndex, kind, twoLegs);
         rules.checkSide(up, true, o.poolIndex, kind, twoLegs);
-        if (twoLegs) rules.checkLegs(o.poolIndex, plan.there, [lo, up, plan.thereLower, plan.thereUpper]);
+        if (twoLegs) {
+            rules.checkLegs(o.poolIndex, plan.there, [lo, up, plan.thereLower, plan.thereUpper]);
+            if (!_moves(lo) && !_moves(up)) revert InvalidOrder(); // the leg must keep a way to the other one
+        }
 
         OrderState.State memory current = _decode(o);
         st.lower.edge = current.lower.edge;
@@ -494,6 +497,8 @@ contract ConditionalOrders is IUnlockCallback {
         if (!rules.met(address(this), orderId, r.order.poolIndex, r.order.lowerState, r.order.upperState, upper)) {
             revert ConditionNotMet();
         }
+        // runs swap and deposit at the price of the moment: never at a pushed one
+        rules.checkPrice(r.key, r.order.maxSlippage);
         if (sd.actions & OrderState.ACT_MOVE != 0) return _move(r, sd);
 
         _removeAndReserve(r, sd);
@@ -596,6 +601,7 @@ contract ConditionalOrders is IUnlockCallback {
             return (0, 0);
         }
         PoolKey memory k = r.to;
+        if (to.poolIndex != r.order.poolIndex) rules.checkPrice(k, r.order.maxSlippage); // the pool it goes into
         uint256 h0 = _amountOf(r, k.currency0);
         uint256 h1 = _amountOf(r, k.currency1);
         (tickLower, tickUpper) = rules.rangeOf(k, to);

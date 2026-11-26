@@ -8,6 +8,7 @@ import { CORE, type Pool, POOLS, amountsFor, poolByIndex, priceAtTick, sqrtFromX
 import { type Advanced, type ChainPlan, type LaneId, type Lane, type Rules, decodeStrategy, legPools, markBackIn, slotsOf } from "./rules";
 import { CHECK, LEG, decodeSide } from "./side";
 import { getLogsSinceDeploy } from "./logs";
+import { explain } from "./tx";
 
 /** Where a strategy's money is now: in its position, waiting (tokens held), or parked in another pool. */
 export type Status = "home" | "waiting" | "parked";
@@ -16,7 +17,7 @@ export type RulePosition = {
   kind: "rules";
   id: bigint;
   pool: Pool; // the position's own pool: its rules are written for this pool
-  tickLower: number; // the position's range (the last one, while plan B runs)
+  tickLower: number; // the position's range (the last one, while the money is moved)
   tickUpper: number;
   tick: number; // the pool's current tick
   status: Status;
@@ -29,8 +30,12 @@ export type RulePosition = {
   liveIsHome: boolean;
   advanced: Advanced;
   expiry: number;
-  /** For the live lanes (the position's lanes, or plan B's ways back while it runs). */
+  /** For the live lanes (the position's lanes, or the ways back while the money is moved). */
   ready: Record<LaneId, boolean>;
+  /** Why a side whose condition is true cannot run right now (the contract's own reason), or null. */
+  blocked: Record<LaneId, string | null>;
+  /** When each live side last ran (or started), unix seconds. */
+  lastRun: Record<LaneId, number>;
   memo: Record<LaneId, SideMemo | null>;
 };
 
@@ -53,7 +58,7 @@ const r = { address: CORE.rules, abi: rulesAbi } as const;
 type Client = NonNullable<ReturnType<typeof usePublicClient>>;
 const ZERO = "0x0000000000000000000000000000000000000000";
 
-/** The live leg's lanes: the position's own, or plan B's ways back. */
+/** The live leg's lanes: the position's own, or the ways back while the money is moved. */
 export const liveLanes = (p: Pick<RulePosition, "rules" | "liveIsHome">): { down: Lane; up: Lane } => (p.liveIsHome ? p.rules : p.rules.plan!.back);
 
 /** Contract side a live lane runs on (true = upper). */
@@ -92,7 +97,7 @@ export async function loadRulePosition(client: Client, id: bigint): Promise<Rule
   const upper = decodeSide(order.upperState);
   const waiting = plan.here.kind === LEG.IDLE;
   const status: Status = liveIsHome ? "home" : waiting ? "waiting" : "parked";
-  // the position's range: live, or the last one it had before moving to plan B
+  // the position's range: live, or the last one it had before the money moved
   const homeLower = liveIsHome ? lower : decodeSide(plan.thereLower);
   const homeUpper = liveIsHome ? upper : decodeSide(plan.thereUpper);
   // a way back at the range's edge reads as "back in my range"
@@ -121,6 +126,16 @@ export async function loadRulePosition(client: Client, id: bigint): Promise<Rule
   };
   const [memoDown, memoUp] = await Promise.all([memoOf("down"), memoOf("up")]);
   const ready = (lane: LaneId) => !!lanes[lane].trigger && (liveSide(base, lane) ? readyUpper : readyLower);
+  // a side whose condition is true can still be refused (the price was pushed, a swap past the limit…): say why
+  const blockedOf = (lane: LaneId) =>
+    ready(lane)
+      ? client
+          .simulateContract({ ...c, functionName: "execute", args: [id, liveSide(base, lane)] })
+          .then(() => null)
+          .catch((e) => explain(e))
+      : Promise.resolve(null);
+  const [blockedDown, blockedUp] = await Promise.all([blockedOf("down"), blockedOf("up")]);
+  const runAt = (lane: LaneId) => (liveSide(base, lane) ? upper.lastRun : lower.lastRun);
   return {
     kind: "rules",
     id,
@@ -142,7 +157,9 @@ export async function loadRulePosition(client: Client, id: bigint): Promise<Rule
       expiryDays: Math.max(1, Math.round((Number(order.expiry) - Date.now() / 1000) / 86400)),
     },
     expiry: Number(order.expiry),
-    ready: { down: ready("down"), up: ready("up") },
+    ready: { down: ready("down") && !blockedDown, up: ready("up") && !blockedUp },
+    blocked: { down: blockedDown, up: blockedUp },
+    lastRun: { down: runAt("down"), up: runAt("up") },
     memo: { down: memoDown, up: memoUp },
   };
 }

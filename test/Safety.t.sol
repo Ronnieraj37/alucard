@@ -10,6 +10,8 @@ import {RuleSetup} from "./utils/RuleSetup.sol";
 import {ConditionalOrders} from "../src/ConditionalOrders.sol";
 import {PriceFeeds} from "../src/PriceFeeds.sol";
 import {OrderState} from "../src/libraries/OrderState.sol";
+import {Rules} from "../src/Rules.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 /// @notice What an LP should be able to take for granted, whatever the strategy: their money stays theirs, nobody
 /// else can change or take it, and a call that makes no sense is refused instead of doing something odd.
@@ -244,5 +246,79 @@ contract SafetyTest is RuleSetup {
         p.liquidity = 1e18;
         uint256 id = _submit(alice, p);
         assertEq(_liquidity(id), 1e18);
+    }
+
+    // ---------------------------------------------------------------- runs happen at believable prices
+
+    /// A rule that deposits (compound) never does it at a price someone just pushed: the deposit would be traded
+    /// back through at the LP's expense.
+    function test_noDepositAtAPushedPrice() public {
+        OrderState.Side memory c = _side(OrderState.CHECK_TIME, 1, OrderState.ACT_KEEP_FEES | OrderState.ACT_ADD, 0);
+        c.repeat = true;
+        uint256 id = _create(c, _off());
+        _wait(2 minutes);
+        _swap(true, 3e18); // pushed in this block, far from the average
+        vm.expectRevert(Rules.PriceMoved.selector);
+        _run(id, false);
+        _settle(); // once the price has held, it runs
+        _run(id, false);
+    }
+
+    /// With the list's band set, a pool price held away from Chainlink for minutes cannot run a rule either; when
+    /// the market really moved (Chainlink agrees), it runs.
+    function test_aPoolHeldAwayFromChainlinkCannotRunARule() public {
+        feeds.setMaxDeviationTicks(200); // about 2%
+        uint256 id = _create(_exit(OrderState.CHECK_TIME, 1), _off());
+        _swap(false, 3e18); // the pool's price up about 6%, held
+        _settle();
+        _wait(2 minutes);
+        _swap(true, 1);
+        _wait(2 minutes);
+        vm.expectRevert(Rules.PriceMoved.selector);
+        _run(id, false);
+
+        feed0.setAnswer(1.06e8); // the market agrees: token0 is worth 6% more
+        (bool ok, int24 link) = feeds.pairTick(Currency.unwrap(currency0), Currency.unwrap(currency1));
+        assertTrue(ok);
+        assertLt(_dist(link, _avg()), 200);
+        _run(id, false);
+        assertEq(orders.getOrder(id).owner, address(0));
+    }
+
+    /// "Leave when fees earn less than 5% a year" must not fire on a young position earning more than that, just
+    /// because its fees are still below one basis point.
+    function test_aYoungPositionEarningWellIsNotLowAPR() public {
+        uint256 id = _create(_exit(OrderState.CHECK_APR, 500), _off());
+        _swap(true, 0.05e18);
+        _swap(false, 0.05e18); // a little trading: well above 5% a year, but under 1 bp of the position
+        _wait(1 hours + 1);
+        (, uint256 bps) = rules.feeBps(address(orders), id, 1, -600, 600);
+        assertEq(bps, 0);
+        vm.expectRevert(ConditionalOrders.ConditionNotMet.selector);
+        _run(id, false);
+    }
+
+    /// Following the price never ends the order by itself: even when the price of the moment dipped back under
+    /// the average, the new range is placed where the held token fills it.
+    function test_followingThePriceNeverEndsTheOrder() public {
+        OrderState.Side memory f = _exit(OrderState.CHECK_EDGE, 60);
+        f.actions |= OrderState.ACT_ADD;
+        f.addMode = OrderState.ADD_ONE_SIDED;
+        f.shape = 5;
+        f.repeat = true;
+        uint256 id = _create(_off(), f);
+        _swap(false, 5e18);
+        _settle();
+        _swap(true, 0.05e18); // the price of the moment dips just under the average
+        assertLt(_tick(), _avg());
+        _run(id, true);
+        assertTrue(orders.getOrder(id).owner != address(0));
+        assertGt(_liquidity(id), 0);
+        (, OrderState.Side memory up) = _state(id);
+        assertLe(up.edge, _tick()); // entirely below the price: all token1
+    }
+
+    function _dist(int24 a, int24 b) internal pure returns (uint256) {
+        return a > b ? uint256(int256(a) - b) : uint256(int256(b) - a);
     }
 }

@@ -12,7 +12,7 @@ const marcellus = Marcellus({ subsets: ["latin"], weight: "400", variable: "--fo
 
 export const metadata: Metadata = {
   title: `${APP_NAME}: ${TAGLINE}`,
-  description: "Add rules to your Uniswap v4 liquidity: take profit, stop loss, follow the price, compound. Limit orders too.",
+  description: "Run your own strategy on a Uniswap v4 position: exit, move the money into another pool and back, re-range, compound. Limit orders too.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
