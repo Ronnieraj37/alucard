@@ -3,13 +3,12 @@ pragma solidity ^0.8.26;
 
 import {Script, console} from "forge-std/Script.sol";
 import {TestToken} from "../../src/testnet/TestToken.sol";
+import {Net} from "./Net.sol";
 
-/// @notice Deploys open-mint test tokens on Sepolia and mints a large balance to the deployer.
-/// Saves the addresses to deployments/sepolia-tokens.json so they are reused, not redeployed.
+/// @notice Deploys open-mint test tokens on a testnet (Sepolia, Unichain Sepolia) and mints a large balance to the deployer.
+/// Saves the addresses to deployments/<chain>-tokens.json so they are reused, not redeployed.
 ///   forge script script/sepolia/01_DeployTokens.s.sol --rpc-url sepolia --broadcast
 contract DeployTokens is Script {
-    string constant OUT = "./deployments/sepolia-tokens.json";
-
     function run() external {
         string[6] memory symbols = ["WETH", "WBTC", "USDC", "USDT", "DAI", "LINK"];
         string[6] memory names = [
@@ -32,6 +31,6 @@ contract DeployTokens is Script {
             console.log(symbols[i], address(t));
         }
         vm.stopBroadcast();
-        vm.writeJson(json, OUT);
+        vm.writeJson(json, Net.file(block.chainid, "./deployments", "tokens"));
     }
 }

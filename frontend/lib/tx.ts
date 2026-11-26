@@ -1,5 +1,6 @@
 "use client";
 
+import { withHeadroom } from "@/lib/gas";
 import { useCallback, useState } from "react";
 import { type Abi, BaseError, ContractFunctionRevertedError, maxUint256 } from "viem";
 import { useAccount, useBalance, usePublicClient, useReadContract, useWriteContract } from "wagmi";
@@ -18,13 +19,17 @@ export function useTx() {
   const send = useCallback(
     async (label: string, req: { address: `0x${string}`; abi: Abi; functionName: string; args?: readonly unknown[]; value?: bigint }) => {
       setState((s) => ({ ...s, busy: true, message: `${label}: confirm in your wallet…`, error: null }));
-      const hash = await writeContractAsync(req as never);
+      // Our pools' hook writes a price snapshot in the first swap of each minute, and a rule's run can take another
+      // path once the price moves. An estimate made a moment before the block can fall short: add room. Only the gas
+      // used is paid. A failing estimate is thrown here, with the contract's reason, before the wallet opens.
+      const estimate = await client!.estimateContractGas({ ...(req as object), account: address } as never);
+      const hash = await writeContractAsync({ ...req, gas: withHeadroom(estimate) } as never);
       setState((s) => ({ ...s, message: `${label}: waiting for the block…`, hash }));
       const receipt = await client!.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") throw new Error(`${label} failed on-chain`);
       return receipt;
     },
-    [client, writeContractAsync],
+    [address, client, writeContractAsync],
   );
 
   /** Approve `spender` for `amount` of `token` if the allowance is not enough already. */
@@ -77,17 +82,24 @@ export function explain(e: unknown): string {
 }
 
 const HUMAN_ERRORS: Record<string, string> = {
-  ConditionNotMet: "Its condition is not met right now.",
-  SwappedThisTx: "The pool was swapped in this same transaction. Try again in a new transaction.",
-  WouldRefire: "This run would leave the order ready to fire again at once, so it was refused.",
-  InvalidSide: "One of the rules is not allowed. Check the warnings on the canvas.",
-  InvalidOrder: "The order settings are not valid (expiry, fee or both sides empty).",
+  ConditionNotMet: "Its condition is not true right now (a pool's price counts only while it is near Chainlink's).",
+  NotHeldLongEnough: "Its condition has not been true long enough yet (“Only if it lasts”). Keepers mark when it first is.",
+  TooSoon: "This side ran (or started) less than a minute ago. A side runs at most once a minute: try again shortly.",
+  NoPrice: "This pool's price is too far from Chainlink's right now to start a trailing stop from it. Try again shortly.",
+  NothingToEnter: "The move could not put anything into the new range at today's price. It is tried again later.",
+  PriceMoved: "The pool's price is too far from Chainlink's (someone may have pushed it, or arbitrage has not caught up), so nothing runs at it. It runs once they agree again.",
+  NothingToPoke: "Nothing to update: the remembered price is already the best one.",
+  SideOff: "This side has no rule.",
+  InvalidSide: "One of the rules is not allowed. Check the warnings in the editor.",
+  InvalidLeg: "That move is not allowed: the other pool must share a token with this one, and the move must swap into that token.",
+  InvalidOrder: "The order settings are not valid (expiry, fee, both sides empty, or a move without a way out and back).",
+  UnknownPool: "That pool does not exist yet.",
+  PoolNotAllowed: "That pool uses another hook, so strategies cannot use it.",
+  TokenNotAllowed: "One of this pool's tokens has no Chainlink price on the list, so strategies cannot use it.",
   TooMuchIn: "The price moved while you were confirming. Refresh and try again.",
   NotOwner: "Only the owner can do this.",
   Expired: "This order has expired. Anyone can now cancel it, which returns the tokens to the owner.",
   UnknownOrder: "This order no longer exists.",
-  TokenNotAllowed: "Rules are only available for tokens on the list (tokens with a Chainlink price). One of this pool's tokens is not on it.",
-  OrderTooSmall: "This position is below the smallest size a rule can be attached to. Add more, or try again when the Chainlink price has updated.",
 };
 
 /** Balance of a token (native ETH or ERC20) for the connected wallet. */

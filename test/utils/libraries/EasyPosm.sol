@@ -28,6 +28,19 @@ library EasyPosm {
 
     /// @dev This function supports sending native tokens (ETH), the amount-to-pay is determined by amount0Max.
     ///      Any excess amount is NOT refunded since it is not encoding the SWEEP action
+    function _mintParams(
+        PoolKey memory poolKey,
+        int24 tickLower,
+        int24 tickUpper,
+        uint256 liquidity,
+        uint256 amount0Max,
+        uint256 amount1Max,
+        address recipient,
+        bytes memory hookData
+    ) private pure returns (bytes memory) {
+        return abi.encode(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, recipient, hookData);
+    }
+
     function mint(
         IPositionManager posm,
         PoolKey memory poolKey,
@@ -40,33 +53,32 @@ library EasyPosm {
         uint256 deadline,
         bytes memory hookData
     ) internal returns (uint256 tokenId, BalanceDelta delta) {
-        (Currency currency0, Currency currency1) = (poolKey.currency0, poolKey.currency1);
+        // few locals on purpose: ten parameters plus locals is "stack too deep" in the coverage build (no optimizer)
+        MintData memory d = _mintStart(poolKey, recipient);
+        d.params[0] = _mintParams(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, recipient, hookData);
+        tokenId = posm.nextTokenId();
+        posm.modifyLiquidities{value: poolKey.currency0.isAddressZero() ? amount0Max : 0}(
+            abi.encode(d.actions, d.params), deadline
+        );
+        delta = _mintDelta(d, poolKey);
+    }
 
-        MintData memory mintData = MintData({
-            balance0Before: currency0.balanceOf(address(this)),
-            balance1Before: currency1.balanceOf(address(this)),
-            actions: new bytes(0),
-            params: new bytes[](4)
-        });
-
-        mintData.actions = abi.encodePacked(
+    function _mintStart(PoolKey memory poolKey, address recipient) private view returns (MintData memory d) {
+        d.balance0Before = poolKey.currency0.balanceOf(address(this));
+        d.balance1Before = poolKey.currency1.balanceOf(address(this));
+        d.actions = abi.encodePacked(
             uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP), uint8(Actions.SWEEP)
         );
+        d.params = new bytes[](4);
+        d.params[1] = abi.encode(poolKey.currency0, poolKey.currency1);
+        d.params[2] = abi.encode(poolKey.currency0, recipient);
+        d.params[3] = abi.encode(poolKey.currency1, recipient);
+    }
 
-        mintData.params[0] =
-            abi.encode(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, recipient, hookData);
-        mintData.params[1] = abi.encode(currency0, currency1);
-        mintData.params[2] = abi.encode(currency0, recipient);
-        mintData.params[3] = abi.encode(currency1, recipient);
-
-        // Mint Liquidity
-        tokenId = posm.nextTokenId();
-        uint256 valueToPass = currency0.isAddressZero() ? amount0Max : 0;
-        posm.modifyLiquidities{value: valueToPass}(abi.encode(mintData.actions, mintData.params), deadline);
-
-        delta = toBalanceDelta(
-            -(mintData.balance0Before - currency0.balanceOf(address(this))).toInt128(),
-            -(mintData.balance1Before - currency1.balanceOf(address(this))).toInt128()
+    function _mintDelta(MintData memory d, PoolKey memory poolKey) private view returns (BalanceDelta) {
+        return toBalanceDelta(
+            -(d.balance0Before - poolKey.currency0.balanceOf(address(this))).toInt128(),
+            -(d.balance1Before - poolKey.currency1.balanceOf(address(this))).toInt128()
         );
     }
 

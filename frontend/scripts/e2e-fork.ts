@@ -1,18 +1,22 @@
-// End-to-end check on a LOCAL anvil fork of Sepolia, with a newly deployed ConditionalOrders (see DEPLOY.md):
-// creates orders with the editor's own encoder, moves the price with real swaps, runs scripts/keeper.ts and checks
-// that holds get armed, trailing highs move, and both rules run when they should.
+// End-to-end check on a LOCAL anvil fork of Sepolia with the contracts deployed by the fork rehearsal (DEPLOY.md,
+// script/sepolia/rehearse-fork.sh, which also gives every token a mock Chainlink feed): creates orders with the editor's
+// own encoder (createParams), moves "the market" (a mock feed) and lets the arbitrage bot (scripts/arb.ts) bring the
+// pools along, runs the keeper (scripts/keeper.ts), and checks that every strategy does what it says. It also checks
+// that pushing a pool's price without the market does nothing.
 //
-//   anvil --fork-url $SEPOLIA_RPC --port 8546 --code-size-limit 65536
 //   RPC_URL=http://127.0.0.1:8546 PRIVATE_KEY=0x... npx tsx scripts/e2e-fork.ts
 //
 // It refuses any RPC that is not on this machine, so it can never send to a real network.
-import { execSync } from "node:child_process";
 import { createPublicClient, createWalletClient, http, maxUint256, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
-import { conditionalOrdersAbi, priceFeedsAbi, routerAbi, testTokenAbi } from "../lib/generated/abis";
-import { CORE, POOLS, type Pool, liquidityFor, amountsFor, priceAtTick, rangeAround, sqrtFromX96 } from "../lib/pools";
-import { describeLane, encodeRules, type Rules } from "../lib/rules";
+import { withHeadroom } from "../lib/gas";
+import { CHAIN } from "../lib/chain";
+import { conditionalOrdersAbi, mockAggregatorAbi, priceFeedsAbi, routerAbi, rulesAbi, testTokenAbi } from "../lib/generated/abis";
+import { CORE, POOLS, type Pool, amountsFor, liquidityFor, priceAtTick, rangeAround, sqrtFromX96 } from "../lib/pools";
+import { type ChainPlan, type Lane, type Rules, createParams, describeLane, isValid, validate } from "../lib/rules";
+import { LEG, decodeSide } from "../lib/side";
+import { keep } from "./keeper";
+import { arbitrage } from "./arb";
 
 const RPC = process.env.RPC_URL ?? "http://127.0.0.1:8546";
 if (!/^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(RPC)) throw new Error(`local fork only, got ${RPC}`);
@@ -20,10 +24,12 @@ const KEY = (process.env.PRIVATE_KEY ?? "") as Hex;
 if (!KEY) throw new Error("PRIVATE_KEY not set");
 
 const account = privateKeyToAccount((KEY.startsWith("0x") ? KEY : `0x${KEY}`) as Hex);
-const client = createPublicClient({ chain: sepolia, transport: http(RPC) });
-const wallet = createWalletClient({ account, chain: sepolia, transport: http(RPC) });
+const client = createPublicClient({ chain: CHAIN, transport: http(RPC) });
+const wallet = createWalletClient({ account, chain: CHAIN, transport: http(RPC) });
 const c = { address: CORE.conditionalOrders, abi: conditionalOrdersAbi } as const;
+const r = { address: CORE.rules, abi: rulesAbi } as const;
 const pool = POOLS.find((p) => p.name === "WETH_USDC_3000")!;
+const stable = POOLS.find((p) => p.name === "USDC_USDT_100")!;
 
 let failures = 0;
 const check = (ok: boolean, what: string) => {
@@ -32,16 +38,32 @@ const check = (ok: boolean, what: string) => {
 };
 
 async function send(req: Parameters<typeof wallet.writeContract>[0]) {
-  const hash = await wallet.writeContract(req);
-  const r = await client.waitForTransactionReceipt({ hash });
-  if (r.status !== "success") throw new Error(`reverted: ${req.functionName}`);
-  return r;
+  // the hook writes a price snapshot in the first swap of each minute: an estimate made a moment earlier can be short
+  const gas = await client.estimateContractGas({ ...(req as object), account } as never);
+  const hash = await wallet.writeContract({ ...req, gas: withHeadroom(gas) } as never);
+  const rc = await client.waitForTransactionReceipt({ hash });
+  if (rc.status !== "success") throw new Error(`reverted: ${req.functionName}`);
+  return rc;
 }
 const now = async () => Number((await client.getBlock()).timestamp);
-const tick = async (p: Pool) => Number((await client.readContract({ ...c, functionName: "poolState", args: [p.index] }))[1]);
-const price = async (p: Pool) => priceAtTick(p, await tick(p));
-const open = async (id: bigint) => (await client.readContract({ ...c, functionName: "getOrder", args: [id] }))[0].owner !== "0x0000000000000000000000000000000000000000";
-const state = async (id: bigint) => (await client.readContract({ ...c, functionName: "getOrder", args: [id] }))[1];
+const tickOf = async (p: Pool) => Number((await client.readContract({ ...r, functionName: "poolState", args: [p.index] }))[1]);
+const price = async (p: Pool) => priceAtTick(p, await tickOf(p));
+const getOrder = (id: bigint) => client.readContract({ ...c, functionName: "getOrder", args: [id] });
+const open = async (id: bigint) => (await getOrder(id)).owner !== "0x0000000000000000000000000000000000000000";
+const plan = async (id: bigint) => (await client.readContract({ ...c, functionName: "getPlan", args: [id] })) as unknown as ChainPlan;
+const warp = async (s: number) => {
+  await client.request({ method: "evm_increaseTime" as never, params: [s] as never });
+  await client.request({ method: "evm_mine" as never, params: [] as never });
+};
+
+async function swap(p: Pool, zeroForOne: boolean, amount: bigint) {
+  await send({
+    address: CORE.swapRouter,
+    abi: routerAbi,
+    functionName: "swapExactTokensForTokens",
+    args: [amount, 0n, zeroForOne, p.key, "0x", account.address, BigInt((await now()) + 600)],
+  });
+}
 
 /** Swap until the base price is past `target` (in quote per base). */
 async function moveTo(target: number) {
@@ -51,128 +73,166 @@ async function moveTo(target: number) {
   for (let i = 0; i < 300; i++) {
     const p = await price(pool);
     if (up ? p >= target : p <= target) return p;
-    const before = p;
-    await send({
-      address: CORE.swapRouter,
-      abi: routerAbi,
-      functionName: "swapExactTokensForTokens",
-      args: [chunk, 0n, tokIn.address === pool.token0.address, pool.key, "0x", account.address, BigInt((await now()) + 600)],
-    });
+    await swap(pool, tokIn.address === pool.token0.address, chunk);
     const after = await price(pool);
-    if (Math.abs(after / before - 1) < 0.003) chunk *= 2n; // too small a step: speed up
+    if (Math.abs(after / p - 1) < 0.003) chunk *= 2n; // too small a step: speed up
   }
   throw new Error("could not move the price");
 }
 
-function keeper(): string {
-  const out = execSync("npx tsx scripts/keeper.ts", { env: { ...process.env, RPC_URL: RPC, KEEPER_PRIVATE_KEY: KEY }, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  console.log(out.trim().split("\n").map((l) => `        keeper: ${l}`).join("\n"));
-  return out;
+const keeper = async () => {
+  const lines: string[] = [];
+  await keep(RPC, KEY, false, (l: string) => {
+    lines.push(l);
+    console.log(`        keeper: ${l}`);
+  });
+  return lines.join("\n");
+};
+
+async function createOrder(rules: Rules, pct = 5): Promise<{ id: bigint; range: [number, number] }> {
+  return createOrderIn(pool, rules, pct);
 }
 
-async function createOrder(rules: Rules): Promise<bigint> {
-  const [sqrtX96, t] = await client.readContract({ ...c, functionName: "poolState", args: [pool.index] });
-  const [tl, tu] = rangeAround(pool, Number(t), 5);
+async function createOrderIn(pool: Pool, rules: Rules, pct = 5): Promise<{ id: bigint; range: [number, number] }> {
+  const [sqrtX96, t] = await client.readContract({ ...r, functionName: "poolState", args: [pool.index] });
+  const range = rangeAround(pool, Number(t), pct);
+  const v = validate(pool, rules, range);
+  if (!isValid(v)) throw new Error(`editor refuses: ${JSON.stringify(v)}`);
   const sp = sqrtFromX96(sqrtX96);
-  const L = liquidityFor(sp, tl, tu, 0.5 * 10 ** pool.base.decimals, pool.base.address === pool.token0.address);
-  const [a0, a1] = amountsFor(sp, tl, tu, L);
-  const enc = encodeRules(pool, rules);
+  const L = liquidityFor(sp, range[0], range[1], 0.5 * 10 ** pool.base.decimals, pool.base.address === pool.token0.address);
+  const [a0, a1] = amountsFor(sp, range[0], range[1], L);
   const id = await client.readContract({ ...c, functionName: "nextOrderId" });
   await send({
     ...c,
     functionName: "createOrder",
-    args: [
-      {
-        key: pool.key,
-        tickLower: tl,
-        tickUpper: tu,
-        liquidity: BigInt(Math.floor(L * 0.999)),
-        amount0Max: BigInt(Math.ceil(a0 * 1.05)) + 1n,
-        amount1Max: BigInt(Math.ceil(a1 * 1.05)) + 1n,
-        swapPoolIndex: 0,
-        expiry: (await now()) + 7 * 86400,
-        maxKeeperFeeBps: 10,
-        maxSlippage: 50,
-        lower: enc.lower,
-        upper: enc.upper,
-      },
-    ],
+    args: [createParams(pool, range, { liquidity: BigInt(Math.floor(L * 0.999)), amount0Max: BigInt(Math.ceil(a0 * 1.05)) + 1n, amount1Max: BigInt(Math.ceil(a1 * 1.05)) + 1n }, { keeperFeeBps: 10, slippagePct: 5, expiryDays: 7 }, rules)],
   });
   for (const lane of ["down", "up"] as const) {
-    const d = describeLane(pool, lane, rules[lane]);
+    const d = describeLane(pool, lane, rules[lane], rules.plan);
     if (d) console.log(`  #${id}: ${d}`);
   }
-  return id;
+  return { id, range };
+}
+
+const off = (): Lane => ({ trigger: null, actions: [], repeat: false });
+
+/** The market moves: the base token's mock Chainlink price goes `pct`% (from where Chainlink is now), and the
+ * arbitrage bot brings every pool of that token along. */
+async function market(pct: number) {
+  const base = pool.base.address;
+  const [agg] = await client.readContract({ address: CORE.priceFeeds, abi: priceFeedsAbi, functionName: "feeds", args: [base] });
+  const now = await client.readContract({ address: agg, abi: mockAggregatorAbi, functionName: "answer" });
+  await send({ address: agg, abi: mockAggregatorAbi, functionName: "setAnswer", args: [(now * BigInt(Math.round((100 + pct) * 1e6))) / 100_000_000n] });
+  for (const p of POOLS.filter((q) => q.token0.address === base || q.token1.address === base)) await arbitrage(p);
+  console.log(`        market ${pct > 0 ? "+" : ""}${pct}%: ${pool.base.symbol} now ${(await price(pool)).toFixed(2)} ${pool.quote.symbol}`);
 }
 
 async function main() {
   console.log(`fork ${RPC}, ConditionalOrders ${CORE.conditionalOrders}, pool ${pool.label}`);
-  // tokens: mint plenty on the fork and approve the router and the order contract
-  for (const t of [pool.token0, pool.token1]) {
+  for (const t of [pool.token0, pool.token1, stable.token0, stable.token1]) {
     await send({ address: t.address, abi: testTokenAbi, functionName: "mint", args: [account.address, 10n ** BigInt(t.decimals + 9)] });
     await send({ address: t.address, abi: testTokenAbi, functionName: "approve", args: [CORE.swapRouter, maxUint256] });
     await send({ address: t.address, abi: testTokenAbi, functionName: "approve", args: [CORE.conditionalOrders, maxUint256] });
   }
+  for (const p of POOLS) await arbitrage(p); // every pool on its Chainlink price to start
   const p0 = await price(pool);
   console.log(`price now ${p0.toFixed(2)} ${pool.quote.symbol}`);
 
-  const off = { trigger: null, actions: [], repeat: false };
-  const trail = await createOrder({
-    down: { trigger: { kind: "trail", trailPct: 2 }, actions: [{ kind: "withdraw", pct: 100 }, { kind: "convert", to: "quote" }], repeat: false },
-    up: off,
+  // ------------------------------------------------------------ 1. nobody can fire a strategy by pushing a pool
+  console.log("\n1. a stop loss, and a 10% push of the pool alone");
+  const stop = await createOrder({ down: { trigger: { kind: "leave" }, actions: [{ kind: "withdraw", pct: 100 }, { kind: "convert", to: "quote" }], repeat: false }, up: off() });
+  await warp(180);
+  await moveTo(p0 * 0.9);
+  const lower = (pool.baseIs0 ? "lower" : "upper") === "upper";
+  const pushed = await client.readContract({ ...r, functionName: "canExecute", args: [CORE.conditionalOrders, stop.id, lower] });
+  check(!pushed, "10% below Chainlink, the pool's price does not count: the stop cannot run");
+  await warp(3600);
+  await keeper();
+  check(await open(stop.id), "an hour later, still pushed: the stop is still open");
+  await arbitrage(pool); // the arbitrageur takes the push back
+  check(Math.abs((await price(pool)) / p0 - 1) < 0.01, "arbitrage brought the pool back to Chainlink");
+
+  // ------------------------------------------------------------ 2. a real move: trailing stop, take profit held 5 min
+  console.log("\n2. the market rises 7%: a trailing stop follows, a take profit held 5 minutes runs");
+  const trail = await createOrder({ down: { trigger: { kind: "trail", trailPct: 2 }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false }, up: off() });
+  const tp = await createOrder({ down: off(), up: { trigger: { kind: "leave" }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false, holdMinutes: 5 } }, 5);
+  await warp(180);
+  await market(7);
+  const out2 = await keeper();
+  check(/to poke/.test(out2) && !/0 to poke/.test(out2), "the keeper pokes: the trailing stop's high, the take profit's hold");
+  check(await open(tp.id), "the take profit waits: out of range for less than 5 minutes");
+  await warp(301);
+  await keeper();
+  check(!(await open(tp.id)), "the take profit ran once the price had stayed above the range for 5 minutes");
+  check(await open(trail.id), "the trailing stop is still open (no drop yet)");
+  await market(-3);
+  await warp(121); // a side runs at most once a minute (its last run is kept to the minute, rounded up)
+  await keeper();
+  check(!(await open(trail.id)), "the trailing stop ran after a 3% drop from the high");
+
+  // ------------------------------------------------------------ 3. move into USDC/USDT and come back
+  console.log("\n3. the market falls: the money moves into the stable pool; it rises back: the money comes back");
+  const [, tk] = await client.readContract({ ...r, functionName: "poolState", args: [pool.index] });
+  const preview = rangeAround(pool, Number(tk), 4);
+  const lowEdge = Math.min(priceAtTick(pool, preview[0]), priceAtTick(pool, preview[1]));
+  const park = await createOrder(
+    {
+      down: { trigger: { kind: "leave" }, actions: [{ kind: "move" }], repeat: false },
+      up: off(),
+      plan: { where: "park", parkPool: stable.index, parkWidthPct: 0.2, returnTo: "same", back: { down: off(), up: { trigger: { kind: "price", price: lowEdge }, actions: [{ kind: "move" }], repeat: true } } },
+    },
+    4,
+  );
+  await warp(180);
+  await market(-7);
+  await warp(121); // a side runs at most once a minute (its last run is kept to the minute, rounded up)
+  await keeper();
+  let o = await getOrder(park.id);
+  let pl = await plan(park.id);
+  check(Number(o.poolIndex) === stable.index, `moved: the order now lives in ${stable.label}`);
+  check(pl.here.kind === LEG.CENTERED && Number(pl.there.poolIndex) === pool.index, "it keeps the way back to the WETH range");
+  const [s0, s1] = await client.readContract({ ...r, functionName: "orderAmounts", args: [CORE.conditionalOrders, park.id] });
+  check(s0 > 0n && s1 > 0n, `both stablecoins in the range there (${Number(s0) / 1e6} / ${Number(s1) / 1e6})`);
+  await market(7.5);
+  await warp(121); // a side runs at most once a minute (its last run is kept to the minute, rounded up)
+  await keeper();
+  o = await getOrder(park.id);
+  pl = await plan(park.id);
+  check(Number(o.poolIndex) === pool.index, "came back into the WETH / USDC pool");
+  check(decodeSide(o.lowerState).edge === park.range[0] && decodeSide(o.upperState).edge === park.range[1], "into the same range as before");
+  check(pl.there.poolIndex === stable.index, "the move is ready for next time");
+
+  // ------------------------------------------------------------ 4. hold USDC, come back centred on a turn
+  console.log("\n4. exit and hold USDC, come back centred after a 3% rebound");
+  const wait = await createOrder({
+    down: { trigger: { kind: "leave" }, actions: [{ kind: "move", to: "quote" }], repeat: false },
+    up: off(),
+    plan: { where: "wait", returnTo: "recentre", back: { down: off(), up: { trigger: { kind: "trail", trailPct: 3 }, actions: [{ kind: "move" }], repeat: true } } },
   });
-  const held = await createOrder({ down: off, up: { trigger: { kind: "leave", bufferPct: 0 }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false, holdMinutes: 5 } });
+  await warp(180);
+  await market(-8);
+  await warp(121); // a side runs at most once a minute (its last run is kept to the minute, rounded up)
+  await keeper();
+  pl = await plan(wait.id);
+  check(pl.here.kind === LEG.IDLE, "holding: the tokens are kept for the order");
+  check(pl.held1 > 0n || pl.held0 > 0n, "held as claims in the PoolManager");
+  await market(5);
+  await warp(121); // a side runs at most once a minute (its last run is kept to the minute, rounded up)
+  await keeper(); // pokes / runs
+  await keeper();
+  pl = await plan(wait.id);
+  check(pl.here.kind === LEG.CENTERED, "re-entered a range centred on the price");
 
-  console.log("\n1. price rises 7%: above the hold order's range, and a new high for the trailing stop");
-  await moveTo(p0 * 1.07);
-  const sideOf = (lane: "down" | "up") => (lane === "up") === pool.baseIs0; // upper side?
-  const bestBefore = (await state(trail))[sideOf("down") ? "upper" : "lower"].best;
-  const out1 = keeper();
-  check(/2 to poke/.test(out1), "keeper finds 2 pokes (arm the hold, move the high)");
-  const st = await state(trail);
-  const bestAfter = st[sideOf("down") ? "upper" : "lower"].best;
-  check(bestAfter !== bestBefore, `trailing best tick moved (${bestBefore} -> ${bestAfter})`);
-  const armed = (await state(held))[sideOf("up") ? "upper" : "lower"].armedAt;
-  check(armed > 0, `hold armed at ${new Date(armed * 1000).toISOString()}`);
-  check(await open(held), "hold order has not run yet");
-
-  console.log("\n2. seven minutes later, still above the range");
-  await client.request({ method: "evm_increaseTime" as never, params: [420] as never });
-  await client.request({ method: "evm_mine" as never, params: [] as never });
-  keeper();
-  check(!(await open(held)), "hold order ran after the wait");
-  check(await open(trail), "trailing stop still open (no drop yet)");
-
-  console.log("\n3. price falls 3% from the high");
-  const high = await price(pool);
-  await moveTo(high * 0.97);
-  keeper();
-  check(!(await open(trail)), "trailing stop ran after the drop");
-
-  console.log("\n4. Chainlink conditions and a batch");
-  const feeds = await client.readContract({ ...c, functionName: "feeds" });
-  for (const t of [pool.token0, pool.token1]) {
-    const listed = await client.readContract({ address: feeds, abi: priceFeedsAbi, functionName: "isListed", args: [t.address] });
-    check(listed, `${t.symbol} is on the token list`);
-  }
-  const [okTick, linkTick] = await client.readContract({ address: feeds, abi: priceFeedsAbi, functionName: "pairTick", args: [pool.token0.address, pool.token1.address] });
-  check(okTick, "Chainlink gives a fresh price for the pair");
-  const link = priceAtTick(pool, Number(linkTick));
-  console.log(`  Chainlink ${link.toFixed(2)} ${pool.quote.symbol}, pool ${(await price(pool)).toFixed(2)} ${pool.quote.symbol}`);
-  const [okPay, pay] = await client.readContract({ ...c, functionName: "keeperGasCostIn", args: [pool.quote.address, 200_000n] });
-  check(okPay, `gas can be priced in ${pool.quote.symbol} (200,000 gas = ${Number(pay) / 10 ** pool.quote.decimals} ${pool.quote.symbol} at this call's gas price)`);
-
-  // true now: Chainlink is already above a level 3% under its price. Not true: a level 30% above it.
-  const linkNow = await createOrder({ down: off, up: { trigger: { kind: "oracle", price: link * 0.97 }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false } });
-  const linkFar = await createOrder({ down: off, up: { trigger: { kind: "oracle", price: link * 1.3 }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false } });
-  const timed = await createOrder({ down: off, up: { trigger: { kind: "timer", hours: 1 / 60 }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false } });
-  await client.request({ method: "evm_increaseTime" as never, params: [120] as never });
-  await client.request({ method: "evm_mine" as never, params: [] as never });
-  const out4 = keeper();
-  check(/batch of 2/.test(out4), "keeper sends the two ready orders as one batch");
-  check(!(await open(linkNow)), "the Chainlink order ran");
-  check(!(await open(timed)), "the timed order ran in the same batch");
-  check(await open(linkFar), "the Chainlink order with a far level did not run");
+  // ------------------------------------------------------------ 5. any pool: a strategy on the hookless pool
+  console.log("\n5. a strategy on a pool without the hook, and a timer, in one keeper round");
+  const bare = POOLS.find((p) => !p.hooked && p.base.symbol === pool.base.symbol)!;
+  await arbitrage(bare);
+  const onBare = await createOrderIn(bare, { down: off(), up: { trigger: { kind: "timer", hours: 1 / 60 }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false } });
+  const timed = await createOrder({ down: off(), up: { trigger: { kind: "timer", hours: 1 / 60 }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false } });
+  await warp(180);
+  await keeper();
+  check(!(await open(onBare.id)), `the order in ${bare.label} ran`);
+  check(!(await open(timed.id)), "the timed order ran");
 
   console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
   process.exit(failures ? 1 : 0);

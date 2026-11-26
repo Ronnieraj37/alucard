@@ -9,7 +9,7 @@ import { CORE, poolByIndex } from "@/lib/pools";
 
 export function RangeSides() {
   return (
-    <figure className="my-6 rounded-[14px] border border-[var(--line)] bg-white p-5">
+    <figure className="my-6 rounded-[14px] border border-[var(--line)] bg-[var(--white)] p-5">
       <svg viewBox="0 0 640 170" className="w-full" role="img" aria-label="A price range with a lower side that acts when the price falls below it and an upper side that acts when it rises above it">
         <defs>
           <linearGradient id="rng" x1="0" x2="1">
@@ -70,7 +70,7 @@ export function Architecture() {
   );
   return (
     <figure className="my-6 overflow-x-auto rounded-[14px] border border-[var(--line)] bg-[var(--paper)] p-4">
-      <svg viewBox="0 0 720 330" className="min-w-[620px] w-full" role="img" aria-label="Architecture: LPs and keepers call ConditionalOrders, swappers call the router, both reach the Uniswap PoolManager, which calls RuleHook">
+      <svg viewBox="0 0 720 330" className="min-w-[620px] w-full" role="img" aria-label="Architecture: LPs and keepers call ConditionalOrders, which asks Rules (and PriceFeeds) before acting; swappers call the router; both reach the Uniswap PoolManager, which calls RuleHook">
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="var(--muted2)" />
@@ -79,20 +79,25 @@ export function Architecture() {
         {box(20, 20, 150, "LP (owner)", "create · update · cancel")}
         {box(20, 130, 150, "Keeper (anyone)", "execute when ready")}
         {box(20, 240, 150, "Swapper", "trades through a router")}
-        {box(270, 75, 190, "ConditionalOrders", "owns positions with rules", true)}
+        {box(270, 60, 190, "ConditionalOrders", "holds positions with a strategy", true)}
+        {box(270, 150, 190, "Rules", "conditions · checks · price math")}
+        {box(540, 260, 160, "PriceFeeds", "Chainlink list · 2-day timelock")}
+        {arrow("M365 116 L365 148", "asks", 382, 136)}
+        {arrow("M460 190 C 500 200, 510 250, 538 280", "Chainlink", 486, 238)}
         {box(270, 240, 190, "Router / Quoter", "Uniswap periphery")}
         {box(540, 150, 160, "PoolManager", "Uniswap v4 core")}
         {box(540, 20, 160, "RuleHook", "pool table · limit orders", true)}
-        {arrow("M170 48 C 220 48, 230 95, 268 98", "createOrder", 215, 60)}
-        {arrow("M170 158 C 220 158, 230 120, 268 118", "execute", 213, 152)}
+        {arrow("M170 48 C 220 48, 230 80, 268 84", "createOrder", 215, 56)}
+        {arrow("M170 158 C 220 158, 230 110, 268 104", "execute", 213, 152)}
         {arrow("M170 268 L268 268", "swap", 220, 262)}
-        {arrow("M460 110 C 500 110, 510 165, 538 172", "modifyLiquidity · swap", 500, 130)}
+        {arrow("M460 96 C 500 96, 510 165, 538 172", "modifyLiquidity · swap", 500, 118)}
         {arrow("M460 268 C 500 268, 510 200, 538 192", "swap", 505, 250)}
         {arrow("M620 150 L620 78", "before/afterSwap", 668, 118)}
-        {arrow("M540 48 C 500 48, 480 70, 462 85", "pool table, swappedThisTx", 492, 34)}
       </svg>
       <figcaption className="mt-1 text-[12px] text-[var(--muted)]">
-        Liquidity never leaves Uniswap: ConditionalOrders owns the positions in the PoolManager, and RuleHook only runs inside swaps of the pools that use it.
+        The money stays in Uniswap v4 until the owner withdraws: ConditionalOrders holds the positions (and tokens held during a move) inside the PoolManager.
+        RuleHook runs only inside swaps of the pools that use it, to fill limit orders. Strategies use any pool of listed tokens, with or without it:
+        a pool's price counts only while it is near Chainlink's.
       </figcaption>
     </figure>
   );
@@ -104,33 +109,33 @@ type F = { name: string; from: number; bits: number; color: string; desc: string
 
 const SIDE: F[] = [
   { name: "edge", from: 0, bits: 24, color: "#0a9a8b", desc: "int24. The position's boundary: tickLower in the lower side's slot, tickUpper in the upper side's. Moves when the order re-ranges." },
-  { name: "checker", from: 24, bits: 6, color: "#0b1f2a", desc: "Condition A: 0 off, 1 EDGE (price leaves the range), 2 TICK (a price level), 3 TIME (a timer), 4 TRAIL (trailing stop), 5 ORACLE (the pair's Chainlink price reaches a level). 6 bits leave room for 58 more." },
-  { name: "value", from: 30, bits: 24, color: "#6d5bd0", desc: "int24, condition A's number. EDGE: ticks past the edge. TICK and ORACLE: the trigger tick. TIME: minutes. TRAIL: ticks back from the best price seen." },
+  { name: "checker", from: 24, bits: 6, color: "#0b1f2a", desc: "Condition A: 0 off, 1 EDGE (price leaves the range), 2 TICK (a price level), 3 TIME (a timer), 4 TRAIL (trailing stop), 6 FEES (fees earned), 7 APR (fee rate below); 5 is retired. Price conditions count only while the pool is near Chainlink." },
+  { name: "value", from: 30, bits: 24, color: "#6d5bd0", desc: "int24, condition A's number. EDGE: ticks past the edge. TICK: the trigger tick. TIME: minutes. TRAIL: ticks back from the best price seen. FEES: bps of the position. APR: bps a year." },
   { name: "checkPool", from: 54, bits: 24, color: "#b5651d", desc: "uint24 pool condition A reads (TICK, TRAIL). 0 = the order's own pool." },
   { name: "checker2", from: 78, bits: 6, color: "#334155", desc: "Condition B, same kinds as A. 0 = no condition B." },
   { name: "value2", from: 84, bits: 24, color: "#8b7be0", desc: "int24, condition B's number." },
   { name: "checkPool2", from: 108, bits: 24, color: "#d08a4a", desc: "uint24 pool condition B reads." },
   { name: "combine", from: 132, bits: 2, color: "#0f766e", desc: "0 = A only, 1 = A and B, 2 = A or B." },
-  { name: "holdMinutes", from: 134, bits: 16, color: "#9333ea", desc: "The condition must be true when the side is armed (poke) and still true this many minutes later. It may run from hold to 2 x hold after arming." },
-  { name: "lastRun", from: 150, bits: 24, color: "#a16207", desc: "Last run, minutes since 2026-01-01 (rounded up, valid until 2057). Timers count from here." },
-  { name: "memo", from: 174, bits: 24, color: "#be185d", desc: "With a hold: when it was armed (minutes since 2026-01-01, 0 = not armed). Otherwise: the best tick a trailing stop has seen (int24)." },
-  { name: "actions", from: 198, bits: 8, color: "#2563eb", desc: "Bit 0 keep fees in the order, bit 1 remove, bit 2 swap, bit 3 add. Run in that order. Bits 4-7 spare." },
+  { name: "holdMinutes", from: 134, bits: 16, color: "#9333ea", desc: "Only if it lasts: the condition must have been true this many minutes in a row (from armedAt, set by poke) before the step runs. 0 = at once; at most 1,440." },
+  { name: "lastRun", from: 150, bits: 24, color: "#a16207", desc: "Last run (or when the order started or entered this leg), minutes since 2026-01-01 (rounded up, valid until 2057). Timers count from here; a side runs at most once a minute after it." },
+  { name: "best", from: 174, bits: 24, color: "#be185d", desc: "int24, the best tick (near Chainlink) a trailing stop has seen. Moved by poke." },
+  { name: "actions", from: 198, bits: 8, color: "#2563eb", desc: "Bit 0 keep fees in the order, bit 1 remove, bit 2 swap, bit 3 add, bit 4 move to the other leg. Run in that order. Bits 5-7 spare." },
   { name: "removeBps", from: 206, bits: 14, color: "#15803d", desc: "How much liquidity to remove, 0-10,000 (= 0-100%)." },
   { name: "swapToToken1", from: 220, bits: 1, color: "#c026d3", desc: "Swap direction: true sells token0 for token1." },
-  { name: "addMode", from: 221, bits: 3, color: "#0891b2", desc: "0 = add back to the same range, 1 = one-sided range next to the price (follow the price)." },
+  { name: "addMode", from: 221, bits: 3, color: "#0891b2", desc: "0 = add back to the same range, 1 = re-centre: a new range around the price, swapped to its mix (follow the price)." },
   { name: "repeat", from: 224, bits: 1, color: "#dc2626", desc: "Run again next time. Without it, the side clears itself after running." },
   { name: "runsLeft", from: 225, bits: 7, color: "#ea580c", desc: "With repeat: runs left before the side switches off. 0 = no limit." },
-  { name: "shape", from: 232, bits: 22, color: "#65a30d", desc: "With add: widthBelow (bits 0-10) and widthAbove (bits 11-21), in tick spacings. Without add: the step a repeating price level moves by." },
+  { name: "shape", from: 232, bits: 22, color: "#65a30d", desc: "Re-centre: the width below (bits 0-10) and above (bits 11-21) the price, in tick spacings. Otherwise: the step a repeating price level moves by." },
   { name: "spare", from: 254, bits: 2, color: "#cbd5e1", desc: "Unused, always zero." },
 ];
 
 const SLOT0: F[] = [
   { name: "owner", from: 0, bits: 160, color: "#0b1f2a", desc: "address. Who can update and cancel, and who receives every payout." },
-  { name: "poolIndex", from: 160, bits: 24, color: "#0a9a8b", desc: "uint24 index in RuleHook's pool table: the pool holding the position." },
-  { name: "swapPoolIndex", from: 184, bits: 24, color: "#6d5bd0", desc: "uint24 pool used for instant swaps (same pair; may be a hookless pool)." },
-  { name: "expiry", from: 208, bits: 32, color: "#b5651d", desc: "uint32 unix time. After it, rules stop and anyone may cancel (tokens go to the owner)." },
-  { name: "maxKeeperFeeBps", from: 240, bits: 8, color: "#2563eb", desc: "uint8, at most 100 (1%). Ceiling on a keeper's pay per run, in bps of what the run removed." },
-  { name: "maxSlippage", from: 248, bits: 8, color: "#dc2626", desc: "uint8, in steps of 10 ticks (~0.1%). Instant swaps stop this far past the trigger price." },
+  { name: "poolIndex", from: 160, bits: 24, color: "#0a9a8b", desc: "uint24 index in Rules' pool table: the pool the money is in now." },
+  { name: "expiry", from: 184, bits: 32, color: "#b5651d", desc: "uint32 unix time. After it, steps stop and anyone may cancel (tokens go to the owner)." },
+  { name: "keeperFeeBps", from: 216, bits: 8, color: "#2563eb", desc: "uint8, at most 100 (1%). The keeper's fee per run, in bps of what the run removed." },
+  { name: "maxSlippage", from: 224, bits: 8, color: "#dc2626", desc: "uint8, in steps of 10 ticks (~0.1%). Swaps stop this far past the price before them." },
+  { name: "spare", from: 232, bits: 24, color: "#cbd5e1", desc: "Unused." },
 ];
 
 export function BitMap({ which }: { which: "side" | "slot0" }) {
@@ -138,7 +143,7 @@ export function BitMap({ which }: { which: "side" | "slot0" }) {
   const total = 256;
   const [hover, setHover] = useState<F>(fields[1]);
   return (
-    <figure className="my-6 rounded-[14px] border border-[var(--line)] bg-white p-4">
+    <figure className="my-6 rounded-[14px] border border-[var(--line)] bg-[var(--white)] p-4">
       <div className="mb-1 flex justify-between text-[11px] text-[var(--muted)]">
         <span>bit 0</span>
         <span>bit {total - 1}</span>
@@ -176,7 +181,7 @@ export function BitMap({ which }: { which: "side" | "slot0" }) {
 // ---------------------------------------------------------------- decoder
 
 const BASE_TIME = 1767225600; // 2026-01-01, OrderState.BASE_TIME
-const CHECKERS = ["off", "EDGE · leaves range", "TICK · price level", "TIME · timer", "TRAIL · trailing stop", "ORACLE · Chainlink price level"];
+const CHECKERS = ["off", "EDGE · leaves range", "TICK · price level", "TIME · timer", "TRAIL · trailing stop", "(retired)", "FEES · fees earned (bps)", "APR · fee rate below (bps a year)"];
 
 function bits(w: bigint, from: number, n: number) {
   return (w >> BigInt(from)) & ((1n << BigInt(n)) - 1n);
@@ -198,7 +203,7 @@ function decodeSide(h: bigint) {
   const checker2 = Number(bits(h, 78, 6));
   const combine = Number(bits(h, 132, 2));
   const hold = Number(bits(h, 134, 16));
-  const memo = bits(h, 174, 24);
+  const best = bits(h, 174, 24);
   const actions = Number(bits(h, 198, 8));
   const shape = Number(bits(h, 232, 22));
   const rows: [string, string][] = [
@@ -207,13 +212,13 @@ function decodeSide(h: bigint) {
   ];
   if (combine) rows.push(["combine", combine === 1 ? "1 · and" : "2 · or"], ["condition B", condText(checker2, s24(bits(h, 84, 24)), Number(bits(h, 108, 24)))]);
   rows.push(
-    ["holdMinutes", hold ? `${hold} min` : "0 · no hold"],
+    ["holdMinutes", hold ? `${hold} min in a row` : "0 · at once"],
     ["lastRun", when(Number(bits(h, 150, 24)))],
-    ["memo", hold ? `armed ${when(Number(memo))}` : checker === 4 || checker2 === 4 ? `best tick ${s24(memo)}` : String(memo)],
-    ["actions", `${actions} · ${["keep fees", "remove", "swap", "add"].filter((_, i) => actions & (1 << i)).join(" + ") || "none"}`],
+    ["best", checker === 4 || checker2 === 4 ? `best tick ${s24(best)}` : String(best)],
+    ["actions", `${actions} · ${["keep fees", "remove", "swap", "add", "move"].filter((_, i) => actions & (1 << i)).join(" + ") || "none"}`],
     ["removeBps", `${Number(bits(h, 206, 14))} (${Number(bits(h, 206, 14)) / 100}%)`],
     ["swapToToken1", bits(h, 220, 1) ? "true" : "false"],
-    ["addMode", Number(bits(h, 221, 3)) === 1 ? "1 · one-sided (follow)" : "0 · same range"],
+    ["addMode", Number(bits(h, 221, 3)) === 1 ? "1 · re-centre (follow)" : "0 · same range"],
     ["repeat", bits(h, 224, 1) ? "true" : "false"],
     ["runsLeft", Number(bits(h, 225, 7)) ? String(Number(bits(h, 225, 7))) : "0 · no limit"],
     ["shape", actions & 8 ? `${shape} · below ${shape & 2047}, above ${(shape >> 11) & 2047} spacings` : `${shape}${shape ? " · step in ticks" : ""}`],
@@ -240,7 +245,7 @@ export function Decoder() {
   const load = async () => {
     if (!client) return;
     try {
-      const [order] = await client.readContract({ address: CORE.conditionalOrders, abi: conditionalOrdersAbi, functionName: "getOrder", args: [BigInt(orderId)] });
+      const order = await client.readContract({ address: CORE.conditionalOrders, abi: conditionalOrdersAbi, functionName: "getOrder", args: [BigInt(orderId)] });
       if (order.owner === "0x0000000000000000000000000000000000000000") {
         setNote(`Order #${orderId} is closed or does not exist.`);
         return;
@@ -253,7 +258,7 @@ export function Decoder() {
   };
 
   return (
-    <div className="my-6 rounded-[14px] border border-[var(--line)] bg-white p-4">
+    <div className="my-6 rounded-[14px] border border-[var(--line)] bg-[var(--white)] p-4">
       <div className="flex flex-wrap items-end gap-2">
         {(["lower", "upper"] as const).map((side) => (
           <label key={side} className="min-w-[220px] flex-1">

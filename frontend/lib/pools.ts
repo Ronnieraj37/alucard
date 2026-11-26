@@ -1,4 +1,4 @@
-import deployment from "./generated/deployment.json";
+import { DEPLOYMENT as deployment } from "./chain";
 
 export const CORE = deployment.core as {
   poolManager: `0x${string}`;
@@ -7,6 +7,8 @@ export const CORE = deployment.core as {
   permit2: `0x${string}`;
   ruleHook: `0x${string}`;
   conditionalOrders: `0x${string}`;
+  rules: `0x${string}`;
+  priceFeeds: `0x${string}`;
   faucet: `0x${string}`;
   deployBlock: number;
 };

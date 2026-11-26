@@ -10,6 +10,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
+import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {IPermit2} from "permit2/src/interfaces/IPermit2.sol";
@@ -17,6 +18,8 @@ import {FixedPointMathLib} from "solmate/src/utils/FixedPointMathLib.sol";
 
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {RuleHook} from "../../src/RuleHook.sol";
+import {Rules} from "../../src/Rules.sol";
+import {Net} from "./Net.sol";
 
 interface IFeed {
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80);
@@ -26,10 +29,10 @@ interface IFeed {
 /// full range (low concentration), some tight around the price (high concentration). Most pools use RuleHook; one
 /// hookless pool is added to the hook's pool table so orders can read its price and swap in it.
 ///   forge script script/sepolia/03_CreatePools.s.sol --rpc-url sepolia --broadcast
+/// OUT_DIR (default ./deployments): where the core file is read and the pool file written (a fork rehearsal).
 contract CreatePools is Script {
     using PoolIdLibrary for PoolKey;
-
-    string constant OUT = "./deployments/sepolia-pools.json";
+    using StateLibrary for IPoolManager;
 
     struct Tok {
         address addr; // address(0) = native ETH
@@ -41,26 +44,30 @@ contract CreatePools is Script {
     IPositionManager posm;
     IPermit2 permit2;
     RuleHook hook;
+    Rules rules;
     address me;
     string poolsJson;
     uint256 poolCount;
 
     function run() external {
-        string memory core = vm.readFile("./deployments/sepolia-core.json");
-        string memory toks = vm.readFile("./deployments/sepolia-tokens.json");
+        string memory dir = vm.envOr("OUT_DIR", string("./deployments"));
+        string memory core = vm.readFile(Net.file(block.chainid, dir, "core"));
+        string memory toks = vm.readFile(Net.file(block.chainid, "./deployments", "tokens"));
+        Net.Feeds memory f = Net.feeds(block.chainid);
         poolManager = IPoolManager(vm.parseJsonAddress(core, ".poolManager"));
         posm = IPositionManager(vm.parseJsonAddress(core, ".positionManager"));
         permit2 = IPermit2(vm.parseJsonAddress(core, ".permit2"));
         hook = RuleHook(vm.parseJsonAddress(core, ".ruleHook"));
+        rules = Rules(vm.parseJsonAddress(core, ".rules"));
 
-        // Chainlink feeds on Sepolia (8 decimals). There is no USDT feed there: USDT is priced at $1.
-        uint256 ethUsd = _feed(0x694AA1769357215DE4FAC081bf1f309aDC325306);
+        // Chainlink's feeds on this chain (8 decimals); a stablecoin without one is priced at $1
+        uint256 ethUsd = _feed(f.eth);
         Tok memory WETH = Tok(vm.parseJsonAddress(toks, ".WETH"), 18, ethUsd);
-        Tok memory WBTC = Tok(vm.parseJsonAddress(toks, ".WBTC"), 8, _feed(0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43));
-        Tok memory USDC = Tok(vm.parseJsonAddress(toks, ".USDC"), 6, _feed(0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E));
-        Tok memory USDT = Tok(vm.parseJsonAddress(toks, ".USDT"), 6, 1e8);
-        Tok memory DAI = Tok(vm.parseJsonAddress(toks, ".DAI"), 18, _feed(0x14866185B1962B63C3Ea9E03Bc1da838bab34C19));
-        Tok memory LINK = Tok(vm.parseJsonAddress(toks, ".LINK"), 18, _feed(0xc59E3633BAAC79493d908e63626716e204A45EdF));
+        Tok memory WBTC = Tok(vm.parseJsonAddress(toks, ".WBTC"), 8, _feed(f.btc));
+        Tok memory USDC = Tok(vm.parseJsonAddress(toks, ".USDC"), 6, _feed(f.usdc));
+        Tok memory USDT = Tok(vm.parseJsonAddress(toks, ".USDT"), 6, _feed(f.usdt));
+        Tok memory DAI = Tok(vm.parseJsonAddress(toks, ".DAI"), 18, _feed(f.dai));
+        Tok memory LINK = Tok(vm.parseJsonAddress(toks, ".LINK"), 18, _feed(f.link));
         Tok memory ETH = Tok(address(0), 18, ethUsd);
 
         vm.startBroadcast();
@@ -83,10 +90,11 @@ contract CreatePools is Script {
         _pool(Spec("ETH_USDC_3000", ETH, USDC, 3000, 60, true, 0, 10, 488, 10)); // ~$10 per side each
         vm.stopBroadcast();
 
-        vm.writeJson(poolsJson, OUT);
+        vm.writeJson(poolsJson, Net.file(block.chainid, dir, "pools"));
     }
 
     function _feed(address f) internal view returns (uint256) {
+        if (f == address(0)) return 1e8;
         (, int256 answer,,,) = IFeed(f).latestRoundData();
         require(answer > 0, "bad feed");
         return uint256(answer);
@@ -118,8 +126,16 @@ contract CreatePools is Script {
         uint160 sqrtP = uint160(
             FixedPointMathLib.sqrt(FullMath.mulDiv(t0.usd * 10 ** t1.decimals, 1 << 192, t1.usd * 10 ** t0.decimals))
         );
+        // a pool without the hook may exist from an earlier deployment: keep it (and its liquidity), only register it
+        (uint160 existing,,,) = poolManager.getSlot0(key.toId());
+        if (existing != 0) {
+            require(!sp.hooked, "hook pool already exists");
+            rules.registerPool(key);
+            _record(sp.name, key);
+            return;
+        }
         int24 tick = poolManager.initialize(key, sqrtP);
-        if (!sp.hooked) hook.registerPool(key);
+        rules.registerPool(key); // strategies can use every pool, hooked or not
 
         if (sp.usd1 > 0) _add(key, t0, t1, sqrtP, _range(tick, sp.w1, sp.spacing), sp.usd1);
         if (sp.usd2 > 0) _add(key, t0, t1, sqrtP, _range(tick, sp.w2, sp.spacing), sp.usd2);
@@ -133,9 +149,9 @@ contract CreatePools is Script {
         vm.serializeInt(name, "tickSpacing", key.tickSpacing);
         vm.serializeAddress(name, "hooks", address(key.hooks));
         vm.serializeBytes32(name, "poolId", PoolId.unwrap(key.toId()));
-        string memory out = vm.serializeUint(name, "poolIndex", hook.poolIndexOf(key.toId()));
+        string memory out = vm.serializeUint(name, "poolIndex", rules.poolIndexOf(key.toId()));
         poolsJson = vm.serializeString("pools", name, out);
-        console.log(name, hook.poolIndexOf(key.toId()));
+        console.log(name, rules.poolIndexOf(key.toId()));
     }
 
     function _range(int24 tick, int24 halfWidth, int24 s) internal pure returns (int24[2] memory r) {
@@ -166,7 +182,8 @@ contract CreatePools is Script {
 
     /// @dev Mint a position NFT to the deployer: MINT_POSITION, SETTLE_PAIR, and SWEEP the unused ETH back.
     function _mint(PoolKey memory key, int24[2] memory r, uint128 liq, uint256 max0, uint256 max1) internal {
-        bytes memory actions = abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP));
+        bytes memory actions =
+            abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP));
         bytes[] memory params = new bytes[](3);
         params[0] = abi.encode(key, r[0], r[1], uint256(liq), uint128(max0), uint128(max1), me, bytes(""));
         params[1] = abi.encode(key.currency0, key.currency1);

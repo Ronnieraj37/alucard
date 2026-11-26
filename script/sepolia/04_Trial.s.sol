@@ -15,6 +15,7 @@ import {IUniswapV4Router04} from "hookmate/interfaces/router/IUniswapV4Router04.
 
 import {RuleHook} from "../../src/RuleHook.sol";
 import {ConditionalOrders} from "../../src/ConditionalOrders.sol";
+import {Rules} from "../../src/Rules.sol";
 import {OrderState} from "../../src/libraries/OrderState.sol";
 
 /// @notice Try conditional and limit orders on Sepolia, in phases (each phase is its own run, so swaps and
@@ -30,6 +31,7 @@ contract Trial is Script {
     string constant TRIAL = "./deployments/sepolia-trial.json";
 
     ConditionalOrders orders;
+    Rules rules;
     RuleHook hook;
     IUniswapV4Router04 router;
     IPoolManager poolManager;
@@ -41,6 +43,7 @@ contract Trial is Script {
         string memory core = vm.readFile("./deployments/sepolia-core.json");
         pools = vm.readFile("./deployments/sepolia-pools.json");
         orders = ConditionalOrders(payable(vm.parseJsonAddress(core, ".conditionalOrders")));
+        rules = Rules(vm.parseJsonAddress(core, ".rules"));
         hook = RuleHook(vm.parseJsonAddress(core, ".ruleHook"));
         router = IUniswapV4Router04(payable(vm.parseJsonAddress(core, ".swapRouter")));
         poolManager = IPoolManager(vm.parseJsonAddress(core, ".poolManager"));
@@ -73,12 +76,12 @@ contract Trial is Script {
         uint256 a = _create(weth, tW - 180, tW + 180, 20_000, off, _exit(false));
         // B. stop loss: exit below the range and sell everything into token1, at most 1% past the trigger
         uint256 b = _create(weth, tW - 180, tW + 180, 20_000, _exit(true), off);
-        // C. follow the price up: when it leaves the range, move it just below the new price, again and again
+        // C. follow the price up: when it leaves the range, re-centre around the new price, again and again
         OrderState.Side memory follow = _exit(false);
         follow.value = 60; // one tick spacing past the edge
         follow.actions |= OrderState.ACT_ADD;
-        follow.addMode = OrderState.ADD_ONE_SIDED;
-        follow.shape = 4; // 4 spacings wide
+        follow.addMode = OrderState.ADD_CENTERED;
+        follow.shape = 2 | (2 << 11); // 2 spacings below and above the price
         follow.repeat = true;
         uint256 c = _create(weth, tW - 120, tW + 120, 20_000, off, follow);
         // D. compound fees back into the position every minute
@@ -88,14 +91,14 @@ contract Trial is Script {
         compound.actions = OrderState.ACT_KEEP_FEES | OrderState.ACT_ADD;
         compound.repeat = true;
         uint256 d = _create(weth, tW - 600, tW + 600, 20_000, off, compound);
-        // E. exit the WBTC position when the price in another pool (hookless WETH/USDC) falls 3%
+        // E. exit the WBTC position when WETH falls 3% in another pool: the hookless WETH/USDC 0.05% pool (any pool
+        // of listed tokens works)
         OrderState.Side memory cross = _exit(false);
         cross.checker = OrderState.CHECK_TICK;
-        uint24 noHook = _index("WETH_USDC_500_NOHOOK");
-        cross.checkPool = noHook;
+        cross.checkPool = _index("WETH_USDC_500_NOHOOK");
         cross.value = _tick(_key("WETH_USDC_500_NOHOOK")) - 300;
         uint256 e = _create(wbtc, tB - 600, tB + 600, 20_000, cross, off);
-        // F. native ETH pool: take profit, keeper paid exact gas
+        // F. native ETH pool: take profit
         uint256 f = _create(eth, tE - 120, tE + 120, 4, off, _exit(false));
 
         // limit orders in WETH-USDC-0.3: one above the price (sells token0), one below (sells token1)
@@ -135,7 +138,7 @@ contract Trial is Script {
         for (uint256 i; i < ids.length; ++i) {
             for (uint256 s; s < 2; ++s) {
                 bool upper = s == 1;
-                if (orders.canExecute(ids[i], upper)) {
+                if (rules.canExecute(orders, ids[i], upper)) {
                     orders.execute(ids[i], upper);
                     console.log("executed order", ids[i], upper ? "upper" : "lower");
                 }
@@ -178,16 +181,16 @@ contract Trial is Script {
         p.tickUpper = _floor(hi, key.tickSpacing);
         _fillAmounts(p, usdPerSide);
         p.expiry = uint32(block.timestamp + 30 days);
-        p.maxKeeperFeeBps = 10;
+        p.keeperFeeBps = 10;
         p.maxSlippage = 10; // 100 ticks, ~1%
-        p.lower = lower;
-        p.upper = upper;
+        p.lower = OrderState.encodeSide(lower);
+        p.upper = OrderState.encodeSide(upper);
         uint256 value = key.currency0.isAddressZero() ? p.amount0Max : 0;
         id = orders.createOrder{value: value}(p);
     }
 
     function _fillAmounts(ConditionalOrders.CreateParams memory p, uint256 usdPerSide) internal view {
-        (uint160 sqrtP,,) = orders.poolState(hook.poolIndexOf(p.key.toId()));
+        (uint160 sqrtP,,) = rules.poolState(rules.poolIndexOf(p.key.toId()));
         uint256 a0 = _usdAmount(p.key, true, usdPerSide);
         uint256 a1 = _usdAmount(p.key, false, usdPerSide);
         p.liquidity = LiquidityAmounts.getLiquidityForAmounts(
@@ -203,7 +206,7 @@ contract Trial is Script {
         bool usdcIs0 = Currency.unwrap(key.currency0) == usdc;
         uint256 usdcAmount = usd * 1e6;
         if (token0 == usdcIs0) return usdcAmount;
-        (uint160 sqrtP,,) = orders.poolState(hook.poolIndexOf(key.toId()));
+        (uint160 sqrtP,,) = rules.poolState(rules.poolIndexOf(key.toId()));
         uint256 priceX96 = FullMath.mulDiv(sqrtP, sqrtP, 1 << 96); // token1 per token0, x 2^96
         return token0 ? FullMath.mulDiv(usdcAmount, 1 << 96, priceX96) : FullMath.mulDiv(usdcAmount, priceX96, 1 << 96);
     }
@@ -256,7 +259,7 @@ contract Trial is Script {
     }
 
     function _tick(PoolKey memory key) internal view returns (int24 t) {
-        (, t,) = orders.poolState(hook.poolIndexOf(key.toId()));
+        (, t,) = rules.poolState(rules.poolIndexOf(key.toId()));
     }
 
     function _floor(int24 t, int24 s) internal pure returns (int24) {

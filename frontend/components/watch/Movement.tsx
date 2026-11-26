@@ -4,7 +4,7 @@ const rc = (a: number) => Math.round(Math.cos(a) * 1e6) / 1e6;
 const rs = (a: number) => Math.round(Math.sin(a) * 1e6) / 1e6;
 
 // The movement: an authored drawing of an automatic watch movement, seen through the caseback. Wheels turn at their
-// gear ratios, the balance swings, the rotor winds. The bridges are engraved with the parts of a rule.
+// gear ratios, the balance swings, the rotor winds. The bridges are engraved with the parts of a strategy.
 
 type Wheel = { x: number; y: number; teeth: number; r: number; period: number; dir: 1 | -1; spokes?: number };
 
@@ -139,7 +139,7 @@ export default function Movement({ className = "" }: { className?: string }) {
       })}
       <text className="mv-ring-text">
         <textPath href="#mv-ring" startOffset="2%">
-          ALUCARD · AUTOMATIC · ADJUSTED TO 79,682 RULE SHAPES · FUNDS NEVER LEAVE UNISWAP ·
+          ALUCARD · AUTOMATIC · YOUR STRATEGY ON-CHAIN · MONEY STAYS IN UNISWAP V4 ·
         </textPath>
       </text>
 

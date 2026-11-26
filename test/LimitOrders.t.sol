@@ -120,7 +120,7 @@ contract LimitOrdersTest is RuleSetup {
         assertEq(hook.openEpoch(poolId, 60, true), 0);
     }
 
-    function test_everyCrossedBucketIsFilled() public {
+    function test_crossedBucketsFillAFewASwap_theBacklogFinishesNext() public {
         uint256[10] memory ids;
         for (uint256 i; i < 10; ++i) {
             ids[i] = _place(alice, int24(int256(60 * (i + 1))), true, 1e18);
@@ -131,6 +131,19 @@ contract LimitOrdersTest is RuleSetup {
         _swap(false, 14e18);
         int24 t = _tick();
         assertGe(t, 660); // all ten buckets [60,120) .. [600,660) fully crossed
+        // a swap fills at most MAX_FILLS_PER_SWAP, lowest first; the rest wait in the backlog
+        uint256 max = hook.MAX_FILLS_PER_SWAP();
+        for (uint256 i; i < 10; ++i) {
+            assertEq(_filled(ids[i]), i < max);
+        }
+        // the next swaps, however small, work through the backlog, lowest first
+        _swap(false, 1);
+        for (uint256 i; i < 10; ++i) {
+            assertEq(_filled(ids[i]), i < 2 * max);
+        }
+        for (uint256 n; n < 10 / max; ++n) {
+            _swap(false, 1);
+        }
         for (uint256 i; i < 10; ++i) {
             assertTrue(_filled(ids[i]));
         }
@@ -189,20 +202,12 @@ contract LimitOrdersTest is RuleSetup {
         low.removeBps = 10_000;
         low.swapToToken1 = true;
         OrderState.Side memory off;
-        ConditionalOrders.CreateParams memory p = ConditionalOrders.CreateParams({
-            key: poolKey,
-            tickLower: -120,
-            tickUpper: 120,
-            liquidity: 150e18,
-            amount0Max: type(uint128).max,
-            amount1Max: type(uint128).max,
-            swapPoolIndex: 0,
-            expiry: uint32(block.timestamp + 1 days),
-            maxKeeperFeeBps: 10,
-            maxSlippage: 100, // 1,000 ticks
-            lower: low,
-            upper: off
-        });
+        ConditionalOrders.CreateParams memory p = _params(low, off);
+        p.tickLower = -120;
+        p.tickUpper = 120;
+        p.liquidity = 150e18;
+        p.keeperFeeBps = 10;
+        p.maxSlippage = 100; // 1,000 ticks
         vm.prank(bob);
         uint256 orderId = orders.createOrder(p);
 
@@ -212,6 +217,7 @@ contract LimitOrdersTest is RuleSetup {
         assertGt(t, -180);
         assertFalse(_filled(bucket));
 
+        _settle(); // bob's rule fires on the average price
         vm.prank(keeper);
         orders.execute(orderId, false); // bob's instant swap pushes the price through the bucket
         assertLt(_tick(), -240);

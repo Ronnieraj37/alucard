@@ -131,7 +131,7 @@ export function TokenPill({ token, onClick }: { token: Token; onClick?: () => vo
     <button
       type="button"
       onClick={onClick}
-      className={`flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--line)] bg-white py-1 pl-1 pr-3 text-[15px] font-semibold ${onClick ? "hover:border-[var(--ink)]" : "cursor-default"}`}
+      className={`flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--white)] py-1 pl-1 pr-3 text-[15px] font-semibold ${onClick ? "hover:border-[var(--glow)]" : "cursor-default"}`}
     >
       <TokenIcon symbol={token.symbol} size={24} />
       {token.symbol}
@@ -164,7 +164,7 @@ export function Menu<T>({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/25 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="card max-h-[70vh] w-full max-w-sm overflow-y-auto p-2 shadow-xl" onClick={(e) => e.stopPropagation()}>
         {items.map((t, i) => (
           <button key={i} className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left hover:bg-[var(--line2)]" onClick={() => onPick(t)}>

@@ -1,18 +1,17 @@
 "use client";
 
-import { ChevronDown, Pencil, Sparkles } from "lucide-react";
+import { ChevronDown, Droplets, Pencil, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { type Abi, encodeAbiParameters, encodePacked } from "viem";
 import { useAccount, usePublicClient, useReadContract } from "wagmi";
-import RuleEditor from "@/components/RuleEditor";
-import { Menu, PoolIcons, TokenBox, Toggle, TxLine } from "@/components/ui";
+import StrategyEditor from "@/components/StrategyEditor";
+import { Menu, PoolIcons, TokenBox, TxLine } from "@/components/ui";
 import { ACTIONS, permit2Abi, positionManagerAbi } from "@/lib/abis-extra";
-import { conditionalOrdersAbi } from "@/lib/generated/abis";
+import { conditionalOrdersAbi, faucetAbi, rulesAbi } from "@/lib/generated/abis";
 import {
   CORE,
   POOLS,
-  type Pool,
   amountsFor,
   floorTo,
   fmt,
@@ -26,7 +25,7 @@ import {
   sqrtFromX96,
   tickAtPrice,
 } from "@/lib/pools";
-import { type Advanced, type LaneId, type Rules, DEFAULT_ADVANCED, describeLane, emptyRules, encodeRules, laneTitle } from "@/lib/rules";
+import { type Advanced, type LaneId, type Rules, DEFAULT_ADVANCED, allErrors, backLaneOf, createParams, describeLane, describeTrigger, emptyRules, has, isValid, laneTitle, validate } from "@/lib/rules";
 import { useTokenBalance, useTx } from "@/lib/tx";
 
 type Preset = "2" | "5" | "15" | "full";
@@ -35,11 +34,11 @@ export default function AddLiquidity() {
   const router = useRouter();
   const { address, isConnected } = useAccount();
   const client = usePublicClient();
-  const [poolIndex, setPoolIndex] = useState(POOLS.find((p) => p.hooked)!.index);
+  const [poolIndex, setPoolIndex] = useState(POOLS[0].index);
   const pool = poolByIndex(poolIndex)!;
   const [poolMenu, setPoolMenu] = useState(false);
 
-  const { data: state } = useReadContract({ address: CORE.conditionalOrders, abi: conditionalOrdersAbi, functionName: "poolState", args: [poolIndex] });
+  const { data: state } = useReadContract({ address: CORE.rules, abi: rulesAbi, functionName: "poolState", args: [poolIndex] });
   const tick = state ? Number(state[1]) : undefined;
   const sp = state ? sqrtFromX96(state[0]) : undefined;
   const price = tick !== undefined ? priceAtTick(pool, tick) : 0;
@@ -99,12 +98,15 @@ export default function AddLiquidity() {
     calc &&
     ((balBase !== undefined && BigInt(Math.ceil(baseRaw)) > balBase) || (balQuote !== undefined && BigInt(Math.ceil(quoteRaw)) > balQuote));
 
-  // ---------------- rules (optional)
+  // ---------------- strategy (optional)
   const [rulesOn, setRulesOn] = useState(false);
   const [rules, setRules] = useState<Rules>(emptyRules());
   const [advanced, setAdvanced] = useState<Advanced>(DEFAULT_ADVANCED);
   const [editor, setEditor] = useState(false);
   const hasRules = !!rules.down.trigger || !!rules.up.trigger;
+  // the range can change after the strategy was set (a move coming back "into this range", say): check again
+  const ruleCheck = rulesOn && hasRules && calc ? validate(pool, rules, [tl, tu]) : null;
+  const ruleProblem = ruleCheck && !isValid(ruleCheck) ? allErrors(ruleCheck)[0] : null;
   useEffect(() => {
     setRules(emptyRules());
   }, [poolIndex]);
@@ -122,29 +124,13 @@ export default function AddLiquidity() {
       const liquidity = BigInt(Math.floor(calc.L * 0.9999));
       const value = pool.token0.native ? max0 : 0n;
       if (rulesOn && hasRules) {
-        const enc = encodeRules(pool, rules);
         await tx.ensureAllowance(pool.token0, CORE.conditionalOrders, max0);
         await tx.ensureAllowance(pool.token1, CORE.conditionalOrders, max1);
-        await tx.send("Add liquidity with rules", {
+        await tx.send("Add liquidity with a strategy", {
           address: CORE.conditionalOrders,
           abi: conditionalOrdersAbi as Abi,
           functionName: "createOrder",
-          args: [
-            {
-              key: pool.key,
-              tickLower: tl,
-              tickUpper: tu,
-              liquidity,
-              amount0Max: max0,
-              amount1Max: max1,
-              swapPoolIndex: 0,
-              expiry: Math.floor(Date.now() / 1000) + advanced.expiryDays * 86400,
-              maxKeeperFeeBps: advanced.keeperFeeBps,
-              maxSlippage: Math.max(1, Math.round(advanced.slippagePct * 10)),
-              lower: enc.lower,
-              upper: enc.upper,
-            },
-          ],
+          args: [createParams(pool, [tl, tu], { liquidity, amount0Max: max0, amount1Max: max1 }, advanced, rules)],
           value,
         });
       } else {
@@ -194,10 +180,12 @@ export default function AddLiquidity() {
       : short
         ? "Not enough balance"
         : rulesOn && !hasRules
-          ? "Add a rule, or turn rules off"
+          ? "Set a strategy, or turn it off"
           : rulesOn
-            ? "Add liquidity with rules"
+            ? "Add liquidity with this strategy"
             : "Add liquidity";
+  const broke = isConnected && balBase !== undefined && balQuote !== undefined && balBase === 0n && balQuote === 0n;
+  const drip = () => tx.run(() => tx.send("Get test tokens", { address: CORE.faucet, abi: faucetAbi as Abi, functionName: "drip", args: [] }), "Test tokens sent to your wallet");
 
   return (
     <div className="mx-auto flex max-w-[520px] flex-col gap-3 px-4 py-8">
@@ -218,7 +206,6 @@ export default function AddLiquidity() {
               {pool.base.symbol} / {pool.quote.symbol}
             </span>
             <span className="rounded bg-[var(--line2)] px-1.5 py-0.5 text-[11px] font-semibold">{pool.key.fee / 10_000}%</span>
-            {!pool.hooked && <span className="text-[11px] text-[var(--muted)]">no rules hook</span>}
             <ChevronDown className="ml-auto h-4 w-4 text-[var(--muted)]" />
           </button>
           <div className="mt-1.5 text-[12px] text-[var(--muted)]">
@@ -251,9 +238,63 @@ export default function AddLiquidity() {
           </div>
         </div>
 
+        {/* the strategy: the point of Alucard, so it comes before the deposit */}
+        <div className={`strat ${rulesOn && hasRules ? "on" : ""}`}>
+          <div className="flex items-start gap-3">
+            <span className="strat-ic">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[15px] font-semibold">Strategy</div>
+              {!(rulesOn && hasRules) && (
+                <div className="text-[13px] text-[var(--muted)]">Say what should happen while you are away, or pick it card by card. You can also add one later.</div>
+              )}
+              {rulesOn && hasRules && (
+                <div className="mt-1.5 flex flex-col gap-1">
+                  {(["down", "up"] as LaneId[]).map((lane) => {
+                    const text = describeLane(pool, lane, rules[lane], rules.plan);
+                    const back = rules.plan && has(rules[lane], "move") ? rules.plan.back[backLaneOf(lane)].trigger : null;
+                    return text ? (
+                      <div key={lane} className="text-[13px] text-[var(--ink2)]">
+                        <span className={`font-semibold ${lane === "up" ? "text-[var(--sage)]" : "text-[var(--rose)]"}`}>{laneTitle(pool, lane, rules[lane])}: </span>
+                        {text}
+                        {back && ` It comes back when ${describeTrigger(pool, backLaneOf(lane), back)}.`}
+                      </div>
+                    ) : null;
+                  })}
+                  {ruleProblem && <div className="text-[12px] text-[var(--amber)]">⚠ {ruleProblem}</div>}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className={`btn ${rulesOn && hasRules ? "btn-light" : "btn-dark"} !py-2`}
+              onClick={() => {
+                setRulesOn(true);
+                setEditor(true);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" /> {rulesOn && hasRules ? "Edit strategy" : "Build a strategy"}
+            </button>
+            {rulesOn && (
+              <button className="btn btn-light !py-2" onClick={() => setRulesOn(false)}>
+                Remove it
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* amounts */}
         <div className="flex flex-col gap-1.5">
-          <div className="label mb-0.5">Deposit</div>
+          <div className="mb-0.5 flex items-center justify-between">
+            <div className="label">Deposit</div>
+            {(broke || short) && (
+              <button className="flex items-center gap-1 text-[12px] font-medium text-[var(--ink)] underline-offset-2 hover:underline" onClick={drip} disabled={tx.state.busy}>
+                <Droplets className="h-3.5 w-3.5" /> Get test tokens
+              </button>
+            )}
+          </div>
           {needsBase ? (
             <TokenBox label={pool.base.symbol} token={pool.base} value={baseText} onChange={(t) => setTyped({ side: "base", text: t })} balance={num(balBase, pool.base.decimals)} />
           ) : (
@@ -266,48 +307,9 @@ export default function AddLiquidity() {
           )}
         </div>
 
-        {/* optional rules */}
-        <div className={`rounded-[12px] border p-3 ${rulesOn ? "border-[var(--ink)]" : "border-[var(--line)]"}`}>
-          <div className="flex items-center gap-3">
-            <Sparkles className="h-4 w-4 shrink-0" />
-            <div className="flex-1">
-              <div className="text-[14px] font-semibold">Automate with rules</div>
-              <div className="text-[12px] text-[var(--muted)]">Optional. Take profit, stop loss, follow the price, compound…</div>
-            </div>
-            <Toggle
-              value={rulesOn}
-              onChange={(on) => {
-                setRulesOn(on);
-                if (on && !hasRules) setEditor(true);
-              }}
-            />
-          </div>
-          {!pool.hooked && rulesOn && <div className="mt-2 text-[12px] text-[var(--amber)]">Rules need a pool that uses the rules hook. Pick another fee tier.</div>}
-          {rulesOn && pool.hooked && (
-            <div className="mt-3 flex flex-col gap-1.5 border-t border-[var(--line)] pt-3">
-              {hasRules ? (
-                (["down", "up"] as LaneId[]).map((lane) => {
-                  const text = describeLane(pool, lane, rules[lane]);
-                  return text ? (
-                    <div key={lane} className="text-[12px]">
-                      <span className={`font-semibold ${lane === "up" ? "text-[var(--sage)]" : "text-[var(--rose)]"}`}>{laneTitle(pool, lane, rules[lane])}: </span>
-                      {text}
-                    </div>
-                  ) : null;
-                })
-              ) : (
-                <div className="text-[12px] text-[var(--muted)]">No rules yet.</div>
-              )}
-              <button className="btn btn-light mt-1 self-start" onClick={() => setEditor(true)}>
-                <Pencil className="h-3.5 w-3.5" /> {hasRules ? "Edit rules" : "Open rule editor"}
-              </button>
-            </div>
-          )}
-        </div>
-
         <button
           className="btn btn-dark w-full !rounded-[14px] !py-3.5 !text-[15px]"
-          disabled={!isConnected || !calc || !!short || tx.state.busy || (rulesOn && (!hasRules || !pool.hooked))}
+          disabled={!isConnected || !calc || !!short || tx.state.busy || (rulesOn && (!hasRules || !!ruleProblem))}
           onClick={submit}
         >
           {tx.state.busy ? tx.state.message : buttonText}
@@ -332,21 +334,21 @@ export default function AddLiquidity() {
                 {p.base.symbol} / {p.quote.symbol}
               </span>
               <span className="rounded bg-[var(--line2)] px-1.5 py-0.5 text-[11px] font-semibold">{p.key.fee / 10_000}%</span>
-              {!p.hooked && <span className="ml-auto text-[11px] text-[var(--muted)]">no rules</span>}
             </>
           )}
         />
       )}
 
       {editor && (
-        <RuleEditor
+        <StrategyEditor
           pool={pool}
           price={price}
           rangeLabel={rangeLabel}
           amountsLabel={amountsLabel}
           initialRules={rules}
           initialAdvanced={advanced}
-          saveLabel="Use these rules"
+          ticks={[tl, tu]}
+          saveLabel="Use this strategy"
           range={full ? { full: true } : { loPct: (lo / price - 1) * 100, hiPct: (hi / price - 1) * 100 }}
           onClose={() => {
             setEditor(false);

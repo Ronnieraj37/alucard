@@ -17,18 +17,18 @@ contract Packer {
 /// wrapping.
 contract OrderStatePackingTest is Test {
     Packer packer = new Packer();
-    uint256 constant FIELDS = 19;
+    uint256 constant FIELDS = 18;
     uint32 constant MAX_TIME = uint32(OrderState.BASE_TIME + uint256(0xFFFFFF) * 60);
 
     // ---------------------------------------------------------------- helpers
 
-    /// Every field at its largest legal value. `hold` picks which memo field is used (armedAt or best).
+    /// Every field at its largest legal value (`hold` only changes holdMinutes, kept for the loop below).
     function _maxSide(bool negative, bool hold) internal pure returns (OrderState.Side memory d) {
         d.edge = negative ? TickMath.MIN_TICK : TickMath.MAX_TICK;
         d.checker = OrderState.MAX_CHECKER;
         d.value = negative ? type(int24).min : type(int24).max;
         d.checkPool = type(uint24).max;
-        d.actions = 15;
+        d.actions = OrderState.MAX_ACTIONS;
         d.removeBps = 10_000;
         d.swapToToken1 = true;
         d.addMode = 7;
@@ -40,12 +40,8 @@ contract OrderStatePackingTest is Test {
         d.checkPool2 = type(uint24).max;
         d.combine = 2;
         d.runsLeft = OrderState.MAX_RUNS;
-        if (hold) {
-            d.holdMinutes = type(uint16).max;
-            d.armedAt = MAX_TIME;
-        } else {
-            d.best = negative ? type(int24).min : type(int24).max;
-        }
+        d.holdMinutes = hold ? type(uint16).max : 1;
+        d.best = negative ? type(int24).min : type(int24).max;
     }
 
     function _h(uint256 seed, uint256 k) internal pure returns (uint256) {
@@ -63,8 +59,7 @@ contract OrderStatePackingTest is Test {
         }
     }
 
-    /// Set field `k` of `d` to a legal value derived from `seed`. Keeps the memo rule: armedAt only with a hold,
-    /// best only without.
+    /// Set field `k` of `d` to a legal value derived from `seed`.
     function _setField(OrderState.Side memory d, uint256 k, uint256 seed) internal pure {
         if (k == 0) {
             d.edge = int24(int256(seed % 1_774_545) - 887_272);
@@ -75,7 +70,7 @@ contract OrderStatePackingTest is Test {
         } else if (k == 3) {
             d.checkPool = uint24(seed);
         } else if (k == 4) {
-            d.actions = uint8(seed % 16);
+            d.actions = uint8(seed % (uint256(OrderState.MAX_ACTIONS) + 1));
         } else if (k == 5) {
             d.removeBps = uint16(seed % 10_001);
         } else if (k == 6) {
@@ -98,13 +93,9 @@ contract OrderStatePackingTest is Test {
             d.combine = uint8(seed % 3);
         } else if (k == 15) {
             d.holdMinutes = uint16(seed);
-            if (d.holdMinutes == 0) d.armedAt = 0;
-            else d.best = 0;
         } else if (k == 16) {
-            if (d.holdMinutes > 0) d.armedAt = seed % 3 == 0 ? 0 : _time(seed);
+            d.best = int24(uint24(seed));
         } else if (k == 17) {
-            if (d.holdMinutes == 0) d.best = int24(uint24(seed));
-        } else if (k == 18) {
             d.runsLeft = uint8(seed % (uint256(OrderState.MAX_RUNS) + 1));
         }
     }
@@ -144,12 +135,8 @@ contract OrderStatePackingTest is Test {
             if (k == 13) one.checkPool2 = full.checkPool2;
             if (k == 14) one.combine = full.combine;
             if (k == 15) one.holdMinutes = fullHold.holdMinutes;
-            if (k == 16) {
-                one.holdMinutes = 1; // armedAt is only kept with a hold
-                one.armedAt = fullHold.armedAt;
-            }
-            if (k == 17) one.best = full.best;
-            if (k == 18) one.runsLeft = full.runsLeft;
+            if (k == 16) one.best = full.best;
+            if (k == 17) one.runsLeft = full.runsLeft;
             assertEq(abi.encode(_roundTrip(one)), abi.encode(one));
         }
     }
@@ -167,8 +154,8 @@ contract OrderStatePackingTest is Test {
         d.combine = 2;
         d.holdMinutes = 0xBEEF;
         d.lastRun = uint32(OrderState.BASE_TIME + 0x654321 * 60);
-        d.armedAt = uint32(OrderState.BASE_TIME + 0x111111 * 60);
-        d.actions = 0xF;
+        d.best = 0x111111;
+        d.actions = 0x1F;
         d.removeBps = 10_000;
         d.swapToToken1 = true;
         d.addMode = 5;
@@ -186,8 +173,8 @@ contract OrderStatePackingTest is Test {
         assertEq((w >> 132) & 0x3, 2, "combine 132-133");
         assertEq((w >> 134) & 0xFFFF, 0xBEEF, "holdMinutes 134-149");
         assertEq((w >> 150) & 0xFFFFFF, 0x654321, "lastRun 150-173");
-        assertEq((w >> 174) & 0xFFFFFF, 0x111111, "memo 174-197");
-        assertEq((w >> 198) & 0xFF, 0xF, "actions 198-205");
+        assertEq((w >> 174) & 0xFFFFFF, 0x111111, "best 174-197");
+        assertEq((w >> 198) & 0xFF, 0x1F, "actions 198-205");
         assertEq((w >> 206) & 0x3FFF, 10_000, "removeBps 206-219");
         assertEq((w >> 220) & 1, 1, "swapToToken1 220");
         assertEq((w >> 221) & 0x7, 5, "addMode 221-223");
@@ -197,14 +184,15 @@ contract OrderStatePackingTest is Test {
         assertEq(w >> 254, 0, "spare 254-255");
     }
 
-    /// Without a hold, the memo holds the trailing best tick (signed).
-    function test_memoHoldsBestWithoutHold() public pure {
+    /// The trailing best tick is signed and kept together with a hold.
+    function test_bestIsSignedAndKeptWithAHold() public pure {
         OrderState.Side memory d;
         d.best = -887_000;
+        d.holdMinutes = 30;
         uint256 w = OrderState.encodeSide(d);
         assertEq((w >> 174) & 0xFFFFFF, uint256(uint24(int24(-887_000))));
         assertEq(OrderState.decodeSide(w).best, -887_000);
-        assertEq(OrderState.decodeSide(w).armedAt, 0);
+        assertEq(OrderState.decodeSide(w).holdMinutes, 30);
     }
 
     // ---------------------------------------------------------------- fuzz
@@ -237,7 +225,7 @@ contract OrderStatePackingTest is Test {
         packer.encode(d);
 
         d.checker2 = 0;
-        d.actions = 16;
+        d.actions = OrderState.MAX_ACTIONS + 1;
         vm.expectRevert(OrderState.FieldTooLarge.selector);
         packer.encode(d);
 
@@ -276,32 +264,13 @@ contract OrderStatePackingTest is Test {
         packer.encode(d);
     }
 
-    /// The memo holds one thing: armedAt with a hold, the trailing best tick without. Both at once is refused.
-    function test_memoConflictReverts() public {
-        OrderState.Side memory d;
-        d.holdMinutes = 5;
-        d.best = 1;
-        vm.expectRevert(OrderState.MemoConflict.selector);
-        packer.encode(d);
-
-        d.holdMinutes = 0;
-        d.best = 0;
-        d.armedAt = uint32(OrderState.BASE_TIME + 60);
-        vm.expectRevert(OrderState.MemoConflict.selector);
-        packer.encode(d);
-    }
-
     /// Times are stored in minutes rounded up: never earlier than the real time, at most 59 s later.
     function testFuzz_timesNeverEarly(uint32 t) public pure {
         t = uint32(bound(t, OrderState.BASE_TIME + 1, MAX_TIME));
         OrderState.Side memory d;
         d.lastRun = t;
-        d.holdMinutes = 1;
-        d.armedAt = t;
         OrderState.Side memory back = _roundTrip(d);
         assertGe(back.lastRun, t);
         assertLt(back.lastRun, uint256(t) + 60);
-        assertGe(back.armedAt, t);
-        assertLt(back.armedAt, uint256(t) + 60);
     }
 }

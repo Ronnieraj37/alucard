@@ -1,7 +1,9 @@
 """Vercel Python function: GET /api/backtest?q=<base64url JSON>  (POST with a JSON body works too).
 
-Request JSON: {pool ("eth_usdc_030" | "eth_usdc_005" | "sepolia:<pool index>"), start?, days, depositUsd, range: {loPct, hiPct} | {full: true}, rules: {down, up},
-               keeperFeeBps, slippagePct, delaySec, keeperCostUsd, keeperMode, mode?: "single" | "windows"}
+Request JSON: {pool ("eth_usdc_030" | "eth_usdc_005" | "sepolia:<pool index>"), start?, days, depositUsd, range: {loPct, hiPct} | {full: true},
+               order: {lower, upper, home, away: {kind, a, b, shared}, awayLower, awayUpper} (the words createOrder would get,
+               as decimal strings), refTick, otherRefTick?, homeIndex, baseIs0,
+               keeperFeeBps, slippagePct, delaySec, mode?: "single" | "windows"}
 The recorded history never changes, so a GET answer is cached by Vercel's CDN: the same backtest is computed once.
 Our Sepolia pools ("sepolia:<index>") are built from the chain at request time (Chainlink rounds, see _chain.py) and
 cached for an hour.

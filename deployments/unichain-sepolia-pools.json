@@ -1,0 +1,74 @@
+{
+  "DAI_USDC_100": {
+    "currency0": "0x018b59D2b831955371320812693D54e51E563223",
+    "currency1": "0xE6548fDD1a8eEe78012d0E3e8A1e0ACb7788AC40",
+    "fee": 100,
+    "hooks": "0x8B7f7798eE5d9Af14529eB964A1e912b670890C0",
+    "poolId": "0xcff4cb9f05385daf3ef30ba26685737628ed40179ad4d51a64438284505d50ee",
+    "poolIndex": 6,
+    "tickSpacing": 1
+  },
+  "ETH_USDC_3000": {
+    "currency0": "0x0000000000000000000000000000000000000000",
+    "currency1": "0xE6548fDD1a8eEe78012d0E3e8A1e0ACb7788AC40",
+    "fee": 3000,
+    "hooks": "0x8B7f7798eE5d9Af14529eB964A1e912b670890C0",
+    "poolId": "0x1d7d4641e8d93e3d887304c14b3e119a3275da5736fd67ec386feb2d757e3bff",
+    "poolIndex": 8,
+    "tickSpacing": 60
+  },
+  "LINK_WETH_10000": {
+    "currency0": "0x196d4119944CD005AD917466B8e2e2Ec018FA547",
+    "currency1": "0xA10746e38636d122eE47F9fC5330ca7b0DbE78D2",
+    "fee": 10000,
+    "hooks": "0x8B7f7798eE5d9Af14529eB964A1e912b670890C0",
+    "poolId": "0x1652facd124dba2762f3a38faec23c357b2c1f4aa6156c94556719dda6746fc8",
+    "poolIndex": 5,
+    "tickSpacing": 200
+  },
+  "USDC_USDT_100": {
+    "currency0": "0xae24032c24438f3fd689C9b76d704fe036C88F5f",
+    "currency1": "0xE6548fDD1a8eEe78012d0E3e8A1e0ACb7788AC40",
+    "fee": 100,
+    "hooks": "0x8B7f7798eE5d9Af14529eB964A1e912b670890C0",
+    "poolId": "0xb7d7f475f320a44aa9b59d23ee315461e88cba3544c55e7b11d48f5173e43709",
+    "poolIndex": 4,
+    "tickSpacing": 1
+  },
+  "WBTC_USDC_3000": {
+    "currency0": "0xb62D0cDd1ac95b4C443674c5DE4CcB60838CF0C6",
+    "currency1": "0xE6548fDD1a8eEe78012d0E3e8A1e0ACb7788AC40",
+    "fee": 3000,
+    "hooks": "0x8B7f7798eE5d9Af14529eB964A1e912b670890C0",
+    "poolId": "0x0e469681e8955df2a1575ab801d9c2dfe9115d4ff28c88621fa4666d7bb8549d",
+    "poolIndex": 2,
+    "tickSpacing": 60
+  },
+  "WETH_USDC_3000": {
+    "currency0": "0x196d4119944CD005AD917466B8e2e2Ec018FA547",
+    "currency1": "0xE6548fDD1a8eEe78012d0E3e8A1e0ACb7788AC40",
+    "fee": 3000,
+    "hooks": "0x8B7f7798eE5d9Af14529eB964A1e912b670890C0",
+    "poolId": "0xbc779bf07b5599ae3be691e4ef7466a5351d91b1ca32c2bd1e030b020a38e73b",
+    "poolIndex": 1,
+    "tickSpacing": 60
+  },
+  "WETH_USDC_500_NOHOOK": {
+    "currency0": "0x196d4119944CD005AD917466B8e2e2Ec018FA547",
+    "currency1": "0xE6548fDD1a8eEe78012d0E3e8A1e0ACb7788AC40",
+    "fee": 500,
+    "hooks": "0x0000000000000000000000000000000000000000",
+    "poolId": "0x4061072b217b920e64959b0eb26394c71cc72726059678a3f2f6f3add0463fc6",
+    "poolIndex": 7,
+    "tickSpacing": 10
+  },
+  "WETH_WBTC_500": {
+    "currency0": "0x196d4119944CD005AD917466B8e2e2Ec018FA547",
+    "currency1": "0xb62D0cDd1ac95b4C443674c5DE4CcB60838CF0C6",
+    "fee": 500,
+    "hooks": "0x8B7f7798eE5d9Af14529eB964A1e912b670890C0",
+    "poolId": "0x3685ac37d302069876315573b6bc923a3acf7f4cbcb03afe4253574e0ee10047",
+    "poolIndex": 3,
+    "tickSpacing": 10
+  }
+}

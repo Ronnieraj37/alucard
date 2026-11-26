@@ -5,7 +5,8 @@
 | Frontend (`frontend/`) | Vercel, Hobby plan | free |
 | Backtest API (`frontend/api/backtest.py`) | the same Vercel project (Python function) | free |
 | Keeper bot (`frontend/scripts/keeper.ts`) | GitHub Actions schedule (`.github/workflows/keeper.yml`) | free (public repo; private: 2,000 min/month) |
-| Contracts | on Sepolia (`deployments/`): ConditionalOrders `0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63`, PriceFeeds `0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e` | Sepolia gas only |
+| Arbitrage bot (`frontend/scripts/arb.ts`) | your machine (`npx tsx scripts/arb.ts --keep` also runs the keeper) | test tokens and Sepolia gas |
+| Contracts | on Sepolia and Unichain Sepolia (`deployments/`); steps in section 5 | testnet gas only |
 
 Keys live only in git-ignored files (`.env`, `frontend/.env.local`) or in the hosts' secret settings.
 
@@ -26,7 +27,7 @@ backtest needs it.
    (`requirements.txt` installs numpy; `vercel.json` bundles `api/_data` and allows 60 s per request).
 5. Check after the first deploy:
    - `https://<your-app>.vercel.app/api/backtest` answers `{"ok":true,"pools":[...]}`
-   - Pool, New position, turn on rules, pick a template, **Backtest**: results appear in about a second.
+   - Pool, New position, turn on "Add a strategy", pick a template, **Backtest**: results appear in about a second.
 6. In the Alchemy dashboard, restrict the key to your Vercel domain (it is visible in the browser).
 
 Every push to the main branch redeploys. After a new contract deployment: `cd frontend && npm run sync`, commit, push.
@@ -44,17 +45,35 @@ Off until you switch it on.
 
 Try it locally without sending anything: `cd frontend && DRY_RUN=1 npx tsx scripts/keeper.ts`
 
-## 3. Verify the contracts on Etherscan (optional)
+## 3. Arbitrage on the test pools
+
+A strategy step runs only while its pool is within `PriceFeeds.maxDeviationTicks` (200, ~2%) of Chainlink. On mainnet
+arbitrageurs keep pools there; on Sepolia nobody does, so run the bot on your machine:
+
+```bash
+cd frontend
+PRIVATE_KEY=0x... npx tsx scripts/arb.ts --keep          # every 60 s: pools onto Chainlink, then the keeper
+PRIVATE_KEY=0x... npx tsx scripts/arb.ts --once          # one round
+```
+
+It trades with the deployer's test tokens (the faucet gives more). `scripts/demo-orders.ts` adds a few example strategies
+in tight ranges, so real ETH moves trigger them while the bot runs.
+
+## 4. Verify the contracts on Etherscan (optional)
 
 ```bash
 set -a; source .env; set +a
 PM=0xE03A1074c86CFeDd5C142C4F04F1a1536e203543
-forge verify-contract --chain sepolia --watch 0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0 src/RuleHook.sol:RuleHook \
+FEEDS=0xC539EE58250B88F2ECAb86682c06ce4cD6592a1b; HOOK=0x0482555fd63636Baa88bF1eA7d0e48e3F2Cb50C0
+RULES=0x59AC15D97080BF47be608750d82bB9528e57996E; ORDERS=0xa653D69C934B431431C11e55a59bbf69e524Db3c
+forge verify-contract --chain sepolia --watch $FEEDS src/PriceFeeds.sol:PriceFeeds \
+  --constructor-args $(cast abi-encode "constructor(address)" $(cast wallet address --private-key $PRIVATE_KEY))
+forge verify-contract --chain sepolia --watch $HOOK src/RuleHook.sol:RuleHook \
   --constructor-args $(cast abi-encode "constructor(address)" $PM)
-forge verify-contract --chain sepolia --watch 0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e src/PriceFeeds.sol:PriceFeeds \
-  --constructor-args $(cast abi-encode "constructor(address)" 0x02847D22C33f5F060Bd27e69F1a413AD44cab213)
-forge verify-contract --chain sepolia --watch 0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63 src/ConditionalOrders.sol:ConditionalOrders \
-  --constructor-args $(cast abi-encode "constructor(address,address,address)" $PM 0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0 0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e)
+forge verify-contract --chain sepolia --watch $RULES src/Rules.sol:Rules \
+  --constructor-args $(cast abi-encode "constructor(address,address,address)" $PM $HOOK $FEEDS)
+forge verify-contract --chain sepolia --watch $ORDERS src/ConditionalOrders.sol:ConditionalOrders \
+  --constructor-args $(cast abi-encode "constructor(address,address)" $PM $RULES)
 ```
 
 ## Local development
@@ -76,62 +95,73 @@ npm run dev           # terminal 2: app on localhost:3000 (forwards /api/backtes
   Checks: `cd frontend && .venv/bin/python -I api/test_chain_history.py`.
 - **Mainnet data**: every swap of mainnet ETH/USDC 0.30% (96k) and 0.05% (1M), 2026-04-05 to 2026-10-03, exported from
   the separate `lp_study` research code by `export_backtest.py` into `frontend/api/_data/*.npz`.
-- **Engine**: `frontend/api/_engine.py` (numpy only) runs the rules the way `ConditionalOrders.sol` does: conditions,
-  keeper delay, remove, keeper reserve, kept or paid-out fees, swap with slippage limit, re-add or follow, repeat,
-  close, and the WouldRefire refusal. Fees use lp_study's validated swap replay.
-- **Checks**: in `lp_study`, `.venv/bin/python -m pytest tests/test_rules_backtest.py` (46 tests: fees equal
-  lp_sim's replay to 1e-9, exits at the swap the contract implies, encoding equal to the frontend's for both token
-  orders, repeats, value conserved, fee share never above the whole fee).
+- **Engine**: `frontend/api/_engine.py` (numpy only) decodes the exact words `createOrder` would get and runs them the
+  way `ConditionalOrders.sol` does: conditions on the pool's price, holds, keeper delay, remove, keeper
+  reserve, kept or paid-out fees, swap with slippage limit, re-add or follow, moves and the way back, repeat, close.
+  Fees use lp_study's validated swap replay.
+- **Checks**: `forge test --match-contract EditorParity` (the engine runs 2,000 random orders exactly where the contract
+  does) and `frontend/api/test_chain_history.py`.
 - **Newer dates**: rerun `lp_study/fetch.py` for a new window, then `export_backtest.py`, commit, push.
 - **Caching**: requests are GETs. Mainnet history never changes: a one-year CDN cache. Our pools: one hour.
 
-## 4. Redeploying ConditionalOrders with the token list (Chainlink feeds)
+## 5. Deploying the contracts
 
-RuleHook did not change, so keep it, its pools and its limit orders. `script/sepolia/06_DeployOrders.s.sol` deploys:
+A full deploy is a new token list, a new hook (pools belong to a hook, so new pools), `Rules` and `ConditionalOrders`. The
+test tokens and the faucet stay. Every contract is under the 24,576-byte limit, so the same scripts work on Unichain.
 
-- `PriceFeeds`, the token list. The deployer owns it. It lists native ETH and the six test tokens with Chainlink's
-  Sepolia USD feeds (addresses from docs.chain.link/data-feeds/price-feeds/addresses, Ethereum Sepolia):
+| Script | Deploys |
+|---|---|
+| `script/sepolia/02_DeployCore.s.sol` | `PriceFeeds` (lists ETH and the six test tokens on Chainlink's Sepolia feeds; USDT gets a fixed $1 mock, reused if one exists; band 200 ticks), `RuleHook` at a mined address, `Rules`, `ConditionalOrders`. Writes `deployments/sepolia-core.json` |
+| `script/sepolia/03_CreatePools.s.sol` | the pools at today's Chainlink prices with the deployer's liquidity, each registered in `Rules`; an existing hookless pool is reused. Writes `deployments/sepolia-pools.json` |
 
-  | Token | Feed | Address | Heartbeat |
-  |---|---|---|---|
-  | ETH, tWETH | ETH / USD | `0x694AA1769357215DE4FAC081bf1f309aDC325306` | 1 h |
-  | tWBTC | BTC / USD | `0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43` | 1 h |
-  | tLINK | LINK / USD | `0xc59E3633BAAC79493d908e63626716e204A45EdF` | 1 h |
-  | tUSDC | USDC / USD | `0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E` | 24 h |
-  | tDAI | DAI / USD | `0x14866185B1962B63C3Ea9E03Bc1da838bab34C19` | 24 h |
-  | tUSDT | none on Sepolia | a `MockAggregator` fixed at $1, deployed by the script | - |
+Chainlink feeds used (Ethereum Sepolia): ETH / USD `0x694AA1769357215DE4FAC081bf1f309aDC325306`, BTC / USD
+`0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43`, LINK / USD `0xc59E3633BAAC79493d908e63626716e204A45EdF` (1 h heartbeat);
+USDC / USD `0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E`, DAI / USD `0x14866185B1962B63C3Ea9E03Bc1da838bab34C19` (24 h).
 
-- a new `ConditionalOrders` that points at the existing hook and at `PriceFeeds`.
-
-Orders in the old ConditionalOrders keep working there; their owners can still cancel them.
-
-1. Rehearse on a local fork first (nothing is sent to Sepolia):
+1. Rehearse on a local fork (nothing is sent to Sepolia; the real `deployments/` files are not touched):
    ```bash
    set -a; source .env; set +a
-   anvil --fork-url $SEPOLIA_RPC --port 8546 --code-size-limit 65536
-   # in another terminal: back up deployments/sepolia-core.json, then
-   forge script script/sepolia/06_DeployOrders.s.sol --rpc-url http://127.0.0.1:8546 --broadcast \
-     --private-key <an anvil test key> --code-size-limit 65536
-   cd frontend && npm run sync && RPC_URL=http://127.0.0.1:8546 PRIVATE_KEY=<the same test key> npx tsx scripts/e2e-fork.ts
-   # (a fork left running for hours makes its frozen Chainlink prices look old: start a fresh one)
-   # restore deployments/sepolia-core.json afterwards and run npm run sync again
+   anvil --fork-url $SEPOLIA_RPC --port 8546        # terminal 1
+   script/sepolia/rehearse-fork.sh                  # terminal 2
    ```
-2. Real deploy. ConditionalOrders is about 35 KB: over the 24 KB limit of Unichain and Ethereum mainnet, so this
-   works on Sepolia only until the contract is split.
+   It deploys into `deployments/fork/`, gives every token a mock Chainlink feed (`ForkMarket.s.sol`, through the
+   2-day timelock), points the frontend at the fork, then runs `check-rules` (every template against the contract) and
+   `e2e-fork` (the market moves, `arb.ts` follows, the keeper runs: pushes alone fire nothing, holds wait, moves go
+   out and come back). To click through the app against the fork: `NEXT_PUBLIC_RPC_URL=http://127.0.0.1:8546
+   NEXT_PUBLIC_LOGS_RPC_URL=http://127.0.0.1:8546 NEXT_DIST_DIR=.next-fork npx next dev -p 3107`.
+2. Real deploy (Sepolia charges far more gas for contract code than forge estimates locally, hence the multiplier):
    ```bash
-   forge script script/sepolia/06_DeployOrders.s.sol --rpc-url $SEPOLIA_RPC --broadcast --private-key $PRIVATE_KEY \
-     --code-size-limit 65536 --gas-estimate-multiplier 1000
+   forge script script/sepolia/02_DeployCore.s.sol --rpc-url $SEPOLIA_RPC --broadcast --private-key $PRIVATE_KEY --gas-estimate-multiplier 1000
+   forge script script/sepolia/03_CreatePools.s.sol --rpc-url $SEPOLIA_RPC --broadcast --private-key $PRIVATE_KEY --gas-estimate-multiplier 1000
    ```
-   Sepolia charges far more gas for contract code than forge's local estimate assumes, hence the multiplier: the
-   node estimates about 55 million gas for ConditionalOrders (the block limit there is 200 million; the earlier 21 KB
-   version used 33 million). After it, remove the fork rehearsal's `broadcast/06_DeployOrders.s.sol` log if one is
-   left over, so only the real run is kept.
-   The script rewrites `deployments/sepolia-core.json` (`conditionalOrders`, `priceFeeds`, `usdtMockFeed`).
-3. `cd frontend && npm run sync`, commit, push.
+3. `cd frontend && npm run sync` (back to the real `deployments/`; it writes every chain it finds), then
+   `CHAIN=sepolia APPROVE=1 npx tsx scripts/check-rules.ts` (the deployer approves the new vault, every template is
+   dry-run against it) and `npx tsx scripts/arb.ts --once` so every pool
+   (an older hookless one too) starts on Chainlink. Commit, push.
 
-Done on 2026-11-19 (ConditionalOrders `0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63`, PriceFeeds
-`0x2bCb85a1EACB0DDb564A7b5481BbdB290933715e`, USDT mock feed `0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4`); the frontend is synced.
+### Unichain Sepolia
 
-Admin calls on `PriceFeeds` afterwards (owner only): `setFeed(token, aggregator, maxAge)` to list a token,
-`removeFeed(token)` to take one off (open orders keep running), `setMinOrderUsd(usd with 18 decimals)` for the
-smallest order, `transferOwnership` then `acceptOwnership` to hand the list over.
+The same scripts (they pick files and Chainlink feeds by chain id: `script/sepolia/Net.sol`). Your Sepolia Alchemy URL
+works there with the network swapped. Gas is a fraction of a cent, so no multiplier is needed:
+
+```bash
+set -a; source .env; set +a
+U=${SEPOLIA_RPC/eth-sepolia/unichain-sepolia}
+for s in 01_DeployTokens 05_DeployFaucet 02_DeployCore 03_CreatePools; do
+  forge script script/sepolia/$s.s.sol --rpc-url $U --broadcast --private-key $PRIVATE_KEY
+done
+cd frontend && npm run sync
+CHAIN=unichain APPROVE=1 npx tsx scripts/check-rules.ts && CHAIN=unichain npx tsx scripts/arb.ts --once
+```
+
+01 and 05 only once per chain (tokens and faucet are reused). On Vercel, `NEXT_PUBLIC_UNICHAIN_RPC_URL` is optional: by
+default the app uses the Sepolia Alchemy URL with the network swapped (allow both networks for the key in Alchemy).
+
+Admin calls on `PriceFeeds` (owner only): `setFeed(token, aggregator, maxAge)` lists a new token at once; changing or
+removing a listed one is announced with `queueFeed(token, aggregator, maxAge)` (aggregator 0 removes) and applied with
+`setFeed` two days later. `setMaxDeviationTicks(ticks)` sets how far a pool's price may be from Chainlink for steps to run
+(200 ≈ 2%; 0 turns the check off and is for tests only); `transferOwnership` then `acceptOwnership` hands the list over.
+
+Earlier deployments, still on Sepolia (their orders can be cancelled there): ConditionalOrders
+`0x6CD66E4c91635E2C7705fa2CE61Ac6df24cb12d3` (before the 2026-11-27 review fixes), `0xfCde70E4Ec35C79CD025306ff26AE1dEfFe72408` (average-price version), `0x05c6f35e2F12eFc54F26b26CE16A6226Ac74B6bC`; v1
+ConditionalOrders `0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63` (RuleHook `0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0`).

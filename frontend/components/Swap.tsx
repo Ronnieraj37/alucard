@@ -1,13 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { CHAIN_ID, CHAINS } from "@/lib/chain";
 import { ArrowDown, Info } from "lucide-react";
 import { useMemo, useState } from "react";
 import { type Abi } from "viem";
 import { useAccount, usePublicClient, useReadContract } from "wagmi";
 import { Menu, TokenBox, TokenIcon, TokenPill, TxLine } from "@/components/ui";
 import { QUOTER, quoterAbi } from "@/lib/abis-extra";
-import { conditionalOrdersAbi, routerAbi, ruleHookAbi } from "@/lib/generated/abis";
+import { conditionalOrdersAbi, routerAbi, ruleHookAbi, rulesAbi } from "@/lib/generated/abis";
 import { CORE, POOLS, type Pool, type Token, TOKENS, fmt, priceAtTick, toRaw } from "@/lib/pools";
 import { useTokenBalance, useTx } from "@/lib/tx";
 import { getLogsSinceDeploy } from "@/lib/logs";
@@ -125,11 +126,11 @@ function MarketSwap() {
           <div className="flex items-center justify-between gap-2">
             <span>Route</span>
             {quote.data!.length > 1 ? (
-              <select className="rounded border border-[var(--line)] bg-white px-1 py-0.5 text-right text-[12px] text-[var(--ink)]" value={chosen.pool.index} onChange={(e) => setRoute(Number(e.target.value))}>
+              <select className="rounded border border-[var(--line)] bg-[var(--white)] px-1 py-0.5 text-right text-[12px] text-[var(--ink)]" value={chosen.pool.index} onChange={(e) => setRoute(Number(e.target.value))}>
                 {quote.data!.map((x, i) => (
                   <option key={x.pool.index} value={x.pool.index}>
                     {x.pool.label}
-                    {x.pool.hooked ? " · rules hook" : ""}
+                    {x.pool.hooked ? " · limit orders" : ""}
                     {i === 0 ? " · best price" : ""}
                   </option>
                 ))}
@@ -169,7 +170,7 @@ function MarketSwap() {
             <>
               <TokenIcon symbol={t.symbol} size={28} />
               <span className="font-semibold">{t.symbol}</span>
-              <span className="text-[12px] text-[var(--muted)]">{t.native ? "Sepolia ETH" : `Test ${t.symbol}`}</span>
+              <span className="text-[12px] text-[var(--muted)]">{t.native ? `${CHAINS[CHAIN_ID].short} ETH` : `Test ${t.symbol}`}</span>
             </>
           )}
         />
@@ -194,7 +195,7 @@ function LimitOrder() {
   const bal = useTokenBalance(sell);
   const tx = useTx();
 
-  const { data: state } = useReadContract({ address: CORE.conditionalOrders, abi: conditionalOrdersAbi, functionName: "poolState", args: [poolIndex] });
+  const { data: state } = useReadContract({ address: CORE.rules, abi: rulesAbi, functionName: "poolState", args: [poolIndex] });
   const tick = state ? Number(state[1]) : undefined;
   // price of what you sell, in what you get
   const market = tick === undefined ? 0 : sellBase ? priceAtTick(pool, tick) : 1 / priceAtTick(pool, tick);

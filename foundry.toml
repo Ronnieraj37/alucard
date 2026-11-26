@@ -5,7 +5,8 @@ ffi = true
 fs_permissions = [{access = "read-write", path = ".forge-snapshots/"}, {access = "read-write", path = "./deployments"}]
 libs = ["lib"]
 optimizer = true
-optimizer_runs = 200
+# Lowest runs: the contracts must stay under the 24,576-byte limit (EIP-170) to deploy on mainnet chains.
+optimizer_runs = 1
 out = "out"
 solc_version = "0.8.30"
 src = "src"
