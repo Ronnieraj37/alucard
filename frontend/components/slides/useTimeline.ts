@@ -14,6 +14,7 @@ export function useTimeline(duration: number, opts: { delay?: number; loop?: boo
   const [playing, setPlaying] = useState(false);
   const pRef = useRef(0);
   const raf = useRef(0);
+  const finished = useRef(false);
 
   const stop = useCallback(() => {
     cancelAnimationFrame(raf.current);
@@ -25,11 +26,18 @@ export function useTimeline(duration: number, opts: { delay?: number; loop?: boo
       cancelAnimationFrame(raf.current);
       if (reduced()) {
         pRef.current = rest;
+        finished.current = !loop;
         setP(rest);
         return;
       }
+      // play(0) is the automatic start. Once a one-shot timeline has finished, ignore it.
+      if (!loop && finished.current && from === 0) return;
+      if (!loop && pRef.current >= 1 && from === undefined) {
+        finished.current = false;
+        pRef.current = 0;
+        from = 0;
+      }
       let start = performance.now() - (from ?? pRef.current) * duration;
-      if (pRef.current >= 1 && from === undefined) start = performance.now();
       setPlaying(true);
       const step = (now: number) => {
         let v = (now - start) / duration;
@@ -39,6 +47,7 @@ export function useTimeline(duration: number, opts: { delay?: number; loop?: boo
             v = 0;
           } else {
             v = 1;
+            finished.current = true;
           }
         }
         pRef.current = v;
@@ -61,7 +70,7 @@ export function useTimeline(duration: number, opts: { delay?: number; loop?: boo
   );
 
   useEffect(() => {
-    if (!autoplay) return;
+    if (!autoplay || finished.current) return;
     const id = setTimeout(() => play(0), reduced() ? 0 : delay);
     return () => {
       clearTimeout(id);

@@ -335,7 +335,7 @@ function Side({ name, lines }: { name: string; lines: StLine[] }) {
 }
 
 function Build() {
-  const clock = useTimeline(56000, { loop: false, delay: 700, rest: 1 });
+  const clock = useTimeline(32000, { loop: false, delay: 400, rest: 1 });
   const { p } = clock;
   const down = ST_LINES.filter((l) => l.side === "down" && p >= l.at);
   const up = ST_LINES.filter((l) => l.side === "up" && p >= l.at);
@@ -405,7 +405,7 @@ const gdPath = (f: (t: number) => number, upTo: number) => {
 };
 
 function Guard() {
-  const clock = useTimeline(36000, { loop: false, delay: 700, rest: 1 });
+  const clock = useTimeline(20600, { loop: false, delay: 400, rest: 1 });
   const { p } = clock;
   const q = gdQ(p);
   const c = gdC(p);
