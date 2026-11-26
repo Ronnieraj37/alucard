@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReadContract } from "wagmi";
+import Assistant from "@/components/Assistant";
 import Backtest, { type BacktestRange } from "@/components/Backtest";
 import { Field, Suffix } from "@/components/ui";
 import { rulesAbi } from "@/lib/generated/abis";
@@ -299,7 +300,7 @@ export default function StrategyEditor(p: StrategyEditorProps) {
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-[var(--paper)]">
       {/* top bar */}
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[var(--line)] bg-white px-3 sm:gap-3 sm:px-4">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[var(--line)] bg-[var(--white)] px-3 sm:gap-3 sm:px-4">
         <button className="btn btn-light !px-2.5" onClick={p.onClose} aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
           <span className="hidden sm:inline">Back</span>
@@ -352,17 +353,20 @@ export default function StrategyEditor(p: StrategyEditorProps) {
             ))}
           </select>
 
-          {empty && !moved && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[13px] text-[var(--muted)]">Or start from an example</span>
-              {TEMPLATES.filter((t) => templateFor(t.id))
-                .slice(0, 5)
-                .map((t) => (
-                  <button key={t.id} className="chip" onClick={() => applyTemplate(t.id)} title={t.hint}>
-                    {t.name}
-                  </button>
-                ))}
-            </div>
+          {!planLocked && (
+            <Assistant
+              pool={pool}
+              price={price}
+              ticks={p.ticks}
+              rules={rules}
+              onApply={(r) => {
+                setRules(r);
+                setTemplate("");
+                setOpen(null);
+                setAdding(null);
+              }}
+              onBacktest={p.range ? () => setBacktest(true) : undefined}
+            />
           )}
           <div className="grid items-start gap-x-6 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_340px]">
           {(["down", "up"] as LaneId[]).map((lane) => (
@@ -651,7 +655,7 @@ function Column(c: ColumnProps) {
         <div className="relative mt-2">
           <button
             className={`flex w-full items-center gap-3 rounded-[var(--r-lg)] border border-dashed px-3 py-3 text-left text-[13px] transition-colors ${
-              c.adding ? "border-[var(--ink)] bg-white text-[var(--ink)]" : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--ink)] hover:text-[var(--ink)]"
+              c.adding ? "border-[var(--glow)] bg-[var(--white)] text-[var(--ink)]" : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--glow)] hover:text-[var(--ink)]"
             }`}
             onClick={() => c.setAdding(c.adding ? null : { lane })}
             aria-expanded={!!c.adding}
@@ -700,12 +704,12 @@ function Card({
   useEffect(() => {
     if (open) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [open]);
-  const iconCls = tone === "when" ? "bg-[var(--ink)] text-white" : tone === "move" ? "bg-[var(--blue-lt)] text-[var(--blue)]" : "bg-[var(--line2)] text-[var(--ink)]";
+  const iconCls = tone === "when" ? "bg-[var(--accent)] text-white" : tone === "move" ? "bg-[var(--blue-lt)] text-[var(--blue)]" : "bg-[var(--line2)] text-[var(--ink)]";
   return (
     <li
       ref={ref}
-      className={`relative overflow-hidden rounded-[var(--r-lg)] border bg-white transition-[border-color,box-shadow] duration-200 ${
-        open ? "border-[var(--ink)] shadow-[0_8px_24px_-12px_rgba(27,29,34,0.25)]" : tone === "move" ? "border-[var(--blue)]/25 hover:border-[var(--blue)]/60" : "border-[var(--line)] hover:border-[var(--muted2)]"
+      className={`relative overflow-hidden rounded-[var(--r-lg)] border bg-[var(--white)] transition-[border-color,box-shadow] duration-200 ${
+        open ? "border-[var(--glow)] shadow-[0_8px_24px_-12px_rgba(139,108,255,0.45)]" : tone === "move" ? "border-[var(--blue)]/25 hover:border-[var(--blue)]/60" : "border-[var(--line)] hover:border-[var(--muted2)]"
       }`}
     >
       <button className="flex w-full items-center gap-3 px-3 py-2.5 text-left" onClick={onToggle} aria-expanded={open}>
@@ -718,7 +722,7 @@ function Card({
           {sub && <span className="block truncate text-[12px] text-[var(--muted)]">{sub}</span>}
         </span>
         {warn && (
-          <span title={warn} className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--amber)] text-white">
+          <span title={warn} className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--amber)] text-[var(--paper)]">
             <AlertTriangle className="h-3 w-3" />
           </span>
         )}
@@ -786,7 +790,7 @@ function AddMenu(c: ColumnProps & { second: boolean; onClose: () => void }) {
   return (
     <div
       ref={ref}
-      className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-[60vh] origin-top animate-[menu-in_140ms_ease-out] overflow-y-auto rounded-[var(--r-lg)] border border-[var(--line)] bg-white p-1.5 shadow-[0_16px_40px_-16px_rgba(27,29,34,0.35)]"
+      className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-[60vh] origin-top animate-[menu-in_140ms_ease-out] overflow-y-auto rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--white)] p-1.5 shadow-[0_16px_40px_-16px_rgba(27,29,34,0.35)]"
     >
       {groups.map(([title, list]) => (
         <div key={title} className="mb-1 last:mb-0">
@@ -839,9 +843,9 @@ function Choices({
           aria-checked={value === x.id}
           disabled={disabled}
           onClick={() => onChange(x.id)}
-          className={`flex items-start gap-2.5 rounded-[var(--r)] border px-3 py-2 text-left transition-colors ${value === x.id ? "border-[var(--ink)] bg-[var(--line2)]" : "border-[var(--line)] hover:border-[var(--muted2)]"}`}
+          className={`flex items-start gap-2.5 rounded-[var(--r)] border px-3 py-2 text-left transition-colors ${value === x.id ? "border-[var(--glow)] bg-[var(--line2)]" : "border-[var(--line)] hover:border-[var(--muted2)]"}`}
         >
-          <span className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full border ${value === x.id ? "border-[4px] border-[var(--ink)]" : "border-[var(--muted2)]"}`} />
+          <span className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full border ${value === x.id ? "border-[4px] border-[var(--glow)]" : "border-[var(--muted2)]"}`} />
           <span className="min-w-0">
             <span className="block text-[13px] font-semibold">{x.title}</span>
             {x.hint && <span className="block text-[11px] text-[var(--muted)]">{x.hint}</span>}

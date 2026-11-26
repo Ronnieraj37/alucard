@@ -25,6 +25,15 @@ Built for the Uniswap Hook Incubator (UHI11) hookathon, theme "Active management
 | **Come back when** | back in my range (optionally a margin inside it) · turns x% from its low or high · after a time · at a price; into the same range or a new one around the price |
 | **Limits** | slippage, keeper fee, expiry, run counts, all checked by the contract on every run |
 
+**Say it instead.** The editor has an assistant: type or say "if ETH drops out of my range, park it in USDT/USDC and
+come back when it's back in range" and it fills in the cards (Gemini, server-side). It only produces the editor's own
+types, every answer goes through the same validation as a hand-built strategy (and is retried once with the refusal),
+and it never signs: you read the cards and the plain-words summary, replay it, then save.
+
+**Replay it on real history.** A testnet pool has no traders, so the backtest replays every swap of the Ethereum
+mainnet Uniswap v3 pool with the same two tokens (ETH/USDC 0.05% and 0.30%, WBTC/USDC, WBTC/WETH, USDC/USDT, DAI/USDC,
+LINK/WETH; 5 April – 3 October 2026), running the exact order words the contract would get.
+
 Each position has two sides ("if WETH falls", "if WETH rises"). The editor builds them as two columns of cards; after each
 card it offers only the options that make sense there, and greys out the rest with the reason.
 
@@ -69,27 +78,37 @@ need decisions a swap cannot take (moving money between pools, waiting, coming b
 4. When WETH is back in the original range, a keeper runs the way back: out of USDT/USDC, into USDC, swapped to
    the range's mix, added to the original range. The original sides start again.
 
-## Safety model
+## Safety model: what you are trusting
 
-- **No step at a pushed price.** A price counts only near Chainlink's; with no Chainlink price, nothing runs.
-- **Holds can't be skipped.** "Only if it lasts" needs the condition true from the moment a keeper first saw it (`poke`)
-  for the whole time; a keeper that sees it false resets it.
-- **Keepers can't overcharge.** The fee is the owner's: a share of what the step moves (0.1% by default, at most 1%),
-  whatever the gas price.
-- **Always withdrawable.** The owner can cancel at any time, wherever the money is; after expiry anyone can, and the
-  tokens still go to the owner. Payouts that fail (a wallet refusing ETH) are held for the owner.
-- **Admin.** The only admin is the token list. Changing or removing a feed waits two days.
+| You trust | What it can do | What it cannot do |
+|---|---|---|
+| **Chainlink** | Decide what a price is: a pool's price counts only within ~2% (200 ticks) of the pair's Chainlink price. A stale or missing feed makes every step wait. | Fire a step on its own: the pool's price must also be past your level. Lock your money: `cancel` never checks prices. |
+| **Keepers** (anyone) | Run a step once its condition is true, and pick the moment within the band. | Take more than your keeper fee (0.1% default, at most 1% of what the step moves) as a fee. Run a step early, skip a hold, or run it at a pushed price. |
+| **The admin** (the token list) | List a token (at once: no order uses it yet); change or remove a feed, or loosen / switch off the band, **2 days after announcing it**; tighten the band at once (that only makes steps wait). | Move, freeze or upgrade anything: there is no pause, no upgrade, no fee switch. |
+| **The testnet** | On Sepolia nobody arbitrages, so `arb.ts` keeps the pools on Chainlink; the USDT "feed" is a mock we set to $1. | |
 
-**Known limits.** Not audited. Only tokens with a Chainlink feed. A push inside the ~2% band is a real price for a
-condition (set levels further than that from the market). A move can go into any pool sharing a token with yours; two
-pools with no token in common would need two swaps and are not supported yet. A position must be created through
-Alucard; existing NFT positions can't be adopted yet.
+Guarantees, each with a test:
+
+- **No step at a pushed price.** A push away from Chainlink does not count, however long it is held (`Manipulation.t.sol`).
+- **Holds can't be skipped, or reset by a push.** "Only if it lasts" needs the condition seen true by `poke` and still
+  true at the run; a believable price that says otherwise resets it, a pushed one does nothing. A hold is sampled by
+  pokes, not watched every block.
+- **Your money is yours.** The owner can cancel at any time, wherever the money is; after expiry anyone can close the
+  position, and everything still goes to the owner. Payouts that fail (a wallet refusing ETH) are held for the owner,
+  and nobody else's order can spend them (`KeeperFee.t.sol`).
+
+**Known limits** (from our own review; not yet fixed): inside the band, a keeper can push the price up to ~2% against
+an order's swap before running it, on top of the order's slippage limit, and near a range edge it could push a position
+out and back in to collect the fee twice; set price levels and "back in my range" margins wider than the band. One band
+for every pair (too wide for two stablecoins). Not audited. Only tokens with a Chainlink feed. A move into a pool with
+no token in common is not supported. A position must be created through Alucard; existing NFT positions can't be
+adopted yet.
 
 ## Evidence
 
 | Check | Result |
 |---|---|
-| `forge test` (fuzz included) | 134 passing |
+| `forge test` (fuzz included) | 137 passing |
 | Branch coverage of `src/` (`forge coverage --ir-minimum`) | 84% (lines 97%, functions 98%) |
 | Strategy shapes the editor builds vs what the contract accepts (`test/EditorParity.t.sol`) | 35,126 cases, 0 mismatches |
 | Backtest engine vs contract, run for run (holds and re-centring included) | 2,000 random orders, identical |
@@ -126,6 +145,7 @@ npm run dev                     # app on http://localhost:3000
 
 PRIVATE_KEY=0x... npx tsx scripts/arb.ts --keep     # keep the test pools on Chainlink, and run the keeper, every minute
 PRIVATE_KEY=0x... npx tsx scripts/demo-orders.ts    # a few example strategies in tight ranges
+# the assistant: GEMINI_API_KEYS=key1,key2 in frontend/.env.local (server-side only; a rate-limited key is skipped)
 ```
 
 Deploying (Vercel, the keeper on GitHub Actions, contracts): [`DEPLOY.md`](DEPLOY.md). The app's own docs are at `/docs`.
