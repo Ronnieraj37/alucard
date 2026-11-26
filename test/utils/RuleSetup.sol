@@ -86,11 +86,20 @@ abstract contract RuleSetup is BaseTest {
     function _newPool(Currency c0, Currency c1, uint160 sqrtPrice) internal returns (PoolKey memory key) {
         key = PoolKey(c0, c1, 3000, 60, IHooks(hook));
         poolManager.initialize(key, sqrtPrice);
+        _addFullRange(key);
+    }
+
+    /// @dev Liquidity `_addFullRange` adds (100e18 for every new pool; a test raises it for a deeper pool).
+    uint256 internal fullRangeLiquidity = 100e18;
+
+    /// @dev Full-range liquidity from this contract. (The amount is read from storage: one more parameter is a
+    /// "stack too deep" in the coverage build.)
+    function _addFullRange(PoolKey memory key) internal {
         positionManager.mint(
             key,
             TickMath.minUsableTick(60),
             TickMath.maxUsableTick(60),
-            100e18,
+            fullRangeLiquidity,
             type(uint256).max,
             type(uint256).max,
             address(this),

@@ -57,7 +57,9 @@ contract EditorParityTest is RuleSetup {
         MockERC20 t2 = deployToken();
         while (address(t2) < Currency.unwrap(currency1)) t2 = deployToken(); // above token1, as the script assumes
         feeds.setFeed(address(t2), address(new MockAggregator(8, 1e8)), MAX_AGE);
-        poolManager.initialize(PoolKey(currency1, Currency.wrap(address(t2)), 100, 1, IHooks(hook)), Constants.SQRT_PRICE_1_1);
+        poolManager.initialize(
+            PoolKey(currency1, Currency.wrap(address(t2)), 100, 1, IHooks(hook)), Constants.SQRT_PRICE_1_1
+        );
         require(hook.poolCount() == 4, "pool #4");
         _wait(1 hours); // average prices for the new pools
     }
@@ -136,7 +138,11 @@ contract EditorParityTest is RuleSetup {
                     accepted++;
                     if (!c.ok[i]) {
                         wrongAccept++;
-                        if (wrongAccept <= 10) console.log("ACCEPTED but the editor cannot build it: npx tsx scripts/parity.ts show", from + i);
+                        if (wrongAccept <= 10) {
+                            console.log(
+                                "ACCEPTED but the editor cannot build it: npx tsx scripts/parity.ts show", from + i
+                            );
+                        }
                     }
                 } catch (bytes memory err) {
                     if (c.ok[i]) {
@@ -177,10 +183,23 @@ contract EditorParityTest is RuleSetup {
     }
 
     function _batch(bytes memory data) internal pure returns (Batch memory b) {
-        (b.ts, b.ticks, b.lower, b.upper, b.home, b.away, b.awayLower, b.awayUpper, b.path, b.swaps, b.events) = abi.decode(
-            data,
-            (uint32[][], int24[][], uint256[], uint256[], OrderState.Leg[], OrderState.Leg[], uint256[], uint256[], uint256[], uint256[], uint256[][])
-        );
+        (b.ts, b.ticks, b.lower, b.upper, b.home, b.away, b.awayLower, b.awayUpper, b.path, b.swaps, b.events) =
+            abi.decode(
+                data,
+                (
+                    uint32[][],
+                    int24[][],
+                    uint256[],
+                    uint256[],
+                    OrderState.Leg[],
+                    OrderState.Leg[],
+                    uint256[],
+                    uint256[],
+                    uint256[],
+                    uint256[],
+                    uint256[][]
+                )
+            );
     }
 
     /// Move the price to a point strictly inside tick `t`, as the synthetic path does (no swap if it is already there).
@@ -299,7 +318,9 @@ contract EditorParityTest is RuleSetup {
         console.log("DIFFERENT: npx tsx scripts/parity.ts engineJob", c);
         uint256[] memory want = b.events[i];
         for (uint256 j; j < want.length || j < got.length; ++j) {
-            console.log("    engine / contract (swap*2 + upper)", j < want.length ? want[j] : 0, j < got.length ? got[j] : 0);
+            console.log(
+                "    engine / contract (swap*2 + upper)", j < want.length ? want[j] : 0, j < got.length ? got[j] : 0
+            );
             if (j > 12) break;
         }
     }

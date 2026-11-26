@@ -8,6 +8,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
+import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
 import {RuleSetup} from "./utils/RuleSetup.sol";
 import {ConditionalOrders} from "../src/ConditionalOrders.sol";
 import {OrderState} from "../src/libraries/OrderState.sol";
@@ -264,5 +265,39 @@ contract StrategiesTest is RuleSetup {
         (bool ok, uint256 bps) = rules.feeBps(address(orders), id, stableIndex, int24(-60), int24(60));
         assertTrue(ok);
         assertGt(bps, 0);
+    }
+
+    /// Parking keeps the money's value: in deep pools, what arrives in the stable pool plus what is paid back to the
+    /// owner is worth what left the range less the 0.3% swap fee (the stable pool's own swap is a few bps more).
+    /// What is paid back is mostly the unused part of the keeper's ceiling: it is set aside before the move and
+    /// returned to the wallet, not into the parked position. (In a thin pool the sale also moves the price; the
+    /// order's slippage limit caps that, see test_moveWaitsWhenItsSwapIsPastTheLimit.)
+    function test_parkingKeepsTheValue() public {
+        uint256 id = _park();
+        _swap(true, 5e18);
+        _settle();
+        fullRangeLiquidity = 10_000e18; // 100x deeper: one order's sale barely moves the price
+        _addFullRange(poolKey);
+        _addFullRange(stable);
+        _settle();
+        (uint256 a0, uint256 a1) = rules.orderAmounts(orders, id);
+        (uint160 sqrtP,,,) = poolManager.getSlot0(poolKey.toId());
+        uint256 before = _in1(a0, sqrtP) + a1;
+        uint256 w0 = _bal(currency0, alice);
+        uint256 w1 = _bal(currency1, alice);
+        uint256 w2 = _bal(currency2, alice);
+
+        _run(id, false);
+        (uint256 s0, uint256 s1) = rules.orderAmounts(orders, id);
+        uint256 parked = s0 + s1; // both stablecoins are worth 1 token1
+        uint256 paidBack =
+            (_bal(currency1, alice) - w1) + (_bal(currency2, alice) - w2) + _in1(_bal(currency0, alice) - w0, sqrtP);
+        assertGe((parked + paidBack) * 10_000, before * 9_960, "lost more than the fees");
+        assertLe(parked + paidBack, before, "value from nowhere");
+        assertLe(paidBack * 10_000, before * 130, "more than the keeper ceiling (1%) and swap change left the strategy");
+    }
+
+    function _in1(uint256 amount0, uint160 sqrtP) internal pure returns (uint256) {
+        return FullMath.mulDiv(FullMath.mulDiv(amount0, sqrtP, 1 << 96), sqrtP, 1 << 96);
     }
 }
