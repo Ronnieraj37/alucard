@@ -454,7 +454,7 @@ export default function StrategyEditor(p: StrategyEditorProps) {
             />
           </aside>
         ) : (
-          <button className="fl-ask" onClick={() => setChat(true)}>
+          <button className={`fl-ask ${open || adding ? "max-md:hidden" : ""}`} onClick={() => setChat(true)}>
             <Sparkles className="h-4 w-4 text-[var(--glow)]" />
             Ask Alucard
             <kbd>⌘K</kbd>

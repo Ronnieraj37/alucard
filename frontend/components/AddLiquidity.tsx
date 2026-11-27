@@ -247,7 +247,7 @@ export default function AddLiquidity() {
             <div className="min-w-0 flex-1">
               <div className="text-[15px] font-semibold">Strategy</div>
               {!(rulesOn && hasRules) && (
-                <div className="text-[13px] text-[var(--muted)]">Say what should happen while you are away, or pick it card by card. You can also add one later.</div>
+                <div className="text-[13px] text-[var(--muted)]">Say what should happen while you are away, or build it step by step. You can also add one later.</div>
               )}
               {rulesOn && hasRules && (
                 <div className="mt-1.5 flex flex-col gap-1">
