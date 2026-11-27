@@ -18,8 +18,8 @@ it would have done, and runs it exactly as written.
 | **The problem** | Concentrated liquidity earns only in range. Out of range it earns nothing and sits in the falling token, and nothing changes unless the LP watches the price and acts, day and night. |
 | **What Alucard adds** | A **strategy attached to the position**: two sides ("if ETH falls", "if ETH rises"), each a short chain of steps. Steps include **moving the whole position into another pool and coming back by the LP's own rule**: a round trip between Uniswap pools that existing tools do not offer. |
 | **How you build it** | A flow of small step cards (When → Then → Come back when → Back into), or **say it to the assistant** (Gemini): it asks back when something is missing, then fills in the same cards. It cannot build anything the contract would refuse, and it never signs. |
-| **Why you can trust it** | A pool's price counts only within ~2% of Chainlink's, so **nobody can push a pool to fire your strategy**. The owner can always cancel and withdraw. Keepers earn only the fee the owner set. One admin power (the token list), behind a 2-day delay. |
-| **Proof it does what it says** | The backtest engine runs the **same order words** as the contract; 2,000 random orders fire at exactly the same swaps in both. 138 contract tests, 35,126 editor-vs-contract cases, every template dry-run against both live deployments. |
+| **Why you can trust it** | A pool's price counts only within ~2% of Chainlink's, so **nobody can push a pool to fire your strategy**. The owner can always cancel and withdraw. Keepers earn only the fee the owner set. One admin power (the token list), behind a 2-day delay. Known limit: inside the ~2% band a keeper can still move the price against a step's swap, on top of its slippage limit ([details](#safety-model-what-you-are-trusting)). |
+| **Proof it does what it says** | The backtest engine runs the **same order words** as the contract; on 2,000 random orders its steps fire at exactly the same swaps as the contract's. 138 contract tests, 35,126 editor-vs-contract cases, every template dry-run against both live deployments. |
 
 ## What you can build
 
@@ -116,7 +116,7 @@ adopted yet.
 | `forge test` (fuzz included) | 138 passing |
 | Branch coverage of `src/` (`forge coverage --ir-minimum`) | 84% (lines 97%, functions 98%) |
 | Strategy shapes the editor builds vs what the contract accepts (`test/EditorParity.t.sol`) | 35,126 cases, 0 mismatches |
-| Backtest engine vs contract, run for run (holds and re-centring included) | 2,000 random orders, identical |
+| Backtest engine vs contract: when each step fires (holds and re-centring included; outcomes in money are not compared) | 2,000 random orders, same swaps |
 | Backtest engine tests (`frontend/api/test_chain_history.py`) | 10 passing |
 | Every template on every pool, dry-run against the live deployments (`frontend/scripts/check-rules.ts`) | 168 / 168 on Sepolia and on Unichain Sepolia |
 | End to end on the live chains: pools on Chainlink (`arb.ts`), strategies created, a keeper runs a real step | done on both chains |
@@ -132,14 +132,14 @@ kept through a move but for the swap fee and the keeper's fee, strategies on a h
 
 From each project's public docs (November 2026); a dash means we found no such feature.
 
-| | Revert / Krystal | Arrakis, Gamma (vaults) | Bunni v2 | DualPool (Uniswap + Spark) | **Alucard** |
+| | Revert | Krystal | Arrakis, Gamma (vaults) | DualPool (Uniswap + Spark) | **Alucard** |
 |---|---|---|---|---|---|
-| Who decides | the user, from presets | the vault manager | the pool's hook | the pool's hook | **the LP, step by step** |
-| Exit, re-range, compound, trailing stop | yes | managed | shapes | no | yes |
+| Who decides | the user, from presets | the user, from presets | the vault manager | the pool's hook | **the LP, step by step** |
+| Exit, re-range, compound, trailing stop | yes | yes (with a time buffer) | managed | no | yes |
 | **Move to another Uniswap pool and come back by your own rule** | — | — | — | idle liquidity into lending, decided by the hook | **yes** |
-| Replay the exact strategy on real history before committing | — | — | — | — | **yes, proven equal to the contract** |
-| Works on existing hookless pools | yes (v3) | own vaults | own pools | own pools | **yes (any v4 pool of listed tokens)** |
-| Push-resistant prices | TWAP check (auto-exit) | — | — | — | **Chainlink band (~2%) on every condition and step** |
+| Replay on real history before committing | a static range ([backtester](https://docs.revert.finance/revert/technical-docs/backtester)) | — | — | — | **the whole strategy; its steps fire at the same swaps as the contract** |
+| Works on existing pools | yes (v3; v4 per secondary sources) | yes | own vaults | pools with the hook | **any v4 pool of listed tokens, hookless too** |
+| Push-resistant prices | TWAP check (auto-exit) | — | TWAP / deviation checks | — | **Chainlink band (~2%) on every condition and step** |
 | Audited, live on mainnet, TVL | yes | yes | yes | yes | **no: testnets, not audited** |
 
 ## For reviewers: where to check each claim

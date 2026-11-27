@@ -2,7 +2,7 @@
 
 Done: strategies of the LP's own (conditions, steps, repeats, holds), moves into another pool and back, fee and fee-rate
 conditions, trailing stops, run limits, a Chainlink price guard against pushed prices, every contract under 24 KB, the
-backtest on real mainnet swaps of the same pair (proven equal to the contract), the AI assistant in the builder, and
+backtest on real mainnet swaps of the same pair (its steps fire at the same swaps as the contract), the AI assistant in the builder, and
 deployments on Ethereum Sepolia and Unichain Sepolia.
 
 Next, all about more options for LPs (Alucard runs the strategies people bring; it does not choose them):
