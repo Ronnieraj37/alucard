@@ -190,7 +190,9 @@ const RULES_OF_THUMB = `Rules of thumb:
 - repeat with a price level steps the level stepPct further each run; set maxRuns for ladders. Do not repeat a full withdraw.
 - "apr" can only be used on one side. "convert" needs a "withdraw" before it.
 - Stop loss = withdraw 100 + convert to quote. Take profit = withdraw (+ convert to quote if they want stablecoins).
-- Only use what the user asked for. Never invent extra steps.`;
+- Only use what the user asked for. Never invent extra steps.
+- "note" and "question" are read by the user: plain words only. Say "if ETH falls" / "if ETH rises", "move into USDT/USDC",
+  "come back"; never "lane", "down/up side", "park", "plan", "trigger", "readd" or field names.`;
 
 export function buildPrompt(req: AssistantRequest, own: Pool, problems?: string[], previous?: string): string {
   const range = req.ticks && req.ticks[0] !== req.ticks[1] ? [priceAtTick(own, req.ticks[0]), priceAtTick(own, req.ticks[1])].sort((a, b) => a - b) : null;

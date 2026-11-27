@@ -11,6 +11,8 @@ import {
   ArrowLeft,
   ArrowUpRight,
   ChevronDown,
+  LayoutTemplate,
+  Sparkles,
   Clock,
   Coins,
   Crosshair,
@@ -261,6 +263,15 @@ export default function StrategyEditor(p: StrategyEditorProps) {
   const [adding, setAdding] = useState<{ lane: LaneId; second?: boolean } | null>(null);
   const [backtest, setBacktest] = useState(false);
   const [template, setTemplate] = useState("");
+  // the assistant panel: open beside the steps on a wide screen, a slide-over on a narrow one (closed at first)
+  const [chat, setChat] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1100);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") setChat(true);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
   const v = useMemo(() => validate(pool, rules, p.ticks, { planLocked: !!p.existing }), [pool, rules, p.ticks, p.existing]);
   const empty = !rules.down.trigger && !rules.up.trigger;
   // An open position: where a move goes was set when it was created. While the money is moved, only the ways back change.
@@ -297,111 +308,88 @@ export default function StrategyEditor(p: StrategyEditorProps) {
     setAdding(null);
   };
 
+  const lanesProps = (lane: LaneId) => ({
+    lane,
+    pool,
+    price,
+    rules,
+    v,
+    ticks: p.ticks,
+    rangeLabel: p.rangeLabel,
+    open,
+    setOpen: (k: string | null) => {
+      setOpen(k);
+      setAdding(null);
+    },
+    adding: adding?.lane === lane ? adding : null,
+    setAdding,
+    setRules: (fn: (r: Rules) => Rules) => {
+      setRules(fn);
+      setTemplate("");
+    },
+    setLane: (l: LaneId, fn: (x: Lane) => Lane) => {
+      setLane(l, fn);
+      setTemplate("");
+    },
+    setPlan: (fn: (pl: PlanB) => PlanB) => {
+      setPlan(fn);
+      setTemplate("");
+    },
+    moved,
+    planLocked,
+    backLocked,
+  });
+  const usable = TEMPLATES.filter((t) => templateFor(t.id));
+
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-[var(--paper)]">
       {/* top bar */}
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-[var(--line)] bg-[var(--white)] px-3 sm:gap-3 sm:px-4">
-        <button className="btn btn-light !px-2.5" onClick={p.onClose} aria-label="Back">
+      <header className="ed-top">
+        <button className="ed-icon" onClick={p.onClose} aria-label="Back" title="Back">
           <ArrowLeft className="h-4 w-4" />
-          <span className="hidden sm:inline">Back</span>
         </button>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">Strategy · {pool.label}</div>
-          <div className="truncate text-[11px] text-[var(--muted)]">
-            Now 1 {pool.base.symbol} = {fmt(price)} {pool.quote.symbol} · range {p.rangeLabel}
+          <div className="truncate text-[14px] font-semibold">
+            {pool.base.symbol} / {pool.quote.symbol} <span className="ml-1 text-[12px] font-normal text-[var(--muted)]">{pool.key.fee / 10_000}% · strategy</span>
+          </div>
+          <div className="truncate text-[12px] text-[var(--muted)]">
+            1 {pool.base.symbol} = {fmt(price)} {pool.quote.symbol} · range {p.rangeLabel}
           </div>
         </div>
-        <select
-          className="input hidden !w-auto max-w-[240px] !py-1.5 text-[13px] md:block"
-          value={template}
-          onChange={(e) => applyTemplate(e.target.value)}
-          disabled={moved}
-          aria-label="Start from a template"
-        >
-          <option value="">{template ? "Custom" : "Start from a template…"}</option>
-          {TEMPLATES.map((t) => (
-            <option key={t.id} value={t.id} disabled={!templateFor(t.id)}>
-              {t.name}
-            </option>
-          ))}
-        </select>
+        {!moved && usable.length > 0 && <TemplatesMenu items={usable} current={template} onPick={applyTemplate} />}
         {p.range && (
-          <button className="btn btn-light !px-3" disabled={empty || !isValid(v)} onClick={() => setBacktest(true)} title="Replay a pool's real swap history with this strategy">
+          <button className="ed-ghost" disabled={empty || !isValid(v)} onClick={() => setBacktest(true)} title="Replay real swap history with this strategy">
             <LineChartIcon className="h-4 w-4" />
-            <span className="text-[12px] sm:text-[14px]">Backtest</span>
+            <span className="max-sm:hidden">Backtest</span>
           </button>
         )}
-        <button className="btn btn-dark !px-4" disabled={p.busy || empty || !isValid(v)} onClick={() => p.onSave(rules, advanced)}>
+        <button className="btn btn-dark !px-4 !py-2 text-[13px]" disabled={p.busy || empty || !isValid(v)} onClick={() => p.onSave(rules, advanced)}>
           {p.saveLabel}
         </button>
+        {!planLocked && !chat && (
+          <button className="ed-icon" onClick={() => setChat(true)} aria-label="Open the assistant" title="Assistant (⌘K)">
+            <Sparkles className="h-4 w-4 text-[var(--glow)]" />
+          </button>
+        )}
       </header>
 
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5 px-4 pb-40 pt-6 sm:px-6">
-          {moved && (
-            <Notice>
-              The money is moved right now. You can change when it comes back; the position's own rules run again once it is back.
-            </Notice>
-          )}
-          {/* template picker on small screens; the header already has it from md up */}
-          <select className="input !py-2 text-[13px] md:hidden" value={template} onChange={(e) => applyTemplate(e.target.value)} disabled={moved}>
-            <option value="">{template ? "Custom" : "Start from a template…"}</option>
-            {TEMPLATES.map((t) => (
-              <option key={t.id} value={t.id} disabled={!templateFor(t.id)}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+      <div className="flex min-h-0 flex-1">
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-[720px] flex-col gap-7 px-5 pb-16 pt-8">
+            {moved && <Notice>The money is moved right now. You can change when it comes back; the position&apos;s own steps run again once it is back.</Notice>}
 
-          <div className="grid items-start gap-x-6 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_340px]">
-          {(["down", "up"] as LaneId[]).map((lane) => (
-            <Column
-              key={lane}
-              lane={lane}
-              pool={pool}
-              price={price}
-              rules={rules}
-              v={v}
-              ticks={p.ticks}
-              rangeLabel={p.rangeLabel}
-              open={open}
-              setOpen={(k) => {
-                setOpen(k);
-                setAdding(null);
-              }}
-              adding={adding?.lane === lane ? adding : null}
-              setAdding={setAdding}
-              setRules={(fn) => {
-                setRules(fn);
-                setTemplate("");
-              }}
-              setLane={(l, fn) => {
-                setLane(l, fn);
-                setTemplate("");
-              }}
-              setPlan={(fn) => {
-                setPlan(fn);
-                setTemplate("");
-              }}
-              moved={moved}
-              planLocked={planLocked}
-              backLocked={backLocked}
-            />
-          ))}
-
-          {/* summary: always on the right (below on a phone) */}
-          <aside className="flex flex-col gap-3 lg:sticky lg:top-0 lg:self-start">
-            <section className="card p-4">
-              <div className="label mb-3">In plain words</div>
-              <div className="flex flex-col gap-3 text-[14px] leading-relaxed">
+            {/* the strategy in one paragraph: what the cards below say */}
+            <section>
+              <div className="ed-eyebrow">In plain words</div>
+              <div className="flex flex-col gap-1.5 text-[15px] leading-relaxed text-[var(--ink2)]">
                 {(["down", "up"] as LaneId[]).map((lane) => (
                   <Sentence key={lane} pool={pool} lane={lane} rules={rules} rangeLabel={p.rangeLabel} />
                 ))}
               </div>
-              {errors.length > 0 && (
-                <div className="mt-3 flex flex-col gap-1.5 border-t border-[var(--line2)] pt-3">
+              {!empty && errors.length > 0 && (
+                <div className="mt-3 flex flex-col gap-1">
                   {errors.map((e) => (
-                    <div key={e} className="flex gap-2 text-[12px] text-[var(--amber)]">
+                    <div key={e} className="flex gap-2 text-[12.5px] text-[var(--amber)]">
                       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                       <span>{e}</span>
                     </div>
@@ -409,28 +397,90 @@ export default function StrategyEditor(p: StrategyEditorProps) {
                 </div>
               )}
             </section>
-            <AdvancedBox value={advanced} onChange={setAdvanced} />
-          </aside>
-          </div>
-        </div>
-      </main>
 
-      {!planLocked && !backtest && (
-        <Assistant
-          pool={pool}
-          price={price}
-          ticks={p.ticks}
-          rules={rules}
-          onApply={(r) => {
-            setRules(r);
-            setTemplate("");
-            setOpen(null);
-            setAdding(null);
-          }}
-          onBacktest={p.range ? () => setBacktest(true) : undefined}
-        />
-      )}
+            {empty && !moved && usable.length > 0 && (
+              <section>
+                <div className="ed-eyebrow">Start from a template</div>
+                <div className="ed-list grid sm:grid-cols-2">
+                  {usable.slice(0, 6).map((t) => (
+                    <button key={t.id} className="ed-tpl" onClick={() => applyTemplate(t.id)}>
+                      <span className="block text-[13.5px] font-medium text-[var(--ink)]">{t.name}</span>
+                      <span className="block text-[12px] text-[var(--muted)]">{t.hint}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[12.5px] text-[var(--muted)]">Or describe it to the assistant, or add the first step below.</p>
+              </section>
+            )}
+
+            {(["down", "up"] as LaneId[]).map((lane) => (
+              <Column key={lane} {...lanesProps(lane)} />
+            ))}
+
+            <AdvancedBox value={advanced} onChange={setAdvanced} />
+          </div>
+        </main>
+
+        {!planLocked && chat && (
+          <>
+            <div className="ed-scrim lg:hidden" onClick={() => setChat(false)} aria-hidden="true" />
+            <aside className="ed-panel">
+              <Assistant
+                pool={pool}
+                price={price}
+                ticks={p.ticks}
+                rules={rules}
+                onClose={() => setChat(false)}
+                onApply={(r) => {
+                  setRules(r);
+                  setTemplate("");
+                  setOpen(null);
+                  setAdding(null);
+                }}
+                onBacktest={p.range ? () => setBacktest(true) : undefined}
+              />
+            </aside>
+          </>
+        )}
+      </div>
       {backtest && p.range && <Backtest pool={pool} price={price} range={p.range} rules={rules} advanced={advanced} onClose={() => setBacktest(false)} />}
+    </div>
+  );
+}
+
+/** The template list in the top bar: a quiet button and a menu. */
+function TemplatesMenu({ items, current, onPick }: { items: { id: string; name: string; hint: string }[]; current: string; onPick: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    window.addEventListener("mousedown", away);
+    return () => window.removeEventListener("mousedown", away);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative max-md:hidden">
+      <button className="ed-ghost" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
+        <LayoutTemplate className="h-4 w-4" /> Templates <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+      </button>
+      {open && (
+        <div className="ed-menu" role="menu">
+          {items.map((t) => (
+            <button
+              key={t.id}
+              role="menuitem"
+              className={`ed-menu-item ${current === t.id ? "on" : ""}`}
+              onClick={() => {
+                setOpen(false);
+                onPick(t.id);
+              }}
+            >
+              <span className="block text-[13px] font-medium text-[var(--ink)]">{t.name}</span>
+              <span className="block text-[12px] text-[var(--muted)]">{t.hint}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -615,15 +665,14 @@ function Column(c: ColumnProps) {
   const canAdd = !locked && !(move && L.trigger);
   return (
     <section className="flex min-w-0 flex-col">
-      <div className={`mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 ${up ? "bg-[var(--sage-lt)] text-[var(--sage)]" : "bg-[var(--rose-lt)] text-[var(--rose)]"}`}>
-        <Icon className="h-4 w-4" />
-        <span className="text-[12.5px] font-semibold">{laneTitle(pool, lane, L)}</span>
-        {locked && <span className="ml-auto text-[11px] opacity-80">waits while the money is moved</span>}
+      <div className="ed-eyebrow flex items-center gap-2">
+        <Icon className={`h-3.5 w-3.5 ${up ? "text-[var(--sage)]" : "text-[var(--rose)]"}`} />
+        <span className="text-[var(--ink)]">{laneTitle(pool, lane, L)}</span>
+        {cards.length > 0 && <span className="text-[var(--muted)]">· {cards.length} step{cards.length > 1 ? "s" : ""}</span>}
+        {locked && <span className="ml-auto text-[var(--muted)]">waits while the money is moved</span>}
       </div>
 
-      <ol className="relative flex flex-col gap-1.5">
-        {/* the rail that ties the cards of one side together */}
-        {cards.length > 1 && <span aria-hidden className="absolute bottom-4 left-[22px] top-4 w-px bg-[var(--line)]" />}
+      <ol className="ed-list">
         {cards.map((card) => {
           const k = cardKey(card.id);
           const editable = card.editable ?? !locked;
@@ -645,26 +694,17 @@ function Column(c: ColumnProps) {
             </Card>
           );
         })}
+        {canAdd && (
+          <li className="relative">
+            <button className={`ed-add ${c.adding ? "on" : ""}`} onClick={() => c.setAdding(c.adding ? null : { lane })} aria-expanded={!!c.adding}>
+              <Plus className="h-4 w-4" />
+              <span>{!L.trigger ? "Add a condition" : L.actions.length ? "Add a step" : "Then what?"}</span>
+              {!L.trigger && <span className="ml-auto text-[12px] text-[var(--muted2)]">Nothing happens on this side</span>}
+            </button>
+            {c.adding && <AddMenu {...c} second={!!c.adding.second} onClose={() => c.setAdding(null)} />}
+          </li>
+        )}
       </ol>
-
-      {canAdd && (
-        <div className="relative mt-2">
-          <button
-            className={`flex w-full items-center gap-2.5 rounded-[10px] border border-dashed px-2.5 py-1.5 text-left text-[13px] transition-colors ${
-              c.adding ? "border-[var(--glow)] bg-[var(--white)] text-[var(--ink)]" : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--glow)] hover:text-[var(--ink)]"
-            }`}
-            onClick={() => c.setAdding(c.adding ? null : { lane })}
-            aria-expanded={!!c.adding}
-          >
-            <span className="grid h-6 w-6 place-items-center rounded-full bg-[var(--line2)]">
-              <Plus className="h-3.5 w-3.5" />
-            </span>
-            <span className="font-medium">{!L.trigger ? "Choose when" : L.actions.length ? "Add a step" : "Then what?"}</span>
-            {!L.trigger && <span className="ml-auto text-[11px]">Nothing happens on this side yet</span>}
-          </button>
-          {c.adding && <AddMenu {...c} second={!!c.adding.second} onClose={() => c.setAdding(null)} />}
-        </div>
-      )}
     </section>
   );
 }
@@ -700,22 +740,16 @@ function Card({
   useEffect(() => {
     if (open) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [open]);
-  const iconCls = tone === "when" ? "bg-[var(--accent)] text-white" : tone === "move" ? "bg-[var(--blue-lt)] text-[var(--blue)]" : "bg-[var(--line2)] text-[var(--ink)]";
+  const iconCls = tone === "when" ? "text-[var(--glow)]" : tone === "move" ? "text-[var(--blue)]" : "text-[var(--muted)]";
   return (
     <li
       ref={ref}
-      className={`relative overflow-hidden rounded-[10px] border bg-[var(--white)] transition-[border-color,box-shadow] duration-200 ${
-        open ? "border-[var(--glow)] shadow-[0_8px_24px_-14px_rgba(139,108,255,0.45)]" : tone === "move" ? "border-[var(--blue)]/25 hover:border-[var(--blue)]/60" : "border-[var(--line)] hover:border-[var(--muted2)]"
-      }`}
+      className={`ed-row ${open ? "open" : ""}`}
     >
-      <button className="flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left" onClick={onToggle} aria-expanded={open} title={sub ? `${kicker}: ${title} · ${sub}` : `${kicker}: ${title}`}>
-        <span className={`relative z-10 grid h-6 w-6 shrink-0 place-items-center rounded-full ${iconCls}`}>
-          <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
-        </span>
-        <span className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="shrink-0 text-[11px] text-[var(--muted)]">{kicker}</span>
-          <span className="truncate text-[13px] font-medium">{title}</span>
-        </span>
+      <button className="ed-row-head" onClick={onToggle} aria-expanded={open} title={sub ? `${kicker}: ${title} · ${sub}` : `${kicker}: ${title}`}>
+        <Icon className={`h-4 w-4 shrink-0 ${iconCls}`} strokeWidth={1.8} />
+        <span className="w-[104px] shrink-0 truncate text-[12.5px] text-[var(--muted)]">{kicker}</span>
+        <span className="min-w-0 flex-1 truncate text-[13.5px] text-[var(--ink)]">{title}</span>
         {warn && (
           <span title={warn} className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--amber)] text-[var(--paper)]">
             <AlertTriangle className="h-3 w-3" />
@@ -726,7 +760,7 @@ function Card({
       {/* height animates with the grid-rows trick: 0fr closed, 1fr open */}
       <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
         <div className="min-h-0 overflow-hidden">
-          <div className="flex flex-col gap-3 border-t border-[var(--line2)] px-3 pb-2.5 pt-2.5">
+          <div className="flex flex-col gap-3 px-4 pb-4 pl-[40px] pt-1">
             {warn && <div className="rounded-[var(--r)] bg-[var(--amber-lt)] px-2.5 py-2 text-[12px] text-[var(--amber)]">{warn}</div>}
             <fieldset disabled={locked} className="flex flex-col gap-3 disabled:opacity-60">
               {children}
@@ -784,11 +818,11 @@ function AddMenu(c: ColumnProps & { second: boolean; onClose: () => void }) {
   return (
     <div
       ref={ref}
-      className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-[60vh] origin-top animate-[menu-in_140ms_ease-out] overflow-y-auto rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--white)] p-1.5 shadow-[0_16px_40px_-16px_rgba(27,29,34,0.35)]"
+      className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 max-h-[60vh] origin-top animate-[menu-in_120ms_ease-out] overflow-y-auto rounded-[12px] bg-[var(--white2)] p-1.5 shadow-[inset_0_0_0_1px_var(--line),0_24px_48px_-20px_rgba(0,0,0,0.85)]"
     >
       {groups.map(([title, list]) => (
         <div key={title} className="mb-1 last:mb-0">
-          <div className="px-2.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">{title}</div>
+          <div className="px-2.5 pb-1 pt-2 text-[12px] font-medium text-[var(--muted)]">{title}</div>
           {list.map((o) => (
             <button
               key={o.id}
@@ -796,7 +830,7 @@ function AddMenu(c: ColumnProps & { second: boolean; onClose: () => void }) {
               onClick={() => pick(o)}
               className="flex w-full items-center gap-3 rounded-[var(--r)] px-2.5 py-2 text-left enabled:hover:bg-[var(--line2)] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${o.id === "move" ? "bg-[var(--blue-lt)] text-[var(--blue)]" : "bg-[var(--line2)]"}`}>
+              <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-[8px] ${o.id === "move" ? "text-[var(--blue)]" : "text-[var(--muted)]"}`}>
                 <o.icon className="h-4 w-4" strokeWidth={1.75} />
               </span>
               <span className="min-w-0">
@@ -1103,17 +1137,17 @@ const lowerFirst = (s: string) => (/^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + 
 function AdvancedBox({ value, onChange }: { value: Advanced; onChange: (a: Advanced) => void }) {
   const [open, setOpen] = useState(false);
   return (
-    <section className="card overflow-hidden">
-      <button className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className="label">Settings</span>
-        <span className="flex items-center gap-2 text-[12px] text-[var(--muted)]">
+    <section className="ed-list">
+      <button className="flex h-11 w-full items-center justify-between gap-2 px-[14px] text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="text-[13.5px] text-[var(--ink)]">Settings</span>
+        <span className="flex items-center gap-2 text-[12.5px] text-[var(--muted)]">
           keeper {value.keeperFeeBps / 100}% · slippage {value.slippagePct}% · {value.expiryDays}d
           <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
         </span>
       </button>
       <div className={`grid transition-[grid-template-rows] duration-200 ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
         <div className="min-h-0 overflow-hidden">
-          <div className="flex flex-col gap-3 border-t border-[var(--line2)] p-4">
+          <div className="flex flex-col gap-3 border-t border-[var(--line2)] px-[14px] py-4">
             <Field label="Keeper fee per run" hint="Paid to whoever runs a step, from what it moves">
               <Suffix value={value.keeperFeeBps / 100} suffix="%" onChange={(x) => onChange({ ...value, keeperFeeBps: Math.min(100, Math.round(Number(x) * 100)) })} />
             </Field>
