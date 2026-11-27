@@ -94,7 +94,7 @@ const HUMAN_ERRORS: Record<string, string> = {
   InvalidLeg: "That move is not allowed: the other pool must share a token with this one, and the move must swap into that token.",
   InvalidOrder: "The order settings are not valid (expiry, fee, both sides empty, or a move without a way out and back).",
   UnknownPool: "That pool does not exist yet.",
-  PoolNotAllowed: "That pool uses another hook, so strategies cannot use it.",
+  PoolNotAllowed: "This pool can't be used with strategies.",
   TokenNotAllowed: "One of this pool's tokens has no Chainlink price on the list, so strategies cannot use it.",
   TooMuchIn: "The price moved while you were confirming. Refresh and try again.",
   NotOwner: "Only the owner can do this.",

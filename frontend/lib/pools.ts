@@ -87,7 +87,7 @@ export const POOLS: Pool[] = Object.entries(deployment.pools as Record<string, R
       quote,
       baseIs0,
       hooked,
-      label: `${base.symbol} / ${quote.symbol} · ${p.fee / 10_000}%${hooked ? "" : " (no hook)"}`,
+      label: `${base.symbol} / ${quote.symbol} · ${p.fee / 10_000}%${hooked ? "" : " (plain pool)"}`,
     };
   })
   .sort((a, b) => a.index - b.index);

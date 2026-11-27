@@ -21,7 +21,7 @@ const sym = (s: string) => s;
 export default function Swap() {
   const [mode, setMode] = useState<"swap" | "limit">("swap");
   return (
-    <div className="mx-auto flex max-w-[480px] flex-col gap-4 px-4 py-8">
+    <div className="mx-auto flex max-w-[520px] flex-col gap-4 px-4 py-8">
       <div className="flex gap-1">
         {(["swap", "limit"] as const).map((m) => (
           <button

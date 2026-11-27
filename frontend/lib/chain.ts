@@ -72,6 +72,7 @@ export function rpcUrl(id: ChainId = CHAIN_ID): string {
 
 /** A node for wide eth_getLogs ranges (free Alchemy keys answer 10 blocks), and how many blocks it takes at once. */
 export function logsRpc(id: ChainId = CHAIN_ID): { url: string; chunk: bigint } {
-  if (id === 1301) return { url: process.env.NEXT_PUBLIC_UNICHAIN_LOGS_RPC_URL ?? "https://sepolia.unichain.org", chunk: 50_000n };
+  // the public Unichain node answers 1,000 blocks per query (Unichain makes one a second; lib/logs caches what it read)
+  if (id === 1301) return { url: process.env.NEXT_PUBLIC_UNICHAIN_LOGS_RPC_URL ?? "https://sepolia.unichain.org", chunk: BigInt(process.env.NEXT_PUBLIC_UNICHAIN_LOGS_CHUNK ?? 1000) };
   return { url: process.env.NEXT_PUBLIC_LOGS_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com", chunk: 50_000n };
 }

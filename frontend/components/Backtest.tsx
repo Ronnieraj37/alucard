@@ -113,6 +113,7 @@ export default function Backtest({
   const [deposit, setDeposit] = useState(10_000);
 
   const q = useQuery({
+    retry: 1,
     queryKey: ["backtest", history, pool.index, dataStart, days, startMonth, allWindows, deposit, JSON.stringify(rules), JSON.stringify(range), JSON.stringify(advanced)],
     staleTime: Infinity,
     queryFn: async () => {
@@ -175,12 +176,9 @@ export default function Backtest({
     <div className="fixed inset-0 z-50 flex flex-col bg-[var(--paper)]">
       <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--line)] bg-[var(--white)] px-4">
         <button className="btn btn-light !px-2.5" onClick={onClose}>
-          <ArrowLeft className="h-4 w-4" /> Back to rules
+          <ArrowLeft className="h-4 w-4" /> Back to strategy
         </button>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">Backtest</div>
-          <div className="text-[11px] text-[var(--muted)]">Every swap of the history is replayed against your position and its rules, the way the contract would run them.</div>
-        </div>
+        <div className="truncate text-sm font-semibold">Backtest</div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -243,14 +241,13 @@ export default function Backtest({
             </div>
           )}
           {!own && (
-            <div className="flex gap-2 rounded-[10px] bg-[var(--line2)] p-3 text-[12px] text-[var(--muted)]">
-              <Info className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>
-                Your pool is on a testnet, where nobody trades. The replay uses every real swap of the same pair on Ethereum mainnet (
-                {HISTORY.find((h) => h.key === history)?.hint.split(":")[0].replace("Ethereum mainnet ", "")}), 5 April – 3 October 2026: real prices, real
-                volume, real fees. Your range and price levels keep their distance from the price.
-              </span>
-            </div>
+            <p
+              className="flex items-center gap-2 text-[12px] text-[var(--muted)]"
+              title="Your pool is on a testnet, where nobody trades, so the replay uses every real swap of the same pair on mainnet: real prices, volume and fees. Your range and price levels keep their distance from the price, and every swap runs your strategy the way the contract would."
+            >
+              <Info className="h-3.5 w-3.5 shrink-0" />
+              Replayed on every real swap of mainnet {HISTORY.find((h) => h.key === history)?.hint.split(":")[0].replace("Ethereum mainnet Uniswap v3 ", "")}, 5 Apr – 3 Oct 2026
+            </p>
           )}
 
           <RulesSummary pool={pool} rules={rules} />
@@ -312,7 +309,7 @@ function RulesSummary({ pool, rules }: { pool: Pool; rules: Rules }) {
       {rules.plan &&
         describeBack(pool, rules.plan).map((t) => (
           <div key={t}>
-            <span className="font-semibold text-[var(--ink)]">Plan B: </span>
+            <span className="font-semibold text-[var(--ink)]">Coming back: </span>
             {t}
           </div>
         ))}
@@ -339,11 +336,11 @@ function SingleResult({ r }: { r: Single }) {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Tile label="With your rules" value={usd(r.rules.final)} sub={`${signed(diff)} vs no rules`} tone={diff >= 0 ? "good" : "bad"} />
-        <Tile label="Same position, no rules" value={usd(r.noRules.final)} sub={`fees earned ${usd(r.noRules.fees)}`} />
+        <Tile label="With the strategy" value={usd(r.rules.final)} sub={`${signed(diff)} vs without`} tone={diff >= 0 ? "good" : "bad"} />
+        <Tile label="Same position, no strategy" value={usd(r.noRules.final)} sub={`fees earned ${usd(r.noRules.fees)}`} />
         <Tile label="Just holding the tokens" value={usd(r.hold.final)} sub={`${signed(r.rules.final - r.hold.final)} for your rules`} tone={r.rules.final >= r.hold.final ? "good" : "bad"} />
         <Tile
-          label="Rules ran"
+          label="Steps run"
           value={`${r.rules.runs}×`}
           sub={`${r.rules.moves ? `${r.rules.moves} moves to another pool and back · ` : ""}fees ${usd(r.rules.fees)} · keepers ${usd(r.rules.keeperPaid)}${r.rules.closed ? " · closed" : r.rules.away ? " · ends moved" : ""}`}
         />
@@ -368,7 +365,7 @@ function SingleResult({ r }: { r: Single }) {
           t={r.series.t}
           series={[
             { name: "With rules", color: C_RULES, values: r.series.rules },
-            { name: "No rules", color: C_PLAIN, values: r.series.noRules },
+            { name: "No strategy", color: C_PLAIN, values: r.series.noRules },
             { name: "Hold", color: C_HOLD, values: r.series.hold, dashed: true },
           ]}
           markers={r.events.map((e) => e.t)}
@@ -383,7 +380,7 @@ function SingleResult({ r }: { r: Single }) {
             {r.base} price ({r.quote}) and your range
           </div>
           <div className="text-[12px] text-[var(--muted)]">
-            {fmt(r.entryPrice)} → {fmt(r.endPrice)} {r.quote} · in range {Math.round(r.rules.timeInRange * 100)}% of the time with rules, {Math.round(r.noRules.timeInRange * 100)}% without
+            {fmt(r.entryPrice)} → {fmt(r.endPrice)} {r.quote} · in range {Math.round(r.rules.timeInRange * 100)}% of the time with the strategy, {Math.round(r.noRules.timeInRange * 100)}% without
           </div>
         </div>
         <LineChart
@@ -398,7 +395,7 @@ function SingleResult({ r }: { r: Single }) {
 
       {r.events.length > 0 && (
         <div className="card p-4">
-          <div className="mb-2 text-[14px] font-semibold">When your rules ran</div>
+          <div className="mb-2 text-[14px] font-semibold">When it acted</div>
           <div className="max-h-[260px] overflow-y-auto text-[12px]">
             <table className="w-full">
               <thead className="text-left text-[var(--muted)]">
@@ -433,10 +430,10 @@ function WindowsResult({ r }: { r: Windows }) {
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Tile label={`Windows of ${r.windowDays} days`} value={String(r.count)} sub="one starting every week" />
-        <Tile label="Rules beat no rules" value={`${r.beatNoRules} of ${r.count}`} />
-        <Tile label="Rules beat holding" value={`${r.beatHold} of ${r.count}`} />
+        <Tile label="Strategy beat no strategy" value={`${r.beatNoRules} of ${r.count}`} />
+        <Tile label="Strategy beat holding" value={`${r.beatHold} of ${r.count}`} />
         <Tile
-          label="Median vs no rules"
+          label="Median vs no strategy"
           value={signed(r.medianVsNoRules)}
           sub={`worst ${signed(r.worstVsNoRules)} · best ${signed(r.bestVsNoRules)}`}
           tone={r.medianVsNoRules >= 0 ? "good" : "bad"}
@@ -449,7 +446,7 @@ function WindowsResult({ r }: { r: Windows }) {
           t={rows.map((w) => w.start)}
           series={[
             { name: "With rules", color: C_RULES, values: rows.map((w) => w.rules) },
-            { name: "No rules", color: C_PLAIN, values: rows.map((w) => w.noRules) },
+            { name: "No strategy", color: C_PLAIN, values: rows.map((w) => w.noRules) },
             { name: "Hold", color: C_HOLD, values: rows.map((w) => w.hold), dashed: true },
           ]}
           format={usd}
@@ -466,8 +463,8 @@ function Legend() {
   return (
     <div className="mb-2 flex gap-4 text-[12px] text-[var(--muted)]">
       {[
-        ["With rules", C_RULES, false],
-        ["No rules", C_PLAIN, false],
+        ["With strategy", C_RULES, false],
+        ["No strategy", C_PLAIN, false],
         ["Just holding", C_HOLD, true],
       ].map(([n, c, d]) => (
         <span key={n as string} className="flex items-center gap-1.5">

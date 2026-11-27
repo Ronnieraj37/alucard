@@ -61,12 +61,12 @@ export default function Keeper() {
     }, "Updated.");
 
   return (
-    <div className="mx-auto flex max-w-[680px] flex-col gap-4 px-4 py-8">
+    <div className="mx-auto flex max-w-[760px] flex-col gap-4 px-4 py-8">
       <div className="flex items-start gap-3">
         <div>
           <h1 className="text-xl font-semibold">Keeper</h1>
           <div className="text-[13px] text-[var(--muted)]">
-            A strategy step runs when someone sends the transaction. Keepers do it automatically; anyone can, and is paid the owner's keeper fee from that position.
+            Strategies run when anyone triggers them, and whoever runs one earns its fee. Keeper bots do it all day; you can too, from here.
           </div>
         </div>
         <button className="btn btn-light ml-auto !p-2" onClick={() => q.refetch()} title="Refresh">

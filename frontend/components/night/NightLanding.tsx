@@ -67,17 +67,10 @@ export function Mark({ size = 28 }: { size?: number }) {
 // ---------------------------------------------------------------- hero
 
 function Hero() {
-  const ref = useRef<HTMLElement>(null);
-  const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end start"] });
-  const scale = useTransform(scrollYProgress, [0, 1], [1, 1.35]);
-  const fade = useTransform(scrollYProgress, [0, 0.8], [1, 0]);
   return (
-    <section ref={ref} className="n-hero">
-      <motion.div className="n-hero-bh" style={{ scale, opacity: fade }}>
-        <Horizon className="h-full w-full" />
-      </motion.div>
+    <section className="n-hero">
       <div className="n-hero-copy">
-        <motion.p className="n-eyebrow" initial={{ opacity: 0, letterSpacing: "0.6em" }} animate={{ opacity: 1, letterSpacing: "0.32em" }} transition={{ duration: 1.6, ease: EASE }}>
+        <motion.p className="n-eyebrow" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.6, ease: EASE }}>
           <Moon className="h-3.5 w-3.5" /> Uniswap v4 · live on Sepolia and Unichain
         </motion.p>
         <motion.h1 className="n-h1" initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.2, delay: 0.2, ease: EASE }}>
@@ -86,7 +79,7 @@ function Hero() {
           <span className="n-grad">It keeps watch.</span>
         </motion.h1>
         <motion.p className="n-lead" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.1, delay: 0.45, ease: EASE }}>
-          Write a plan for your Uniswap v4 position in plain words: when to leave the range, where the money waits, when it comes back. Alucard checks it,
+          Write a strategy for your Uniswap v4 position in plain words: when to leave the range, where the money waits, when it comes back. Alucard checks it,
           replays it on real history, and any keeper runs it on-chain, while the money stays inside Uniswap v4.
         </motion.p>
         <motion.div className="mt-9 flex flex-col gap-3 sm:flex-row" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1, delay: 0.7 }}>
@@ -135,7 +128,7 @@ function Build() {
           </p>
           <h2 className="n-h2">Describe it. The cards fill themselves in.</h2>
           <p className="n-p">
-            Type or say what you want. The assistant fills in the same cards you could pick by hand. Every card is checked by the rules the contract uses, so
+            Type or say what you want. The assistant fills in the same cards you could pick by hand. Every card is checked against what the contract allows, so
             it can only build what the chain accepts. It never signs: you read the plain-words summary, replay it on real history, then save.
           </p>
           <ul className="n-ticks">
@@ -458,6 +451,7 @@ function Close() {
 export default function NightLanding() {
   return (
     <div className="n-page">
+      <Horizon />
       <Nav />
       <Hero />
       <Build />

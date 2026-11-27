@@ -82,7 +82,7 @@ export const defaultWidthPct = (q: Pool) => (STABLE.includes(q.base.symbol) && S
 /** A new move for a lane: into the first other pool there is (or holding a token when there is none), coming back
  * into the same range once the price is back in it. */
 export const newPlan = (exit: LaneId, home?: Pool): PlanB => {
-  const q = home ? parkable(home)[0] : undefined;
+  const q = home ? defaultPark(home) : undefined;
   const plan: PlanB = q
     ? { where: "park", parkPool: q.index, parkWidthPct: defaultWidthPct(q), returnTo: "same", back: { down: moveLane(null), up: moveLane(null) } }
     : { where: "wait", returnTo: "same", back: { down: moveLane(null), up: moveLane(null) } };
@@ -210,6 +210,10 @@ const STABLE = ["USDC", "USDT", "DAI"];
 /** Pools a move can go into: every pool in the table that shares a token with this one (another fee tier of the same pair
  * too). The money is swapped into the shared token on the way. */
 export const parkable = (p: Pool) => POOLS.filter((q) => q.index !== p.index && sharedToken(p, q));
+const STABLES = ["USDC", "USDT", "DAI"];
+/** Where moved money goes by default: a pool of two stablecoins if one shares a token (it waits there at a steady
+ * price), else the first pool that does. */
+export const defaultPark = (p: Pool) => parkable(p).find((q) => STABLES.includes(q.base.symbol) && STABLES.includes(q.quote.symbol)) ?? parkable(p)[0];
 
 // ---------------------------------------------------------------- trailing distance <-> ticks
 
@@ -800,7 +804,7 @@ export const TEMPLATES: Template[] = [
     name: "Move to another pool while out of range",
     hint: "Below the range: move the money into another pool; come back once the price is 1% back inside the range",
     build: (p) => {
-      const q = parkable(p)[0];
+      const q = defaultPark(p);
       if (!q) return null;
       return {
         down: { trigger: leave(), actions: [{ kind: "move" }], repeat: false },

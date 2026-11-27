@@ -11,7 +11,7 @@ import { Empty, PoolIcons, TxLine } from "@/components/ui";
 import { conditionalOrdersAbi } from "@/lib/generated/abis";
 import { type RulePosition, type SideMemo, liveLanes, liveSide, useRulePosition } from "@/lib/positions";
 import { CORE, type Pool, fmt, maxUsable, minUsable, priceAtTick, priceRange } from "@/lib/pools";
-import { type Advanced, type LaneId, type Rules, describeBack, describeLane, describePlan, describeWhen, laneTitle, updateParams } from "@/lib/rules";
+import { type Advanced, type Lane, type LaneId, type Rules, describeBack, describeLane, describePlan, describeWhen, laneTitle, updateParams } from "@/lib/rules";
 import { useTx } from "@/lib/tx";
 
 export default function PositionDetail({ id }: { id: bigint }) {
@@ -72,24 +72,25 @@ export default function PositionDetail({ id }: { id: bigint }) {
         <span className="text-[12px] text-[var(--muted)]">#{String(p.id)}</span>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="card p-4">
-          <div className="label mb-1">{p.status === "home" ? "Liquidity" : p.status === "waiting" ? "Held while moved" : `Now in ${p.livePool.label}`}</div>
-          <div className="text-[15px]">
-            {fmt(p.amount0)} {p.livePool.token0.symbol}
-          </div>
-          <div className="text-[15px]">
-            {fmt(p.amount1)} {p.livePool.token1.symbol}
+      <p className="-mt-1 text-[14px] text-[var(--ink2)]">{statusLine(p, inRange, lanes)}</p>
+
+      {/* the position at a glance: one strip */}
+      <div className="card grid gap-3 p-4 sm:grid-cols-3">
+        <div>
+          <div className="label mb-0.5">{p.status === "home" ? "Liquidity" : p.status === "waiting" ? "Held while moved" : `In ${p.livePool.base.symbol}/${p.livePool.quote.symbol}`}</div>
+          <div className="text-[14px]">
+            {fmt(p.amount0)} {p.livePool.token0.symbol} + {fmt(p.amount1)} {p.livePool.token1.symbol}
           </div>
           {p.status === "parked" && p.liveRange && <ParkedRange pool={p.livePool} range={p.liveRange} tick={p.liveTick} />}
         </div>
-        <div className="card p-4">
-          <div className="label mb-1">{p.status === "home" ? "Range" : "Range (when it comes back)"}</div>
-          <div className="text-[15px]">
-            {p.status !== "home" && p.rules.plan?.returnTo === "recentre" ? "Centred on the price, same width" : rangeLabel}
-          </div>
-          <div className="text-[13px] text-[var(--muted)]">
-            Now 1 {p.pool.base.symbol} = {fmt(price)} {p.pool.quote.symbol}
+        <div>
+          <div className="label mb-0.5">{p.status === "home" ? "Range" : "Range when it comes back"}</div>
+          <div className="text-[14px]">{p.status !== "home" && p.rules.plan?.returnTo === "recentre" ? "Centred on the price, same width" : rangeLabel}</div>
+        </div>
+        <div>
+          <div className="label mb-0.5">Now</div>
+          <div className="text-[14px]">
+            1 {p.pool.base.symbol} = {fmt(price)} {p.pool.quote.symbol}
           </div>
         </div>
       </div>
@@ -98,12 +99,12 @@ export default function PositionDetail({ id }: { id: bigint }) {
         <div className="mb-3 flex items-center gap-2">
           <Sparkles className="h-4 w-4" />
           <div className="font-semibold">{p.liveIsHome ? "Strategy" : "Moved: coming back"}</div>
-          <span className="text-[12px] text-[var(--muted)]">expire {new Date(p.expiry * 1000).toLocaleDateString()}</span>
-          <button className="btn btn-light ml-auto" onClick={() => setEditor(true)}>
+          <span className="text-[12px] text-[var(--muted)]">· expires {new Date(p.expiry * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</span>
+          {owner && <button className="btn btn-light ml-auto !py-1.5" onClick={() => setEditor(true)}>
             <Pencil className="h-3.5 w-3.5" /> {p.liveIsHome ? "Edit strategy" : "Edit when it comes back"}
-          </button>
+          </button>}
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col divide-y divide-[var(--line2)]">
           {(["down", "up"] as LaneId[]).map((lane) => {
             const L = lanes[lane];
             const text = p.liveIsHome
@@ -112,14 +113,15 @@ export default function PositionDetail({ id }: { id: bigint }) {
                 ? `${describeWhen(p.pool, lane, L)}: come back into ${p.rules.plan!.returnTo === "same" ? "the same range" : "a new range around the price"}.`
                 : null;
             return (
-              <div key={lane} className="flex items-center gap-3 rounded-[10px] bg-[var(--line2)] p-3 text-[13px]">
+              <div key={lane} className="flex items-center gap-3 py-2.5 text-[13px] first:pt-0">
                 <div className="flex-1">
-                  <div className={`label mb-0.5 ${lane === "up" ? "!text-[var(--sage)]" : "!text-[var(--rose)]"}`}>{laneTitle(p.pool, lane, L)}</div>
+                  <span className={`mb-1 inline-block rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${lane === "up" ? "bg-[var(--sage-lt)] text-[var(--sage)]" : "bg-[var(--rose-lt)] text-[var(--rose)]"}`}>{laneTitle(p.pool, lane, L)}</span>
+                  <div />
                   {text ?? <span className="text-[var(--muted)]">Nothing happens.</span>}
                   {p.memo[lane] && <MemoLine m={p.memo[lane]!} pool={p.pool} lane={lane} />}
                   {L.trigger && (p.lastRun?.[lane] ?? 0) > 0 && (
                     <div className="mt-1 flex items-center gap-1 text-[11px] text-[var(--muted)]">
-                      <Clock className="h-3 w-3" /> {p.status === "home" ? "Started or last ran" : "Moved"} {ago(p.lastRun[lane])}
+                      <Clock className="h-3 w-3" /> {p.status === "home" ? "Last ran or set" : "Moved"} {ago(p.lastRun[lane])}
                     </div>
                   )}
                   {p.blocked?.[lane] && <div className="mt-1 text-[12px] text-[var(--amber)]">Its condition is true, but it cannot run yet: {p.blocked[lane]}</div>}
@@ -141,12 +143,16 @@ export default function PositionDetail({ id }: { id: bigint }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <button className="btn btn-danger" disabled={!owner || tx.state.busy} onClick={close}>
-          Withdraw everything
-        </button>
-        <TxLine state={tx.state} />
-      </div>
+      {owner ? (
+        <div className="flex items-center gap-3">
+          <button className="btn btn-danger" disabled={tx.state.busy} onClick={close}>
+            Withdraw everything
+          </button>
+          <TxLine state={tx.state} />
+        </div>
+      ) : (
+        <p className="text-[12px] text-[var(--muted)]">Read-only: only the owner can edit or withdraw. Anyone can run a step that is ready.</p>
+      )}
 
       {editor && (
         <StrategyEditor
@@ -192,7 +198,7 @@ function PlanLines({ p }: { p: RulePosition }) {
     ? [`${plan.where === "wait" ? "While moved, it holds" : "A move puts the money"} ${describePlan(p.pool, plan).replace(/^hold /, "")}.`, ...describeBack(p.pool, plan)]
     : (["down", "up"] as LaneId[]).filter((l) => p.rules[l].trigger).map((l) => `Back in the position: ${describeLane(p.pool, l, p.rules[l], plan)}`);
   return (
-    <div className="flex gap-2 rounded-[10px] border border-dashed border-[var(--line)] p-3 text-[12px] text-[var(--muted)]">
+    <div className="flex gap-2 pt-2.5 text-[12px] text-[var(--muted)]">
       <Waypoints className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       <div className="flex flex-col gap-1">
         {lines.map((t) => (
@@ -222,4 +228,16 @@ function ago(t: number) {
   if (s < 5400) return `${Math.round(s / 60)} min ago`;
   if (s < 172800) return `${Math.round(s / 3600)} h ago`;
   return `${Math.round(s / 86400)} days ago`;
+}
+
+/** One sentence: where the money is and what it is watching for. */
+function statusLine(p: RulePosition, inRange: boolean, lanes: { down: Lane; up: Lane }): string {
+  const watch = (["down", "up"] as LaneId[])
+    .filter((l) => lanes[l].trigger)
+    .map((l) => describeWhen(p.pool, l, lanes[l]).replace(/^When /, "").replace(/^Every /, "every "));
+  const watching = watch.length ? ` Watching: ${watch.join(", or ")}.` : "";
+  if (p.ready.down || p.ready.up) return "A step is ready: any keeper can run it now (it pays the keeper fee).";
+  if (p.status === "waiting") return `Moved: holding tokens until it comes back.${watching}`;
+  if (p.status === "parked") return `Moved to ${p.livePool.base.symbol}/${p.livePool.quote.symbol}, earning fees there.${watching}`;
+  return `${inRange ? "In range, earning fees." : "Out of range: not earning fees."}${watching}`;
 }

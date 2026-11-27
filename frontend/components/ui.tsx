@@ -46,19 +46,6 @@ export function Suffix({ value, suffix, onChange }: { value: number | undefined;
   );
 }
 
-export function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!value)}
-      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${value ? "bg-[var(--ink)]" : "bg-[var(--line)]"}`}
-      aria-pressed={value}
-    >
-      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${value ? "left-[22px]" : "left-0.5"}`} />
-    </button>
-  );
-}
-
 /** Uniswap-style token amount box. */
 export function TokenBox({
   label,
@@ -81,8 +68,8 @@ export function TokenBox({
 }) {
   return (
     <div className="rounded-[16px] bg-[var(--line2)] p-4">
-      <div className="text-[13px] text-[var(--muted)]">{label}</div>
-      <div className="mt-1 flex items-center gap-3">
+      {label !== token.symbol && <div className="mb-1 text-[13px] text-[var(--muted)]">{label}</div>}
+      <div className="flex items-center gap-3">
         <input
           className="min-w-0 flex-1 bg-transparent text-[30px] font-medium outline-none placeholder:text-[var(--muted2)]"
           placeholder="0"

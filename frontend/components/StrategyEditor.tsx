@@ -328,7 +328,7 @@ export default function StrategyEditor(p: StrategyEditorProps) {
         {p.range && (
           <button className="btn btn-light !px-3" disabled={empty || !isValid(v)} onClick={() => setBacktest(true)} title="Replay a pool's real swap history with this strategy">
             <LineChartIcon className="h-4 w-4" />
-            <span className="hidden sm:inline">Backtest</span>
+            <span className="text-[12px] sm:text-[14px]">Backtest</span>
           </button>
         )}
         <button className="btn btn-dark !px-4" disabled={p.busy || empty || !isValid(v)} onClick={() => p.onSave(rules, advanced)}>
@@ -337,7 +337,7 @@ export default function StrategyEditor(p: StrategyEditorProps) {
       </header>
 
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5 px-4 py-6 sm:px-6">
+        <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-5 px-4 pb-40 pt-6 sm:px-6">
           {moved && (
             <Notice>
               The money is moved right now. You can change when it comes back; the position's own rules run again once it is back.
@@ -353,21 +353,6 @@ export default function StrategyEditor(p: StrategyEditorProps) {
             ))}
           </select>
 
-          {!planLocked && (
-            <Assistant
-              pool={pool}
-              price={price}
-              ticks={p.ticks}
-              rules={rules}
-              onApply={(r) => {
-                setRules(r);
-                setTemplate("");
-                setOpen(null);
-                setAdding(null);
-              }}
-              onBacktest={p.range ? () => setBacktest(true) : undefined}
-            />
-          )}
           <div className="grid items-start gap-x-6 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_340px]">
           {(["down", "up"] as LaneId[]).map((lane) => (
             <Column
@@ -425,15 +410,26 @@ export default function StrategyEditor(p: StrategyEditorProps) {
               )}
             </section>
             <AdvancedBox value={advanced} onChange={setAdvanced} />
-            <p className="px-1 text-[12px] leading-relaxed text-[var(--muted)]">
-              A price counts only while it is within about 2% of Chainlink's, so nobody can push a pool's price to fire your strategy. Any keeper can
-              run a step once its condition is true; it is paid your keeper fee, set under Settings.
-            </p>
           </aside>
           </div>
         </div>
       </main>
 
+      {!planLocked && !backtest && (
+        <Assistant
+          pool={pool}
+          price={price}
+          ticks={p.ticks}
+          rules={rules}
+          onApply={(r) => {
+            setRules(r);
+            setTemplate("");
+            setOpen(null);
+            setAdding(null);
+          }}
+          onBacktest={p.range ? () => setBacktest(true) : undefined}
+        />
+      )}
       {backtest && p.range && <Backtest pool={pool} price={price} range={p.range} rules={rules} advanced={advanced} onClose={() => setBacktest(false)} />}
     </div>
   );
@@ -619,15 +615,15 @@ function Column(c: ColumnProps) {
   const canAdd = !locked && !(move && L.trigger);
   return (
     <section className="flex min-w-0 flex-col">
-      <div className={`mb-3 inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 ${up ? "bg-[var(--sage-lt)] text-[var(--sage)]" : "bg-[var(--rose-lt)] text-[var(--rose)]"}`}>
+      <div className={`mb-2 inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 ${up ? "bg-[var(--sage-lt)] text-[var(--sage)]" : "bg-[var(--rose-lt)] text-[var(--rose)]"}`}>
         <Icon className="h-4 w-4" />
-        <span className="text-[13px] font-semibold">{laneTitle(pool, lane, L)}</span>
+        <span className="text-[12.5px] font-semibold">{laneTitle(pool, lane, L)}</span>
         {locked && <span className="ml-auto text-[11px] opacity-80">waits while the money is moved</span>}
       </div>
 
-      <ol className="relative flex flex-col gap-2">
+      <ol className="relative flex flex-col gap-1.5">
         {/* the rail that ties the cards of one side together */}
-        {cards.length > 1 && <span aria-hidden className="absolute bottom-6 left-[27px] top-6 w-px bg-[var(--line)]" />}
+        {cards.length > 1 && <span aria-hidden className="absolute bottom-4 left-[22px] top-4 w-px bg-[var(--line)]" />}
         {cards.map((card) => {
           const k = cardKey(card.id);
           const editable = card.editable ?? !locked;
@@ -654,14 +650,14 @@ function Column(c: ColumnProps) {
       {canAdd && (
         <div className="relative mt-2">
           <button
-            className={`flex w-full items-center gap-3 rounded-[var(--r-lg)] border border-dashed px-3 py-3 text-left text-[13px] transition-colors ${
+            className={`flex w-full items-center gap-2.5 rounded-[10px] border border-dashed px-2.5 py-1.5 text-left text-[13px] transition-colors ${
               c.adding ? "border-[var(--glow)] bg-[var(--white)] text-[var(--ink)]" : "border-[var(--line)] text-[var(--muted)] hover:border-[var(--glow)] hover:text-[var(--ink)]"
             }`}
             onClick={() => c.setAdding(c.adding ? null : { lane })}
             aria-expanded={!!c.adding}
           >
-            <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--line2)]">
-              <Plus className="h-4 w-4" />
+            <span className="grid h-6 w-6 place-items-center rounded-full bg-[var(--line2)]">
+              <Plus className="h-3.5 w-3.5" />
             </span>
             <span className="font-medium">{!L.trigger ? "Choose when" : L.actions.length ? "Add a step" : "Then what?"}</span>
             {!L.trigger && <span className="ml-auto text-[11px]">Nothing happens on this side yet</span>}
@@ -708,38 +704,37 @@ function Card({
   return (
     <li
       ref={ref}
-      className={`relative overflow-hidden rounded-[var(--r-lg)] border bg-[var(--white)] transition-[border-color,box-shadow] duration-200 ${
-        open ? "border-[var(--glow)] shadow-[0_8px_24px_-12px_rgba(139,108,255,0.45)]" : tone === "move" ? "border-[var(--blue)]/25 hover:border-[var(--blue)]/60" : "border-[var(--line)] hover:border-[var(--muted2)]"
+      className={`relative overflow-hidden rounded-[10px] border bg-[var(--white)] transition-[border-color,box-shadow] duration-200 ${
+        open ? "border-[var(--glow)] shadow-[0_8px_24px_-14px_rgba(139,108,255,0.45)]" : tone === "move" ? "border-[var(--blue)]/25 hover:border-[var(--blue)]/60" : "border-[var(--line)] hover:border-[var(--muted2)]"
       }`}
     >
-      <button className="flex w-full items-center gap-3 px-3 py-2.5 text-left" onClick={onToggle} aria-expanded={open}>
-        <span className={`relative z-10 grid h-9 w-9 shrink-0 place-items-center rounded-full ${iconCls}`}>
-          <Icon className="h-[17px] w-[17px]" strokeWidth={1.75} />
+      <button className="flex w-full items-center gap-2.5 px-2.5 py-1.5 text-left" onClick={onToggle} aria-expanded={open} title={sub ? `${kicker}: ${title} · ${sub}` : `${kicker}: ${title}`}>
+        <span className={`relative z-10 grid h-6 w-6 shrink-0 place-items-center rounded-full ${iconCls}`}>
+          <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">{kicker}</span>
-          <span className="block truncate text-[14px] font-semibold">{title}</span>
-          {sub && <span className="block truncate text-[12px] text-[var(--muted)]">{sub}</span>}
+        <span className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span className="shrink-0 text-[11px] text-[var(--muted)]">{kicker}</span>
+          <span className="truncate text-[13px] font-medium">{title}</span>
         </span>
         {warn && (
           <span title={warn} className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--amber)] text-[var(--paper)]">
             <AlertTriangle className="h-3 w-3" />
           </span>
         )}
-        <ChevronDown className={`h-4 w-4 shrink-0 text-[var(--muted)] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-[var(--muted)] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
       </button>
       {/* height animates with the grid-rows trick: 0fr closed, 1fr open */}
       <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
         <div className="min-h-0 overflow-hidden">
-          <div className="flex flex-col gap-4 border-t border-[var(--line2)] px-3 pb-3 pt-3">
+          <div className="flex flex-col gap-3 border-t border-[var(--line2)] px-3 pb-2.5 pt-2.5">
             {warn && <div className="rounded-[var(--r)] bg-[var(--amber-lt)] px-2.5 py-2 text-[12px] text-[var(--amber)]">{warn}</div>}
-            <fieldset disabled={locked} className="flex flex-col gap-4 disabled:opacity-60">
+            <fieldset disabled={locked} className="flex flex-col gap-3 disabled:opacity-60">
               {children}
             </fieldset>
             {locked && <p className="text-[12px] text-[var(--muted)]">This part is fixed for an open position.</p>}
             {onRemove && (
-              <button className="btn btn-danger self-start !px-3 !py-1.5 text-[13px]" onClick={onRemove}>
-                <Trash2 className="h-3.5 w-3.5" /> Remove
+              <button className="flex items-center gap-1.5 self-start text-[12px] text-[var(--muted)] transition-colors hover:text-[var(--rose)]" onClick={onRemove}>
+                <Trash2 className="h-3.5 w-3.5" /> Remove this step
               </button>
             )}
           </div>
@@ -784,7 +779,6 @@ function AddMenu(c: ColumnProps & { second: boolean; onClose: () => void }) {
     }
     c.setRules((r) => o.apply(r));
     c.setAdding(null);
-    if (o.open) c.setOpen(cardKey(o.open));
   };
 
   return (
@@ -835,7 +829,7 @@ function Choices({
   grid?: boolean;
 }) {
   return (
-    <div className={grid ? "grid grid-cols-1 gap-1.5 sm:grid-cols-2" : "flex flex-col gap-1.5"} role="radiogroup">
+    <div className={grid ? "grid grid-cols-1 gap-0.5 sm:grid-cols-2" : "flex flex-col gap-0.5"} role="radiogroup">
       {items.map((x) => (
         <button
           key={x.id}
@@ -843,12 +837,12 @@ function Choices({
           aria-checked={value === x.id}
           disabled={disabled}
           onClick={() => onChange(x.id)}
-          className={`flex items-start gap-2.5 rounded-[var(--r)] border px-3 py-2 text-left transition-colors ${value === x.id ? "border-[var(--glow)] bg-[var(--line2)]" : "border-[var(--line)] hover:border-[var(--muted2)]"}`}
+          className={`flex items-start gap-2.5 rounded-[var(--r)] px-2 py-1.5 text-left transition-colors ${value === x.id ? "bg-[var(--line2)]" : "hover:bg-[var(--line2)]/60"}`}
         >
           <span className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full border ${value === x.id ? "border-[4px] border-[var(--glow)]" : "border-[var(--muted2)]"}`} />
           <span className="min-w-0">
-            <span className="block text-[13px] font-semibold">{x.title}</span>
-            {x.hint && <span className="block text-[11px] text-[var(--muted)]">{x.hint}</span>}
+            <span className="block text-[13px] font-medium">{x.title}</span>
+            {x.hint && value === x.id && <span className="block text-[11px] text-[var(--muted)]">{x.hint}</span>}
           </span>
         </button>
       ))}
@@ -886,7 +880,7 @@ function StepFields({ pool, a, set, num }: { pool: Pool; a: Action; set: (patch:
           value={a.to ?? "quote"}
           onChange={(x) => set({ to: x as "base" | "quote" })}
         />
-        <p className="text-[12px] text-[var(--muted)]">Swapped at once, never worse than your slippage limit. If the pool's price is far from Chainlink's, it waits.</p>
+        <p className="text-[12px] text-[var(--muted)]">Never worse than your slippage limit.</p>
       </>
     );
   if (a.kind === "follow")
@@ -925,14 +919,6 @@ function MoveFields({
     title: `Hold ${to === "quote" ? pool.quote.symbol : pool.base.symbol}`,
     hint: "no pool, kept for you",
   }));
-  const items = [
-    ...pools.map((q) => {
-      const sh = sharedToken(pool, q);
-      const via = sh === "token0" ? pool.token0.symbol : sh === "token1" ? pool.token1.symbol : null;
-      return { id: `pool-${q.index}`, title: q.label, hint: via ? `via ${via}` : "same pair, another fee" };
-    }),
-    ...holds,
-  ];
   const value = plan.where === "park" ? `pool-${plan.parkPool}` : `hold-${move.to ?? (lane === "down" ? "quote" : "base")}`;
   const choose = (id: string) => {
     if (id.startsWith("pool-")) {
@@ -946,18 +932,38 @@ function MoveFields({
   };
   return (
     <>
-      <div className="text-[13px] text-[var(--muted)]">
-        Everything is taken out of the range and goes here until it comes back by itself. Into another pool it is swapped to the token both pools share
-        (“via”), then added there.
-      </div>
-      <Choices items={items} value={value} onChange={choose} disabled={locked} grid />
+      <Field label="Move it into">
+        <select className="input" value={value} onChange={(e) => choose(e.target.value)} disabled={locked}>
+          {pools.length > 0 && (
+            <optgroup label="Another pool">
+              {pools.map((q) => {
+                const sh = sharedToken(pool, q);
+                const via = sh === "token0" ? pool.token0.symbol : sh === "token1" ? pool.token1.symbol : null;
+                return (
+                  <option key={q.index} value={`pool-${q.index}`}>
+                    {q.label}
+                    {via ? ` · via ${via}` : " · same pair"}
+                  </option>
+                );
+              })}
+            </optgroup>
+          )}
+          <optgroup label="No pool: hold a token">
+            {holds.map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.title}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+      </Field>
       {plan.where === "park" && (
         <Field label="Range in that pool" hint="Around that pool's price when the money arrives">
           <Suffix value={plan.parkWidthPct ?? 5} suffix="% each way" onChange={(x) => setPlan((pl) => ({ ...pl, parkWidthPct: num(x) }))} />
           <Chips values={[0.2, 1, 5, 10]} current={plan.parkWidthPct} label={(x) => `±${x}%`} onPick={(x) => setPlan((pl) => ({ ...pl, parkWidthPct: x }))} />
         </Field>
       )}
-      <p className="text-[12px] text-[var(--muted)]">Both sides share this place if both move the money.</p>
+
     </>
   );
 }
@@ -1108,15 +1114,21 @@ function AdvancedBox({ value, onChange }: { value: Advanced; onChange: (a: Advan
       <div className={`grid transition-[grid-template-rows] duration-200 ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
         <div className="min-h-0 overflow-hidden">
           <div className="flex flex-col gap-3 border-t border-[var(--line2)] p-4">
-            <Field label="Keeper fee per run" hint="Paid to whoever runs a step, out of what the step moves. 0 = you run it yourself">
+            <Field label="Keeper fee per run" hint="Paid to whoever runs a step, from what it moves">
               <Suffix value={value.keeperFeeBps / 100} suffix="%" onChange={(x) => onChange({ ...value, keeperFeeBps: Math.min(100, Math.round(Number(x) * 100)) })} />
             </Field>
             <Field label="Swap slippage limit" hint="How far a swap may move the price">
               <Suffix value={value.slippagePct} suffix="%" onChange={(x) => onChange({ ...value, slippagePct: Number(x) })} />
             </Field>
-            <Field label="Strategy expires after">
+            <Field label="Strategy expires after" hint="Then anyone can close it; the money still goes to you">
               <Suffix value={value.expiryDays} suffix="days" onChange={(x) => onChange({ ...value, expiryDays: Math.max(1, Number(x)) })} />
             </Field>
+            <p className="text-[12px] text-[var(--muted)]">
+              Prices count only within ~2% of Chainlink, so nobody can push a pool to fire it.{" "}
+              <a className="underline decoration-[var(--line)] underline-offset-4 hover:text-[var(--ink)]" href="/docs#safety" target="_blank" rel="noreferrer">
+                How it&apos;s protected
+              </a>
+            </p>
           </div>
         </div>
       </div>

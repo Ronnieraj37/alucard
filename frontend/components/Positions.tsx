@@ -29,7 +29,7 @@ export default function Positions() {
   const all = [...(q.data?.rules ?? []), ...(q.data?.plain ?? [])];
 
   return (
-    <div className="mx-auto flex max-w-[860px] flex-col gap-4 px-4 py-8">
+    <div className="mx-auto flex max-w-[760px] flex-col gap-4 px-4 py-8">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Positions</h1>

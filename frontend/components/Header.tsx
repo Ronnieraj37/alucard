@@ -45,17 +45,17 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-[var(--paper)]/95">
-      <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-3 px-4 sm:gap-6">
+      <div className="mx-auto flex h-16 max-w-[1200px] items-center gap-2 px-3 sm:gap-6 sm:px-4">
         <Link href="/" className="flex items-center gap-2.5">
           <Mark size={28} />
           <span className="engraved hidden text-[17px] tracking-[0.16em] sm:inline">{APP_NAME}</span>
         </Link>
-        <nav className="flex gap-1">
+        <nav className="flex gap-0 sm:gap-1">
           {NAV.map((n) => (
             <Link
               key={n.href}
               href={n.href}
-              className={`relative px-2 py-1.5 text-[15px] sm:px-3 ${path.startsWith(n.href) ? "text-[var(--ink)] after:absolute after:inset-x-3 after:-bottom-[17px] after:h-[2px] after:bg-[var(--glow)] after:shadow-[0_0_12px_var(--glow)]" : "text-[var(--ink2)] hover:text-[var(--ink)]"}`}
+              className={`relative px-1.5 py-1.5 text-[14px] sm:px-3 sm:text-[15px] ${n.href === "/docs" ? "max-sm:hidden " : ""}${path.startsWith(n.href) ? "text-[var(--ink)] after:absolute after:inset-x-3 after:-bottom-[17px] after:h-[2px] after:bg-[var(--glow)] after:shadow-[0_0_12px_var(--glow)]" : "text-[var(--ink2)] hover:text-[var(--ink)]"}`}
             >
               {n.label}
             </Link>
@@ -88,7 +88,7 @@ export default function Header() {
               {address!.slice(0, 6)}…{address!.slice(-4)}
             </button>
           ) : (
-            <button className="btn btn-dark !rounded-full" disabled={isPending} onClick={() => connect({ connector: connectors[0] })}>
+            <button className="btn btn-dark !rounded-full max-sm:!px-3.5 max-sm:!py-2" disabled={isPending} onClick={() => connect({ connector: connectors[0] })}>
               Connect
             </button>
           )}

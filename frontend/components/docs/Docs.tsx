@@ -58,7 +58,7 @@ export default function Docs() {
         </div>
         <h1 className="mt-1 text-[34px] font-semibold tracking-tight">How {APP_NAME} works</h1>
         <p className="mt-1 max-w-[620px] text-[15px] text-[var(--muted)]">
-          How to swap, place limit orders and put rules on your liquidity, and how it all works inside: contracts, storage, encodings, formulas and APIs.
+          How to swap, place limit orders and put a strategy on your liquidity, and how it all works inside: contracts, storage, encodings, formulas and APIs.
         </p>
       </div>
 
