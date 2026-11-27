@@ -114,9 +114,22 @@ export async function POST(req: Request) {
       const p2 = problemsOf(own, r2, body.ticks);
       if (p2.length <= problems.length) [out, rules, problems] = [again, r2, p2];
     }
+    // a change keeps what it was not asked to change: a side the answer left empty keeps its steps (and the move
+    // they use), unless the user asked to remove or replace them
+    if (body.current && !/\b(remove|clear|delete|replace|instead|only|start over|reset|drop)\b/i.test(text)) {
+      for (const lane of ["down", "up"] as const) {
+        if (!rules[lane].trigger && body.current[lane]?.trigger) {
+          rules = { ...rules, [lane]: body.current[lane] };
+          if (!rules.plan && body.current.plan && body.current[lane].actions?.some((x) => x.kind === "move")) rules = { ...rules, plan: body.current.plan };
+        }
+      }
+      problems = problemsOf(own, rules, body.ticks);
+    }
     if (!rules.down.trigger && !rules.up.trigger)
       return reply({ ok: false, error: out.note || "I could not turn that into a strategy. Try naming when (a price, leaving the range, a % drop) and what to do." });
-    return reply({ ok: true, kind: "build", rules, summary: summarize(own, rules), problems, note: out.note || undefined });
+    // the model's note is shown as is, so drop it if it slipped into internal words
+    const note = out.note && !/\b(lanes?|park(ed|ing)?|plan|trigger2?|readd|downside|upside|checker)\b/i.test(out.note) ? out.note : undefined;
+    return reply({ ok: true, kind: "build", rules, summary: summarize(own, rules), problems, note });
   } catch (e) {
     console.error("assistant:", (e as Error).message);
     return reply({ ok: false, error: "The assistant is unavailable right now. Build it with the cards, or try again." }, 502);

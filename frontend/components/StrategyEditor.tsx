@@ -11,6 +11,9 @@ import {
   ArrowLeft,
   ArrowUpRight,
   ChevronDown,
+  Check,
+  Settings2,
+  X,
   LayoutTemplate,
   Sparkles,
   Clock,
@@ -41,7 +44,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReadContract } from "wagmi";
 import Assistant from "@/components/Assistant";
 import Backtest, { type BacktestRange } from "@/components/Backtest";
-import { Field, Suffix } from "@/components/ui";
+import { Field, PoolIcons, Suffix } from "@/components/ui";
 import { rulesAbi } from "@/lib/generated/abis";
 import { CORE, type Pool, fmt, poolByIndex, priceAtTick } from "@/lib/pools";
 import {
@@ -229,6 +232,7 @@ function moreOptions(rules: Rules, lane: LaneId): Option[] {
   return out;
 }
 
+const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
 const laneProblems = (v: Validation, lane: LaneId) => [...v[lane], ...v.general, ...v.plan, ...v.backDown, ...v.backUp, ...v.advice];
 /** Not a problem with a card, just the next thing to do: the "Then what?" button is right there. */
 const NEXT_STEP = new Set(["Add a step after the condition."]);
@@ -264,7 +268,14 @@ export default function StrategyEditor(p: StrategyEditorProps) {
   const [backtest, setBacktest] = useState(false);
   const [template, setTemplate] = useState("");
   // the assistant panel: open beside the steps on a wide screen, a slide-over on a narrow one (closed at first)
-  const [chat, setChat] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1100);
+  const [chat, setChat] = useState(false);
+  // one floating panel at a time: a step's settings, or the assistant
+  useEffect(() => {
+    if (open) setChat(false);
+  }, [open]);
+  useEffect(() => {
+    if (chat) setOpen(null);
+  }, [chat]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") setChat(true);
@@ -343,20 +354,42 @@ export default function StrategyEditor(p: StrategyEditorProps) {
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-[var(--paper)]">
-      {/* top bar */}
+      {/* top bar: only what you act on; the rest opens on demand */}
       <header className="ed-top">
         <button className="ed-icon" onClick={p.onClose} aria-label="Back" title="Back">
           <ArrowLeft className="h-4 w-4" />
         </button>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-semibold">
-            {pool.base.symbol} / {pool.quote.symbol} <span className="ml-1 text-[12px] font-normal text-[var(--muted)]">{pool.key.fee / 10_000}% · strategy</span>
-          </div>
-          <div className="truncate text-[12px] text-[var(--muted)]">
-            1 {pool.base.symbol} = {fmt(price)} {pool.quote.symbol} · range {p.rangeLabel}
-          </div>
+        <div className="min-w-0 flex-1 truncate text-[14px] font-semibold">
+          {pool.base.symbol} / {pool.quote.symbol} <span className="font-normal text-[var(--muted)]">· strategy</span>
         </div>
+        {!empty && (
+          <Pop
+            label={errors.length ? `${errors.length} to fix` : "Ready"}
+            icon={errors.length ? AlertTriangle : Check}
+            tone={errors.length ? "warn" : "ok"}
+            title={errors.length ? "What to fix" : "In plain words"}
+          >
+            {errors.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                {errors.map((e) => (
+                  <p key={e} className="text-[13px] leading-relaxed text-[var(--amber)]">
+                    {e}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 text-[13.5px] leading-relaxed text-[var(--ink2)]">
+                {(["down", "up"] as LaneId[]).map((lane) => (
+                  <Sentence key={lane} pool={pool} lane={lane} rules={rules} rangeLabel={p.rangeLabel} />
+                ))}
+              </div>
+            )}
+          </Pop>
+        )}
         {!moved && usable.length > 0 && <TemplatesMenu items={usable} current={template} onPick={applyTemplate} />}
+        <Pop label="" icon={Settings2} title="Settings" iconOnly>
+          <AdvancedFields value={advanced} onChange={setAdvanced} />
+        </Pop>
         {p.range && (
           <button className="ed-ghost" disabled={empty || !isValid(v)} onClick={() => setBacktest(true)} title="Replay real swap history with this strategy">
             <LineChartIcon className="h-4 w-4" />
@@ -366,84 +399,115 @@ export default function StrategyEditor(p: StrategyEditorProps) {
         <button className="btn btn-dark !px-4 !py-2 text-[13px]" disabled={p.busy || empty || !isValid(v)} onClick={() => p.onSave(rules, advanced)}>
           {p.saveLabel}
         </button>
-        {!planLocked && !chat && (
-          <button className="ed-icon" onClick={() => setChat(true)} aria-label="Open the assistant" title="Assistant (⌘K)">
-            <Sparkles className="h-4 w-4 text-[var(--glow)]" />
-          </button>
-        )}
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <main className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-[720px] flex-col gap-7 px-5 pb-16 pt-8">
-            {moved && <Notice>The money is moved right now. You can change when it comes back; the position&apos;s own steps run again once it is back.</Notice>}
-
-            {/* the strategy in one paragraph: what the cards below say */}
-            <section>
-              <div className="ed-eyebrow">In plain words</div>
-              <div className="flex flex-col gap-1.5 text-[15px] leading-relaxed text-[var(--ink2)]">
-                {(["down", "up"] as LaneId[]).map((lane) => (
-                  <Sentence key={lane} pool={pool} lane={lane} rules={rules} rangeLabel={p.rangeLabel} />
-                ))}
+      {/* the canvas: the position, then what happens if the price falls or rises */}
+      <main className={`fl-canvas min-h-0 flex-1 overflow-auto ${chat ? "side-chat" : open ? "side-step" : ""}`}>
+        <div className="fl-flow">
+          {moved && <Notice className="mb-6">The money is moved right now. You can change when it comes back.</Notice>}
+          <div className="fl-root">
+            <PoolIcons pool={pool} />
+            <div className="min-w-0">
+              <div className="text-[13.5px] font-medium text-[var(--ink)]">Your position</div>
+              <div className="truncate text-[12px] text-[var(--muted)]">
+                {p.rangeLabel} · now {fmt(price)} {pool.quote.symbol}
               </div>
-              {!empty && errors.length > 0 && (
-                <div className="mt-3 flex flex-col gap-1">
-                  {errors.map((e) => (
-                    <div key={e} className="flex gap-2 text-[12.5px] text-[var(--amber)]">
-                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      <span>{e}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {empty && !moved && usable.length > 0 && (
-              <section>
-                <div className="ed-eyebrow">Start from a template</div>
-                <div className="ed-list grid sm:grid-cols-2">
-                  {usable.slice(0, 6).map((t) => (
-                    <button key={t.id} className="ed-tpl" onClick={() => applyTemplate(t.id)}>
-                      <span className="block text-[13.5px] font-medium text-[var(--ink)]">{t.name}</span>
-                      <span className="block text-[12px] text-[var(--muted)]">{t.hint}</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-2 text-[12.5px] text-[var(--muted)]">Or describe it to the assistant, or add the first step below.</p>
-              </section>
-            )}
-
+            </div>
+          </div>
+          <div className="fl-split" aria-hidden="true" />
+          <div className="fl-lanes">
             {(["down", "up"] as LaneId[]).map((lane) => (
               <Column key={lane} {...lanesProps(lane)} />
             ))}
-
-            <AdvancedBox value={advanced} onChange={setAdvanced} />
           </div>
-        </main>
+          {empty && !moved && (
+            <p className="fl-hint mt-10">
+              Add a condition to a side, pick a template, or{" "}
+              {!planLocked && (
+                <button className="underline decoration-[var(--line)] underline-offset-4 hover:text-[var(--ink)]" onClick={() => setChat(true)}>
+                  ask Alucard
+                </button>
+              )}
+              .
+            </p>
+          )}
+        </div>
+      </main>
 
-        {!planLocked && chat && (
-          <>
-            <div className="ed-scrim lg:hidden" onClick={() => setChat(false)} aria-hidden="true" />
-            <aside className="ed-panel">
-              <Assistant
-                pool={pool}
-                price={price}
-                ticks={p.ticks}
-                rules={rules}
-                onClose={() => setChat(false)}
-                onApply={(r) => {
-                  setRules(r);
-                  setTemplate("");
-                  setOpen(null);
-                  setAdding(null);
-                }}
-                onBacktest={p.range ? () => setBacktest(true) : undefined}
-              />
-            </aside>
-          </>
-        )}
-      </div>
+      {/* the assistant floats over the canvas: a pill until you use it */}
+      {!planLocked &&
+        (chat ? (
+          <aside className="fl-chat">
+            <Assistant
+              pool={pool}
+              price={price}
+              ticks={p.ticks}
+              rules={rules}
+              onClose={() => setChat(false)}
+              onApply={(r) => {
+                setRules(r);
+                setTemplate("");
+                setOpen(null);
+                setAdding(null);
+              }}
+              onBacktest={p.range ? () => setBacktest(true) : undefined}
+            />
+          </aside>
+        ) : (
+          <button className="fl-ask" onClick={() => setChat(true)}>
+            <Sparkles className="h-4 w-4 text-[var(--glow)]" />
+            Ask Alucard
+            <kbd>⌘K</kbd>
+          </button>
+        ))}
       {backtest && p.range && <Backtest pool={pool} price={price} range={p.range} rules={rules} advanced={advanced} onClose={() => setBacktest(false)} />}
+    </div>
+  );
+}
+
+/** A top-bar button that opens a small panel under it. */
+function Pop({
+  label,
+  icon: Icon,
+  title,
+  tone,
+  iconOnly,
+  children,
+}: {
+  label: string;
+  icon: LucideIcon;
+  title: string;
+  tone?: "ok" | "warn";
+  iconOnly?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    window.addEventListener("mousedown", away);
+    return () => window.removeEventListener("mousedown", away);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        className={iconOnly ? "ed-icon" : `fl-status ${tone ?? ""}`}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={title}
+        aria-label={iconOnly ? title : undefined}
+      >
+        <Icon className="h-3.5 w-3.5" />
+        {!iconOnly && label}
+      </button>
+      {open && (
+        <div className="ed-menu !w-[340px] !p-4" role="dialog" aria-label={title}>
+          <div className="mb-2 text-[12.5px] font-medium text-[var(--muted)]">{title}</div>
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -522,7 +586,7 @@ function Column(c: ColumnProps) {
   const locked = c.moved; // the position's own sides wait while the money is moved
   const Icon = up ? ArrowUpRight : ArrowDownRight;
 
-  const cards: { id: CardId; kicker: string; title: string; sub?: string; icon: LucideIcon; tone?: "when" | "move"; warn?: string; body: React.ReactNode; remove?: () => void; editable?: boolean }[] = [];
+  const cards: { id: CardId; kicker: string; title: string; headline?: string; sub?: string; icon: LucideIcon; tone?: "when" | "move"; warn?: string; body: React.ReactNode; remove?: () => void; editable?: boolean }[] = [];
   const update = (fn: (l: Lane) => Lane) => c.setLane(lane, fn);
   const num = (s: string) => (s === "" ? NaN : Number(s));
 
@@ -531,6 +595,7 @@ function Column(c: ColumnProps) {
       id: { lane, part: "trigger" },
       kicker: "When",
       title: TITLES[L.trigger.kind],
+      headline: cap(describeTrigger(pool, lane, L.trigger)),
       sub: describeTrigger(pool, lane, L.trigger),
       icon: L.trigger.kind === "trail" && up ? TrendingUp : ICONS[L.trigger.kind],
       tone: "when",
@@ -544,6 +609,7 @@ function Column(c: ColumnProps) {
       id: { lane, part: "trigger2" },
       kicker: L.combine === "or" ? "Or when" : "And when",
       title: TITLES[L.trigger2.kind],
+      headline: cap(describeTrigger(pool, lane, L.trigger2)),
       sub: describeTrigger(pool, lane, L.trigger2),
       icon: L.trigger2.kind === "trail" && up ? TrendingUp : ICONS[L.trigger2.kind],
       tone: "when",
@@ -587,6 +653,7 @@ function Column(c: ColumnProps) {
       id: { lane, part: "step", kind: a.kind },
       kicker: "Then",
       title: TITLES[a.kind],
+      headline: cap(describeAction(pool, a, plan)),
       sub: describeAction(pool, a, plan),
       icon: ICONS[a.kind],
       remove: () => update((l) => ({ ...l, actions: l.actions.filter((x) => x.kind !== a.kind && !(a.kind === "withdraw" && x.kind === "convert")) })),
@@ -644,6 +711,7 @@ function Column(c: ColumnProps) {
       id: { lane, part: "repeat" },
       kicker: "Finally",
       title: "Repeat",
+      headline: L.maxRuns ? `Repeat, at most ${L.maxRuns} times` : "Repeat every time",
       sub: L.maxRuns ? `At most ${L.maxRuns} times` : "Runs again the next time",
       icon: Repeat,
       remove: () => update((l) => ({ ...l, repeat: false, maxRuns: undefined })),
@@ -663,118 +731,124 @@ function Column(c: ColumnProps) {
   }
 
   const canAdd = !locked && !(move && L.trigger);
+  const openCard = cards.find((card) => isOpen(card.id));
   return (
-    <section className="flex min-w-0 flex-col">
-      <div className="ed-eyebrow flex items-center gap-2">
-        <Icon className={`h-3.5 w-3.5 ${up ? "text-[var(--sage)]" : "text-[var(--rose)]"}`} />
-        <span className="text-[var(--ink)]">{laneTitle(pool, lane, L)}</span>
-        {cards.length > 0 && <span className="text-[var(--muted)]">· {cards.length} step{cards.length > 1 ? "s" : ""}</span>}
-        {locked && <span className="ml-auto text-[var(--muted)]">waits while the money is moved</span>}
+    <section className="fl-lane">
+      <div className={`fl-branch ${up ? "up" : "down"}`}>
+        <Icon className="h-3.5 w-3.5" />
+        {laneTitle(pool, lane, L)}
       </div>
+      {locked && <p className="mt-2 text-[12px] text-[var(--muted)]">Waits while the money is moved</p>}
 
-      <ol className="ed-list">
-        {cards.map((card) => {
-          const k = cardKey(card.id);
-          const editable = card.editable ?? !locked;
-          return (
-            <Card
-              key={k}
-              open={isOpen(card.id)}
-              onToggle={() => toggle(card.id)}
-              kicker={card.kicker}
-              title={card.title}
-              sub={card.sub}
-              icon={card.icon}
-              tone={card.tone}
-              warn={card.warn}
-              locked={!editable}
-              onRemove={editable ? card.remove : undefined}
-            >
-              {card.body}
-            </Card>
-          );
-        })}
-        {canAdd && (
-          <li className="relative">
-            <button className={`ed-add ${c.adding ? "on" : ""}`} onClick={() => c.setAdding(c.adding ? null : { lane })} aria-expanded={!!c.adding}>
-              <Plus className="h-4 w-4" />
-              <span>{!L.trigger ? "Add a condition" : L.actions.length ? "Add a step" : "Then what?"}</span>
-              {!L.trigger && <span className="ml-auto text-[12px] text-[var(--muted2)]">Nothing happens on this side</span>}
+      {cards.map((card) => {
+        const k = cardKey(card.id);
+        return (
+          <div key={k} className="fl-step">
+            <span className="fl-wire" aria-hidden="true" />
+            <button className={`fl-node ${isOpen(card.id) ? "on" : ""} ${card.tone === "move" ? "move" : ""}`} onClick={() => toggle(card.id)} aria-expanded={isOpen(card.id)} title={card.sub}>
+              <span className={`fl-ic ${card.tone ?? ""}`}>
+                <card.icon className="h-3.5 w-3.5" strokeWidth={1.9} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[11.5px] text-[var(--muted)]">{card.kicker}</span>
+                <span className="line-clamp-2 block text-[13.5px] font-medium leading-snug text-[var(--ink)]">{card.headline ?? card.title}</span>
+              </span>
+              {card.warn && (
+                <span className="fl-warn" title={card.warn}>
+                  <AlertTriangle className="h-3 w-3" />
+                </span>
+              )}
+            </button>
+          </div>
+        );
+      })}
+
+      {canAdd && (
+        <div className="fl-step">
+          <span className="fl-wire dashed" aria-hidden="true" />
+          <div className="relative">
+            <button className={`fl-plus ${c.adding ? "on" : ""}`} onClick={() => c.setAdding(c.adding ? null : { lane })} aria-expanded={!!c.adding}>
+              <Plus className="h-3.5 w-3.5" />
+              {!L.trigger ? "Add a condition" : L.actions.length ? "Add a step" : "Then what?"}
             </button>
             {c.adding && <AddMenu {...c} second={!!c.adding.second} onClose={() => c.setAdding(null)} />}
-          </li>
-        )}
-      </ol>
+          </div>
+        </div>
+      )}
+
+      {openCard && (
+        <Inspector
+          kicker={openCard.kicker}
+          title={openCard.title}
+          icon={openCard.icon}
+          tone={openCard.tone}
+          warn={openCard.warn}
+          locked={!(openCard.editable ?? !locked)}
+          onClose={() => c.setOpen(null)}
+          onRemove={(openCard.editable ?? !locked) ? openCard.remove : undefined}
+        >
+          {openCard.body}
+        </Inspector>
+      )}
     </section>
   );
 }
 
-// ---------------------------------------------------------------- a card that opens in place
+// ---------------------------------------------------------------- the selected step's settings, in a floating panel
 
-function Card({
-  open,
-  onToggle,
+function Inspector({
   kicker,
   title,
-  sub,
   icon: Icon,
   tone,
   warn,
   locked,
+  onClose,
   onRemove,
   children,
 }: {
-  open: boolean;
-  onToggle: () => void;
   kicker: string;
   title: string;
-  sub?: string;
   icon: LucideIcon;
   tone?: "when" | "move";
   warn?: string;
   locked: boolean;
+  onClose: () => void;
   onRemove?: () => void;
   children: React.ReactNode;
 }) {
-  const ref = useRef<HTMLLIElement>(null);
   useEffect(() => {
-    if (open) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [open]);
-  const iconCls = tone === "when" ? "text-[var(--glow)]" : tone === "move" ? "text-[var(--blue)]" : "text-[var(--muted)]";
+    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onClose]);
   return (
-    <li
-      ref={ref}
-      className={`ed-row ${open ? "open" : ""}`}
-    >
-      <button className="ed-row-head" onClick={onToggle} aria-expanded={open} title={sub ? `${kicker}: ${title} · ${sub}` : `${kicker}: ${title}`}>
-        <Icon className={`h-4 w-4 shrink-0 ${iconCls}`} strokeWidth={1.8} />
-        <span className="w-[104px] shrink-0 truncate text-[12.5px] text-[var(--muted)]">{kicker}</span>
-        <span className="min-w-0 flex-1 truncate text-[13.5px] text-[var(--ink)]">{title}</span>
-        {warn && (
-          <span title={warn} className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--amber)] text-[var(--paper)]">
-            <AlertTriangle className="h-3 w-3" />
-          </span>
-        )}
-        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-[var(--muted)] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-      </button>
-      {/* height animates with the grid-rows trick: 0fr closed, 1fr open */}
-      <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
-        <div className="min-h-0 overflow-hidden">
-          <div className="flex flex-col gap-3 px-4 pb-4 pl-[40px] pt-1">
-            {warn && <div className="rounded-[var(--r)] bg-[var(--amber-lt)] px-2.5 py-2 text-[12px] text-[var(--amber)]">{warn}</div>}
-            <fieldset disabled={locked} className="flex flex-col gap-3 disabled:opacity-60">
-              {children}
-            </fieldset>
-            {locked && <p className="text-[12px] text-[var(--muted)]">This part is fixed for an open position.</p>}
-            {onRemove && (
-              <button className="flex items-center gap-1.5 self-start text-[12px] text-[var(--muted)] transition-colors hover:text-[var(--rose)]" onClick={onRemove}>
-                <Trash2 className="h-3.5 w-3.5" /> Remove this step
-              </button>
-            )}
-          </div>
+    <div className="fl-inspector" role="dialog" aria-label={`${kicker}: ${title}`}>
+      <div className="flex items-center gap-2.5 px-4 pb-3 pt-4">
+        <span className={`fl-ic ${tone ?? ""}`}>
+          <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[11.5px] text-[var(--muted)]">{kicker}</div>
+          <div className="truncate text-[14px] font-semibold text-[var(--ink)]">{title}</div>
         </div>
+        <button className="ed-icon" onClick={onClose} aria-label="Close">
+          <X className="h-4 w-4" />
+        </button>
       </div>
-    </li>
+      <div className="flex flex-col gap-3 overflow-y-auto px-4 pb-4">
+        {warn && <div className="rounded-[8px] bg-[var(--amber-lt)] px-3 py-2 text-[12.5px] text-[var(--amber)]">{warn}</div>}
+        <fieldset disabled={locked} className="flex flex-col gap-3 disabled:opacity-60">
+          {children}
+        </fieldset>
+        {locked && <p className="text-[12px] text-[var(--muted)]">This part is fixed for an open position.</p>}
+        {onRemove && (
+          <button className="mt-1 flex items-center gap-1.5 self-start text-[12.5px] text-[var(--muted)] transition-colors hover:text-[var(--rose)]" onClick={onRemove}>
+            <Trash2 className="h-3.5 w-3.5" /> Remove this step
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -818,7 +892,7 @@ function AddMenu(c: ColumnProps & { second: boolean; onClose: () => void }) {
   return (
     <div
       ref={ref}
-      className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 max-h-[60vh] origin-top animate-[menu-in_120ms_ease-out] overflow-y-auto rounded-[12px] bg-[var(--white2)] p-1.5 shadow-[inset_0_0_0_1px_var(--line),0_24px_48px_-20px_rgba(0,0,0,0.85)]"
+      className="absolute left-1/2 top-[calc(100%+6px)] z-20 w-[320px] -translate-x-1/2 max-h-[60vh] origin-top animate-[menu-in_120ms_ease-out] overflow-y-auto rounded-[12px] bg-[var(--white2)] p-1.5 shadow-[inset_0_0_0_1px_var(--line),0_24px_48px_-20px_rgba(0,0,0,0.85)]"
     >
       {groups.map(([title, list]) => (
         <div key={title} className="mb-1 last:mb-0">
@@ -1133,6 +1207,29 @@ function Sentence({ pool, lane, rules, rangeLabel }: { pool: Pool; lane: LaneId;
 }
 
 const lowerFirst = (s: string) => (/^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s);
+
+/** Settings, as fields (the top bar shows them in a small panel). */
+function AdvancedFields({ value, onChange }: { value: Advanced; onChange: (a: Advanced) => void }) {
+  return (
+    <div className="flex flex-col gap-3">
+      <Field label="Keeper fee per run" hint="Paid to whoever runs a step, from what it moves">
+        <Suffix value={value.keeperFeeBps / 100} suffix="%" onChange={(x) => onChange({ ...value, keeperFeeBps: Math.min(100, Math.round(Number(x) * 100)) })} />
+      </Field>
+      <Field label="Swap slippage limit" hint="How far a swap may move the price">
+        <Suffix value={value.slippagePct} suffix="%" onChange={(x) => onChange({ ...value, slippagePct: Number(x) })} />
+      </Field>
+      <Field label="Strategy expires after" hint="Then anyone can close it; the money still goes to you">
+        <Suffix value={value.expiryDays} suffix="days" onChange={(x) => onChange({ ...value, expiryDays: Math.max(1, Number(x)) })} />
+      </Field>
+      <p className="text-[12px] text-[var(--muted)]">
+        Prices count only within ~2% of Chainlink, so nobody can push a pool to fire it.{" "}
+        <a className="underline decoration-[var(--line)] underline-offset-4 hover:text-[var(--ink)]" href="/docs#safety" target="_blank" rel="noreferrer">
+          How it&apos;s protected
+        </a>
+      </p>
+    </div>
+  );
+}
 
 function AdvancedBox({ value, onChange }: { value: Advanced; onChange: (a: Advanced) => void }) {
   const [open, setOpen] = useState(false);

@@ -261,6 +261,66 @@ select.input option { background: var(--white); color: var(--ink); }
 .ai-send:disabled { background: var(--steel2); color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .ai-typing span, .ed-panel { animation: none; } }
 
+/* ---------------------------------------------------------------- the strategy as a flow
+   A dotted canvas; the position at the top branching into the two sides; each step a small card joined by a wire.
+   A step's settings open in a floating inspector, the assistant in a floating panel: one at a time. */
+.fl-canvas { background-image: radial-gradient(rgba(220, 214, 255, 0.1) 1px, transparent 1px); background-size: 22px 22px; }
+.fl-flow { margin: 0 auto; display: flex; max-width: 760px; flex-direction: column; align-items: center; padding: 48px 24px 140px; }
+.fl-root { display: flex; width: 340px; max-width: 100%; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--white); box-shadow: inset 0 0 0 1px var(--line); }
+.fl-hint { margin-top: 14px; font-size: 12.5px; color: var(--muted); text-align: center; }
+.fl-split { position: relative; width: calc(50% + 16px); height: 28px; }
+.fl-split::before { content: ""; position: absolute; left: 50%; top: 0; height: 12px; width: 1px; background: var(--line); }
+.fl-split::after { content: ""; position: absolute; left: 0; right: 0; top: 12px; height: 16px; border: 1px solid var(--line); border-bottom: 0; border-radius: 12px 12px 0 0; }
+.fl-lanes { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; }
+.fl-lane { display: flex; min-width: 0; flex-direction: column; align-items: center; }
+.fl-branch { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+.fl-branch.down { color: var(--rose); background: var(--rose-lt); }
+.fl-branch.up { color: var(--sage); background: var(--sage-lt); }
+.fl-step { display: flex; width: 100%; flex-direction: column; align-items: center; }
+.fl-wire { width: 1px; height: 18px; background: var(--line); }
+.fl-wire.dashed { background: none; border-left: 1px dashed var(--line); }
+.fl-node { display: flex; width: 100%; max-width: 300px; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; text-align: left;
+  background: var(--white); box-shadow: inset 0 0 0 1px var(--line2); transition: box-shadow 0.15s, background 0.15s; }
+.fl-node:hover { box-shadow: inset 0 0 0 1px var(--line); }
+.fl-node.on { box-shadow: inset 0 0 0 1px var(--glow), 0 0 0 4px rgba(139, 108, 255, 0.14); }
+.fl-node.move { background: linear-gradient(0deg, rgba(143, 168, 255, 0.05), rgba(143, 168, 255, 0.05)), var(--white); }
+.fl-ic { display: grid; width: 28px; height: 28px; flex-shrink: 0; place-items: center; border-radius: 8px; color: var(--muted); background: var(--white2); }
+.fl-ic.when { color: var(--glow); background: var(--accent-lt); }
+.fl-ic.move { color: var(--blue); background: var(--blue-lt); }
+.fl-tag { flex-shrink: 0; padding: 2px 7px; border-radius: 6px; font-size: 11px; color: var(--muted); background: var(--line2); }
+.fl-warn { display: grid; width: 20px; height: 20px; flex-shrink: 0; place-items: center; border-radius: 999px; color: var(--paper); background: var(--amber); }
+.fl-plus { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 13px; border-radius: 999px; font-size: 12.5px; color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line); transition: color 0.15s, box-shadow 0.15s, background 0.15s; }
+.fl-plus:hover, .fl-plus.on { color: var(--ink); box-shadow: inset 0 0 0 1px var(--glow); background: var(--accent-lt); }
+.fl-status { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; font-weight: 500; }
+.fl-status.ok { color: var(--sage); background: var(--sage-lt); }
+.fl-status.warn { color: var(--amber); background: var(--amber-lt); }
+.fl-inspector { position: fixed; top: 72px; right: 20px; z-index: 45; display: flex; width: 360px; max-height: calc(100vh - 92px); flex-direction: column; border-radius: 16px;
+  background: var(--white2); box-shadow: inset 0 0 0 1px var(--line), 0 30px 70px -24px rgba(0, 0, 0, 0.85); animation: panel-in 0.16s ease-out; }
+.fl-ask { position: fixed; bottom: 24px; left: 50%; translate: -50% 0; z-index: 45; display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 16px;
+  border-radius: 999px; font-size: 14px; font-weight: 500; color: var(--ink); background: var(--white2);
+  box-shadow: inset 0 0 0 1px var(--line), 0 18px 40px -16px rgba(0, 0, 0, 0.85); transition: box-shadow 0.15s; }
+.fl-ask:hover { box-shadow: inset 0 0 0 1px var(--glow), 0 18px 40px -16px rgba(0, 0, 0, 0.85); }
+.fl-ask kbd { margin-left: 4px; padding: 3px 8px; border-radius: 999px; font-family: var(--font-geist-mono), monospace; font-size: 11px; color: var(--muted); background: var(--line2); }
+.fl-chat { position: fixed; right: 20px; bottom: 20px; z-index: 50; width: 400px; height: min(620px, calc(100vh - 96px)); overflow: hidden; border-radius: 18px;
+  background: var(--white2); box-shadow: inset 0 0 0 1px var(--line), 0 30px 70px -24px rgba(0, 0, 0, 0.9); animation: panel-in 0.18s ease-out; }
+.fl-chat .ai-head, .fl-chat .ai-composer { background: transparent; }
+.fl-chat .ai-composer { background: var(--white); }
+/* an open panel moves the flow aside instead of covering it */
+@media (min-width: 1100px) {
+  .fl-canvas { transition: padding 0.2s ease-out; }
+  .fl-canvas.side-chat { padding-right: 420px; }
+  .fl-canvas.side-step { padding-right: 380px; }
+}
+@media (max-width: 720px) {
+  .fl-lanes { grid-template-columns: 1fr; gap: 40px; }
+  .fl-split { display: none; }
+  .fl-inspector { top: auto; left: 10px; right: 10px; bottom: 10px; width: auto; max-height: 75vh; }
+  .fl-chat { inset: 0; width: auto; height: auto; border-radius: 0; }
+  .fl-ask kbd { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .fl-inspector, .fl-chat { animation: none; } }
+
 /* the strategy step on the new-position card */
 .strat { border-radius: 12px; padding: 14px; background: var(--white2); box-shadow: inset 0 0 0 1px var(--line); }
 .strat.on { box-shadow: inset 0 0 0 1px rgba(94, 224, 168, 0.35); }
@@ -277,3 +337,5 @@ select.input option { background: var(--white); color: var(--ink); }
 .net-item { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; font-size: 14px; color: var(--ink); }
 .net-item:hover { background: var(--line2); }
 .net-menu-f { padding: 6px 10px 4px; font-size: 12px; color: var(--muted); }
+
+
