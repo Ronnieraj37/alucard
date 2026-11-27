@@ -64,41 +64,40 @@ export default function Keeper() {
     <div className="mx-auto flex max-w-[760px] flex-col gap-4 px-4 py-8">
       <div className="flex items-start gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Keeper</h1>
-          <div className="text-[13px] text-[var(--muted)]">
-            Strategies run when anyone triggers them, and whoever runs one earns its fee. Keeper bots do it all day; you can too, from here.
-          </div>
+          <h1 className="page-h">Keeper</h1>
+          <div className="page-sub">Anyone can run a ready step and earn its fee. Bots do it all day; you can too.</div>
         </div>
         <button className="btn btn-light ml-auto !p-2" onClick={() => q.refetch()} title="Refresh">
           <RefreshCw className={`h-4 w-4 ${q.isFetching ? "animate-spin" : ""}`} />
         </button>
       </div>
-      <div className="text-[13px] text-[var(--muted)]">{q.data ? `${q.data.open} open positions with a strategy, ${q.data.ready.length} ready to run.` : "Checking…"}</div>
+      <div className="text-[12.5px] font-medium text-[var(--muted)]">{q.data ? `${q.data.ready.length} ready to run · ${q.data.open} watched` : "Checking…"}</div>
       {q.data && q.data.ready.length === 0 && <Empty text="Nothing to run right now. Move a price on the Swap page to trigger a strategy." />}
-      <div className="flex flex-col gap-2">
-        {q.data?.ready.map((r) => (
-          <div key={`${r.id}-${r.upper}`} className="card flex items-start gap-3 p-3 text-[13px]">
-            <Bot className="mt-0.5 h-4 w-4 text-[var(--muted)]" />
-            <div>
-              <div className="font-semibold">
-                #{String(r.id)} · {r.label}
+      {!!q.data?.ready.length && (
+        <div className="list">
+          {q.data.ready.map((r) => (
+            <div key={`${r.id}-${r.upper}`} className="row">
+              <Bot className="h-4 w-4 shrink-0 text-[var(--glow)]" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[14px] font-medium text-[var(--ink)]">
+                  #{String(r.id)} · {r.label}
+                </div>
+                <div className="truncate text-[12.5px] text-[var(--muted)]">{r.text}</div>
               </div>
-              <div className="text-[var(--muted)]">{r.text}</div>
+              <span className="pill accent">Ready</span>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
       {!!q.data?.ready.length && (
         <button className="btn btn-dark !rounded-[14px] !py-3" disabled={!address || tx.state.busy} onClick={runAll}>
           <Play className="h-4 w-4" /> {address ? "Run all ready steps" : "Connect a wallet to run them"}
         </button>
       )}
       {!!q.data?.pokes.length && (
-        <div className="card flex flex-col gap-2 p-3 text-[13px]">
-          <div className="font-semibold">To update ({q.data.pokes.length})</div>
-          <div className="text-[var(--muted)]">
-            Trailing stops remember the best price, and “only if it lasts” needs to be seen true first: someone has to update them as the price moves. Updating moves no tokens and is not paid.
-          </div>
+        <div className="card flex flex-col gap-2 p-4 text-[13px]">
+          <div className="font-medium text-[var(--ink)]">To update ({q.data.pokes.length})</div>
+          <div className="text-[12.5px] text-[var(--muted)]">Trailing stops and holds need someone to record the price as it moves. No tokens move.</div>
           {q.data.pokes.map((r) => (
             <div key={`p-${r.id}-${r.upper}`} className="text-[var(--muted)]">
               #{String(r.id)} · {r.label}: {r.text}

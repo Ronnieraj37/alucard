@@ -67,7 +67,7 @@ export function TokenBox({
   dim?: string;
 }) {
   return (
-    <div className="rounded-[16px] bg-[var(--line2)] p-4">
+    <div className="rounded-[12px] bg-[var(--paper)] p-4 shadow-[inset_0_0_0_1px_var(--line2)]">
       {label !== token.symbol && <div className="mb-1 text-[13px] text-[var(--muted)]">{label}</div>}
       <div className="flex items-center gap-3">
         <input

@@ -190,7 +190,7 @@ export default function AddLiquidity() {
   return (
     <div className="mx-auto flex max-w-[520px] flex-col gap-3 px-4 py-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">New position</h1>
+        <h1 className="page-h">New position</h1>
         <button className="text-[13px] text-[var(--muted)] hover:text-[var(--ink)]" onClick={() => router.push("/pool")}>
           Cancel
         </button>
@@ -371,7 +371,7 @@ function PriceBox({ label, value, quote, base, onCommit }: { label: string; valu
   const [text, setText] = useState(shown);
   useEffect(() => setText(shown), [shown]);
   return (
-    <div className="rounded-[12px] bg-[var(--line2)] p-3 text-center">
+    <div className="rounded-[12px] bg-[var(--paper)] p-3 text-center shadow-[inset_0_0_0_1px_var(--line2)]">
       <div className="text-[12px] text-[var(--muted)]">{label}</div>
       <input
         className="w-full bg-transparent text-center text-[20px] font-semibold outline-none"

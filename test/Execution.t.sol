@@ -188,6 +188,43 @@ contract ExecutionTest is RuleSetup {
         assertGt(up2.edge, up.edge);
     }
 
+    /// Re-range both ways, repeating (the owner's question): when the price rises out and the top side re-centres,
+    /// the bottom side follows the new range too. Its condition is "leaves my range", which reads the range's edges,
+    /// and the re-centre moved both edges. A fall out of the NEW range then re-centres downward, not one out of the old.
+    function test_rerangeBothWaysFollowsTheNewRange() public {
+        OrderState.Side memory f = _exit(OrderState.CHECK_EDGE, 60);
+        f.actions |= OrderState.ACT_ADD;
+        f.addMode = OrderState.ADD_CENTERED;
+        f.shape = 5 | (5 << 11);
+        f.repeat = true;
+        uint256 id = _create(f, f);
+        (OrderState.Side memory lo0, OrderState.Side memory up0) = _state(id);
+
+        // up and out: the top side re-centres; both edges move up
+        _swap(false, 5e18);
+        _settle();
+        assertFalse(rules.canExecute(orders, id, false)); // a rise never fires the bottom side
+        _run(id, true);
+        (OrderState.Side memory lo1, OrderState.Side memory up1) = _state(id);
+        assertGt(lo1.edge, lo0.edge);
+        assertGt(up1.edge, up0.edge);
+        assertEq(lo1.checker, OrderState.CHECK_EDGE); // both sides still live, still about the range
+        assertEq(up1.checker, OrderState.CHECK_EDGE);
+
+        // down, out of the new range but still above the old bottom edge: the bottom side fires (new range)
+        _wait(2 minutes);
+        int24 target = lo1.edge - 60 - 30; // past the new bottom edge and its 60-tick margin
+        while (_tick() > target) _swap(true, 0.5e18);
+        assertGt(_tick(), lo0.edge); // the old range would not have fired yet
+        _settle();
+        assertTrue(rules.canExecute(orders, id, false));
+        _run(id, false);
+        (OrderState.Side memory lo2, OrderState.Side memory up2) = _state(id);
+        assertLt(up2.edge, up1.edge);
+        assertLt(lo2.edge, lo1.edge);
+        assertGt(_liquidity(id), 0);
+    }
+
     /// A trailing stop: the remembered high follows the price (poke), and the side fires 3% below it.
     function test_trailingStop() public {
         uint256 id = _create(_exit(OrderState.CHECK_TRAIL, 300), _off());

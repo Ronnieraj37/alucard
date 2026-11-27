@@ -64,7 +64,7 @@ export default function PositionDetail({ id }: { id: bigint }) {
       </Link>
       <div className="flex flex-wrap items-center gap-3">
         <PoolIcons pool={p.pool} />
-        <h1 className="text-xl font-semibold">
+        <h1 className="page-h">
           {p.pool.base.symbol} / {p.pool.quote.symbol}
         </h1>
         <span className="rounded bg-[var(--line2)] px-1.5 py-0.5 text-[11px] font-semibold">{p.pool.key.fee / 10_000}%</span>

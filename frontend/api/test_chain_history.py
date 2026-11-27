@@ -145,6 +145,29 @@ def test_a_stop_loss_runs_the_same_on_a_pool_quoted_the_other_way():
     assert b["sides"]["upper"]["checker"] == e.CHECK_TICK  # base falls = the tick rises in the mirrored pool
 
 
+
+def test_rerange_both_ways_follows_the_new_range():
+    """Both sides re-centre on leaving the range, repeating. Up and out: the top side re-centres. Then down, out of
+    the NEW range but still above the old bottom: the bottom side fires (it reads the range, which moved), the same as
+    test/Execution.t.sol test_rerangeBothWaysFollowsTheNewRange on the contract."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
+    from parity_engine import series as synthetic  # noqa: PLC0415
+
+    d = e.Side(checker=e.CHECK_EDGE, value=60, actions=e.ACT_REMOVE | e.ACT_KEEP_FEES | e.ACT_ADD, remove_bps=10_000,
+               add_mode=e.ADD_CENTERED, repeat=True, shape=5 | (5 << 11))
+    w = str(e.encode_word(d))
+    ticks = [0] + list(range(0, 721, 60)) + [720] * 5 + list(range(720, 279, -60)) + [280] * 5
+    t0 = 1_780_000_000
+    s = synthetic({"ts": [t0 + 120 * i for i in range(len(ticks))], "ticks": ticks}, t0)
+    r = e.run_series(s, None, {"order": {"lower": w, "upper": w}, "homeIndex": 1, "refTick": 0, "baseIs0": True, "ticks": [-600, 600],
+                               "start": float(s.ts[0]), "days": 10_000, "delaySec": 0, "keeperFeeBps": 10, "slippagePct": 5})
+    row = {float(t): i for i, t in enumerate(s.ts)}
+    fired = [(ticks[row[ev["t"]]], ev["side"]) for ev in r["events"]]
+    assert [x[1] for x in fired] == ["upper", "lower"], fired
+    assert fired[0][0] >= 660  # past the top edge (600) and its margin
+    assert -600 < fired[1][0] < 300  # past the new bottom (about 360 - 60), long before the old bottom (-600)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:
