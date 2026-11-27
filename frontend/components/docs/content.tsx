@@ -46,7 +46,7 @@ export const SECTIONS: DocSection[] = [
           <p>
             Four contracts. <code>RuleHook</code> is the Uniswap v4 hook (afterInitialize, beforeSwap, afterSwap): it fills limit orders inside swaps. <code>ConditionalOrders</code> holds positions that have a strategy, inside the PoolManager (owner = the contract, salt =
             order id). <code>Rules</code> holds the pool table (any pool of listed tokens) and does conditions, the Chainlink check, validation and price math. <code>PriceFeeds</code> is the Chainlink token list. Each stays
-            under the 24 KB size limit. Source: <code>src/</code>, tests: <code>test/</code> (134 Foundry tests).
+            under the 24 KB size limit. Source: <code>src/</code>, tests: <code>test/</code> (138 Foundry tests).
           </p>
         </Dev>
       </Section>
@@ -186,9 +186,10 @@ export const SECTIONS: DocSection[] = [
       <Section id="strategies" title="Strategies" lead="Two sides: what happens if the price falls, and what happens if it rises. Each side is: when this is true, do these steps.">
         <RangeSides />
         <p>
-          The editor shows the two sides as two columns of cards, read top to bottom. A card opens in place to show its settings; <Kbd>Add</Kbd> under a column
-          only offers what fits after the cards above it, and greys out the rest with the reason. The summary on the right says the whole strategy in plain
-          words.
+          The builder shows the strategy as a flow: your position at the top, branching into the two sides, each a short chain of step cards read top to
+          bottom. Click a step to open its settings; the <Kbd>+</Kbd> at the end of a side only offers what fits after the steps above it, and greys out
+          the rest with the reason. The status chip in the top bar says the whole strategy in plain words, or what is left to fix. Or describe it to the
+          assistant (<Kbd>⌘K</Kbd>): it asks back when something is missing, then fills in the same steps; nothing is signed until you save.
         </p>
         <h3>When: conditions</h3>
         <table>
@@ -912,7 +913,7 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
     render: () => (
       <Section dev id="local-dev" title="Run it locally">
         <Code lang="bash">{`# contracts
-forge test                                   # 134 tests (EditorParity needs the app installed below)
+forge test                                   # 138 tests (EditorParity needs the app installed below)
 
 # app + backtest API
 cd frontend && npm install && npm run setup:api

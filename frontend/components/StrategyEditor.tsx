@@ -1,6 +1,6 @@
 "use client";
 
-// The strategy editor. One layout everywhere: two columns, "If WETH falls" and "If WETH rises", each a short stack of
+// The strategy editor: a flow on a canvas. The position branches into "If WETH falls" and "If WETH rises", each a short chain of
 // cards read top to bottom (When → Then → …). A card opens in place to show its settings; the "Add" menu opens in
 // place under the column it belongs to; the plain-words summary stays on the right (below, on a phone). Nothing
 // slides in from the sides.

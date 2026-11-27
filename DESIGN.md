@@ -1,6 +1,6 @@
 ---
 name: Alucard
-description: Rules inside a Uniswap v4 position, drawn as a watchmaker's technical catalogue.
+description: A night watch over your liquidity: deep indigo, violet light from an event horizon, quiet flat surfaces.
 colors:
   paper: "#f3f4f5"
   enamel: "#fbfbfc"
@@ -109,7 +109,18 @@ components:
 
 ## Overview
 
-**Creative North Star: "The Watchmaker's Catalogue"**
+**Creative North Star: "The Night Watch"** (replaces the earlier "Watchmaker's Catalogue")
+
+Alucard is Dracula reversed: the thing that keeps watch at night while you sleep. The landing page is a black hole the
+camera falls into as you scroll; the app is deep indigo (`--paper #0d0b20`, surfaces `#161333` / `#1d1940`, hairlines
+`#3a3270`), violet light (`--accent #8b6cff`, `--glow #a78bfa`), ember for the hot side (`#ffb46b`), rose for falls and
+sage for rises. Surfaces are flat with one hairline; one line per thing; details open on demand (the strategy builder is a
+flow of step cards on a dotted canvas, its settings and the assistant float in when used). Tokens live in
+`frontend/app/globals.css`; the sections below describe the earlier light design and are kept for history.
+
+---
+
+Earlier direction:
 
 Alucard is drawn as a plate from a technical catalogue of fine watchmaking: cool white paper, graphite linework, and a working automatic movement whose bridges are engraved with the parts of a rule. The object does the explaining. Each viewport holds one drawn instrument (the movement, the dial, the caseback, the certificate) beside a short column of plain prose, and everything that moves moves the way a mechanism moves: wheels at their gear ratios, a balance swinging, hands that spring to a value and settle.
 

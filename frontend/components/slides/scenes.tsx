@@ -97,7 +97,7 @@ function Cover() {
           Your own strategy, running on your Uniswap v4 position: exit, move to another pool and back, re-range, compound. Set it once; it runs on-chain while you’re away.
         </p>
         <div className="cv-tags in" style={d(420)}>
-          {["Uniswap v4", "Any pool, Chainlink-checked", "Live on Sepolia"].map((t) => (
+          {["Uniswap v4", "Any pool, Chainlink-checked", "Live on Sepolia and Unichain"].map((t) => (
             <span key={t}>{t}</span>
           ))}
         </div>
@@ -598,7 +598,7 @@ function Built() {
   ];
   return (
     <>
-      <Head eyebrow="Built and live on Sepolia" title="An editor, a contract and a backtest that agree." />
+      <Head eyebrow="Built and live on Sepolia and Unichain" title="An editor, a contract and a backtest that agree." />
       <div className="facts">
         {facts.map(([h, s], k) => (
           <div key={h} className="fact in" style={d(220 + k * 90)}>
@@ -625,7 +625,7 @@ function Built() {
           </div>
           <div className="in" style={d(1100)}>
             <p className="num">
-              <Count to={134} delay={1100} duration={1800} />
+              <Count to={138} delay={1100} duration={1800} />
             </p>
             <p className="s-small">contract tests, 84% of branches</p>
           </div>
@@ -825,7 +825,7 @@ export const SLIDES: Slide[] = [
     title: "Built and live",
     theme: "paper",
     C: Built,
-    notes: "What’s live on Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A price counts only while Chainlink agrees; a push does nothing and a real move runs at once. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 35,126 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run identically, 134 contract tests covering 84% of branches.",
+    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A price counts only while Chainlink agrees; a push does nothing and a real move runs at once. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 35,126 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run identically, 138 contract tests covering 84% of branches. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
   },
   {
     id: "now",
@@ -846,6 +846,6 @@ export const SLIDES: Slide[] = [
     title: "Thank you",
     theme: "enamel",
     C: Close,
-    notes: "That’s Alucard: set your rules once, and put the position down. It’s live on Sepolia, the code is public, and I’m happy to show the app or the backtest live. Thank you.",
+    notes: "That’s Alucard: set your rules once, and put the position down. It’s live on Sepolia and Unichain Sepolia, the code is public, and I’m happy to show the app or the backtest live. Thank you.",
   },
 ];

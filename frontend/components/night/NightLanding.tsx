@@ -377,7 +377,7 @@ function Proof() {
   const rows: [number, string, string][] = [
     [35126, "", "strategy shapes where the editor and the contract agree"],
     [2000, "", "orders the backtest and the contract run identically"],
-    [134, "", "contract tests, fuzz included, all passing"],
+    [138, "", "contract tests, fuzz included, all passing"],
     [84, "%", "of contract branches covered"],
   ];
   return (

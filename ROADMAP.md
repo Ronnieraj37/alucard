@@ -1,17 +1,19 @@
 # Roadmap
 
-Done in v2: moves into another pool and back, fee and fee-rate conditions, trailing stops, run limits, a price guard
-against pushed prices, every contract under 24 KB.
+Done: strategies of the LP's own (conditions, steps, repeats, holds), moves into another pool and back, fee and fee-rate
+conditions, trailing stops, run limits, a Chainlink price guard against pushed prices, every contract under 24 KB, the
+backtest on real mainnet swaps of the same pair (proven equal to the contract), the AI assistant in the builder, and
+deployments on Ethereum Sepolia and Unichain Sepolia.
 
 Next, all about more options for LPs (Alucard runs the strategies people bring; it does not choose them):
 
+- **Audit and mainnet:** an external audit, then Unichain and Ethereum mainnet.
 - **Bring an existing position:** adopt a Uniswap v4 NFT position (or migrate a v3 one) instead of creating a new one.
+- **Tighter execution:** anchor a step's swap to Chainlink (not only the pool's price), a margin before money comes back
+  (no push-in-push-out within the band), and a band per pair (narrower for stablecoins).
+- **Backtest the price guard:** replay mainnet Chainlink rounds too, so steps the band would have delayed show as delayed;
+  count fees in the pool a move goes into.
 - **Moves between pools with no token in common:** two swaps on the way (e.g. WBTC/WETH into USDC/USDT).
 - **Moves into lending:** hold the token in an ERC-4626 vault while moved, not only in a pool or the PoolManager.
 - **More conditions:** volatility, pool volume or liquidity, another pool's fee rate ("move to whichever pool pays more").
-- **Backtests across pools:** swap history for the pool a move goes into, so its fees are counted.
 - **Alerts:** Telegram or email when a step runs, or waits on the price guard.
-- **AI strategy builder:** describe a strategy in words, get one ready to backtest.
-- **Unichain deploy:** needs its Chainlink feed addresses; the contracts already fit.
-- **Loans for LPs?** LPs can also trade, so give them more options: take a loan whose amount is used from a black box
-  that can sit in any pool in any ratio, and lend right into the protocol.

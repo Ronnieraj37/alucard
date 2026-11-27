@@ -26,15 +26,16 @@ Alucard runs the LP's own strategy on a Uniswap v4 position: conditions (pool pr
 
 ## Operating Context
 
-- Ethereum Sepolia testnet; test tokens from the in-app faucet; MetaMask-style injected wallet.
-- Screens: Swap and limit orders, Pool (positions, new position), strategy editor (two columns of cards that open in place, templates as starting points, plain-words summary), Backtest, Keeper (anyone can run ready steps), Docs.
+- Ethereum Sepolia and Unichain Sepolia testnets (network menu in the header; the app follows the wallet); test tokens from the in-app faucet; MetaMask-style injected wallet.
+- Screens: Swap and limit orders, Pool (positions, new position), strategy builder (a flow of step cards on a canvas: the position branching into "if it falls" and "if it rises"; a step's settings open on click; templates; an AI assistant that asks back and fills in the steps), Backtest, Keeper (anyone can run ready steps), Docs.
 - Built for the Uniswap Hook Incubator hookathon (UHI11).
 
 ## Capabilities and Constraints
 
-- Contracts: RuleHook, ConditionalOrders, Rules, PriceFeeds (Chainlink token list) on Sepolia; each under 24 KB (Unichain-ready).
-- Backtest: the pool's own Chainlink price history (arbitrage-only fees, a lower bound) or real mainnet ETH/USDC swaps.
-- Stack: Next.js, wagmi/viem, Tailwind; Python backtest function on Vercel.
+- Contracts: RuleHook, ConditionalOrders, Rules, PriceFeeds (Chainlink token list) on Sepolia and Unichain Sepolia; each under 24 KB.
+- Backtest: every real mainnet swap of the same pair (ETH/USDC, WBTC/USDC, WBTC/WETH, USDC/USDT, DAI/USDC, LINK/WETH), or the pool's own Chainlink price path.
+- Assistant: Gemini, server-side; produces only the editor's types, validated like a hand-built strategy; never signs.
+- Stack: Next.js, wagmi/viem, Tailwind; Python (numpy) backtest function and a Gemini route on Vercel.
 - Undecided: domain name (to be bought), mainnet launch, protocol fee.
 
 ## Brand Commitments
@@ -43,8 +44,8 @@ Alucard runs the LP's own strategy on a Uniswap v4 position: conditions (pool pr
 
 ## Evidence on Hand
 
-- 134 Foundry tests, 35,126 editor-vs-contract parity cases with 0 mismatches, 2,000 engine-vs-contract replays identical, every template dry-run against Sepolia, an end-to-end market test on a fork.
-- Live Sepolia deployment (addresses in `deployments/`).
+- 138 Foundry tests, 35,126 editor-vs-contract parity cases with 0 mismatches, 2,000 engine-vs-contract replays identical, 10 engine tests, every template dry-run against both live deployments, end to end on both chains and on a fork.
+- Live deployments on Ethereum Sepolia and Unichain Sepolia (addresses in `deployments/`).
 - No users, testimonials, TVL or partners yet: never invent them.
 
 ## Product Principles
