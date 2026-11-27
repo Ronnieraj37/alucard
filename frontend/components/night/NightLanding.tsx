@@ -7,8 +7,7 @@ import { motion, useInView, useScroll, useTransform, type MotionValue } from "fr
 import { ArrowRight, Check, Eye, KeyRound, Moon, Radio, ShieldCheck, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { CHAIN_LABEL, explorerAddress } from "@/lib/chain";
-import { CORE } from "@/lib/pools";
+import { DEPLOYMENTS } from "@/lib/deployments";
 import Horizon from "./Horizon";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -397,17 +396,19 @@ function Proof() {
           ))}
         </div>
         <p className="mt-6 text-[14px] text-[var(--muted)]">
-          Live on {CHAIN_LABEL} (and the other testnet in the app):{" "}
-          {[
-            ["ConditionalOrders", CORE.conditionalOrders],
-            ["Rules", CORE.rules],
-            ["RuleHook", CORE.ruleHook],
-          ].map(([n, a], i) => (
-            <span key={n}>
-              {i > 0 && " · "}
-              <a className="n-link" href={explorerAddress(a)} target="_blank" rel="noreferrer">
-                {n} {short(a)}
-              </a>
+          Live on{" "}
+          {DEPLOYMENTS.map((d, k) => (
+            <span key={d.id}>
+              {k > 0 && "; "}
+              {d.label}:{" "}
+              {(["conditionalOrders", "rules", "ruleHook"] as const).map((n, i) => (
+                <span key={n}>
+                  {i > 0 && " · "}
+                  <a className="n-link" href={`${d.explorer}/address/${d.core[n]}`} target="_blank" rel="noreferrer">
+                    {n === "conditionalOrders" ? "ConditionalOrders" : n === "rules" ? "Rules" : "RuleHook"} {short(d.core[n])}
+                  </a>
+                </span>
+              ))}
             </span>
           ))}
         </p>

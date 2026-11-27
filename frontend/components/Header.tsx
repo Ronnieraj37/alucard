@@ -27,6 +27,9 @@ export default function Header() {
   const { disconnect } = useDisconnect();
   const { switchChain } = useSwitchChain();
   const tx = useTx();
+  // the network and the wallet are only known in the browser
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   // the app follows the wallet onto any network we are deployed on; anywhere else, it asks to switch
   const walletSupported = !!chainId && SUPPORTED.includes(chainId as ChainId);
   const wrongChain = isConnected && !walletSupported;
@@ -61,6 +64,7 @@ export default function Header() {
             </Link>
           ))}
         </nav>
+        {mounted && (
         <div className="ml-auto flex items-center gap-2">
           <span className="hidden lg:contents">
             {tx.state.busy && <span className="text-xs text-[var(--muted)]">{tx.state.message}</span>}
@@ -93,6 +97,7 @@ export default function Header() {
             </button>
           )}
         </div>
+        )}
       </div>
     </header>
   );

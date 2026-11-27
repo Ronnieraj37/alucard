@@ -1,15 +1,14 @@
 "use client";
 
 import { ArrowLeftRight, Bot, FlaskConical, Layers, LineChart, ShieldCheck, Sparkles, Target, Waypoints } from "lucide-react";
-import { CHAIN_ID, CHAIN_LABEL, EXPLORER } from "@/lib/chain";
 import Link from "next/link";
-import { CORE, POOLS, TOKENS } from "@/lib/pools";
+import { DEPLOYMENTS } from "@/lib/deployments";
+import { POOLS } from "@/lib/pools";
 import { Callout, Cards, Code, Dev, Kbd, Section, Steps } from "./ui";
 import { Architecture, BitMap, Decoder, RangeSides } from "./visuals";
 
-const ES = `${EXPLORER}/address/`;
-const A = ({ a }: { a: string }) => (
-  <a href={`${ES}${a}`} target="_blank" rel="noreferrer" className="font-mono text-[12.5px]">
+const A = ({ a, explorer }: { a: string; explorer: string }) => (
+  <a href={`${explorer}/address/${a}`} target="_blank" rel="noreferrer" className="font-mono text-[12.5px]">
     {a.slice(0, 6)}…{a.slice(-4)}
   </a>
 );
@@ -40,7 +39,7 @@ export const SECTIONS: DocSection[] = [
           ]}
         />
         <Callout kind="warn" title="Testnet">
-          Alucard runs on Ethereum Sepolia with test tokens (tWETH, tUSDC…) that anyone can mint. They have no value.
+          Alucard runs on two testnets, Ethereum Sepolia and Unichain Sepolia (pick one in the header), with test tokens (tWETH, tUSDC…) that anyone can mint. They have no value.
         </Callout>
         <Dev>
           <p>
@@ -62,11 +61,11 @@ export const SECTIONS: DocSection[] = [
         <Steps
           items={[
             <>
-              <strong>Connect a wallet</strong> (MetaMask or any browser wallet) with <Kbd>Connect</Kbd>. If it is on another network, the app offers to switch to
-              Sepolia.
+              <strong>Connect a wallet</strong> (MetaMask or any browser wallet) with <Kbd>Connect</Kbd>. Pick the network in the header: Sepolia or Unichain Sepolia. If the wallet is on another one, the app offers to switch; if it is on either
+              of ours, the app follows it.
             </>,
             <>
-              <strong>Get Sepolia ETH</strong> for gas from any public Sepolia faucet. Gas on Sepolia costs a tiny fraction of a cent.
+              <strong>Get testnet ETH</strong> for gas from any public faucet for that network (Unichain Sepolia ETH can also be bridged from Sepolia). Gas costs a tiny fraction of a cent.
             </>,
             <>
               <strong>Get test tokens</strong> with <Kbd>Faucet</Kbd> in the header (or <Kbd>Get test tokens</Kbd> on a new position): one transaction gives 100 tWETH, 5 tWBTC, 500,000 tUSDC, tUSDT and tDAI, and
@@ -80,7 +79,7 @@ export const SECTIONS: DocSection[] = [
         />
         <Dev>
           <p>
-            The faucet is <code>TestFaucet.drip()</code> at <A a={CORE.faucet} />. It calls <code>mint(msg.sender, amount)</code> on each open-mint{" "}
+            The faucet is <code>TestFaucet.drip()</code> (addresses for each network under <a href="#addresses">Addresses</a>). It calls <code>mint(msg.sender, amount)</code> on each open-mint{" "}
             <code>TestToken</code>, so it works with any wallet (no batching support needed).
           </p>
         </Dev>
@@ -101,7 +100,7 @@ export const SECTIONS: DocSection[] = [
         <Dev>
           <p>
             Quotes: Uniswap v4 <code>V4Quoter.quoteExactInputSingle</code> via <code>eth_call</code> (the quoter is not a view function). Swaps: hookmate
-            router <code>swapExactTokensForTokens(amountIn, amountOutMin, zeroForOne, poolKey, hookData, receiver, deadline)</code> at <A a={CORE.swapRouter} />.
+            router <code>swapExactTokensForTokens(amountIn, amountOutMin, zeroForOne, poolKey, hookData, receiver, deadline)</code> (see <a href="#addresses">Addresses</a>).
           </p>
         </Dev>
       </Section>
@@ -254,10 +253,45 @@ export const SECTIONS: DocSection[] = [
           If both sides move the money, they share the same place and both ways back watch it, so each way back must not be true the moment the money arrives
           (the editor tells you when one would be).
         </p>
+        <h3>What you can combine</h3>
+        <ul>
+          <li><strong>Each side:</strong> one condition, or two joined with <em>and</em> (both) or <em>or</em> (either), plus optionally “only if it lasts” (1 to 1,440 minutes in a row).</li>
+          <li><strong>Steps, in order:</strong> withdraw (0.01% to 100%) → swap what was withdrawn to one token → send fees to your wallet or compound them; or re-range the whole position around the price; or move everything (a move is always alone).</li>
+          <li><strong>Repeat</strong> with an optional run limit (1 to 127). A repeating price level steps by the % you set after each run (a ladder); a trailing stop starts again from the price after the run; a side runs at most once a minute.</li>
+          <li><strong>Both sides</strong> can be used at once: for example a stop below and take-profit steps above, or re-range both ways.</li>
+          <li><strong>Re-ranging moves the range itself</strong>, so a side that watches “leaves my range” follows the new range on the other side too (tested on the contract and on the backtest engine).</li>
+        </ul>
+        <h3>What is refused, and why</h3>
+        <p>The builder greys these out with the reason, and the contract refuses them too (the two are checked against each other on 35,126 strategy shapes):</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Combination</th>
+              <th>Why it is refused</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Repeat after withdrawing everything</td><td>Nothing is left to repeat on.</td></tr>
+            <tr><td>Repeat “leaves my range” without re-ranging</td><td>The range does not move, so it would fire again straight away.</td></tr>
+            <tr><td>Repeat a fixed price level on a re-ranging side</td><td>The level cannot step (the side’s step setting holds the range widths), so it would fire again straight away.</td></tr>
+            <tr><td>“Or” with a repeating “leaves my range”</td><td>Either condition alone fires, so it would fire again straight away. Use “and”.</td></tr>
+            <tr><td>Swap without a withdraw before it</td><td>There is nothing to swap.</td></tr>
+            <tr><td>Swap, then put the tokens back in</td><td>Contradictory: re-ranging and compounding keep the tokens in the pool.</td></tr>
+            <tr><td>Re-range plus withdraw or compound</td><td>Re-ranging already moves everything.</td></tr>
+            <tr><td>Move plus other steps</td><td>A move takes everything.</td></tr>
+            <tr><td>“Fees earn less than” without leaving</td><td>It is a reason to leave: withdraw everything or move.</td></tr>
+            <tr><td>Two trailing stops on one side</td><td>One “best price” per side.</td></tr>
+            <tr><td>Two price conditions on pools quoted the opposite way</td><td>“Falls” would mean the opposite in one of them.</td></tr>
+            <tr><td>A move into a pool with no token in common</td><td>It would need two swaps (planned, not yet supported).</td></tr>
+            <tr><td>A way back already true when the money arrives</td><td>The money would come straight back; the builder says which level to use instead.</td></tr>
+            <tr><td>A run limit without repeat</td><td>It only means something when the side repeats.</td></tr>
+          </tbody>
+        </table>
         <h3>Templates</h3>
         <p>
-          Starting points, not advice: move to another pool while out of range, hold a token and come back on a turn, take profit, stop loss, trailing stop,
-          auto re-range, compound, leave when fees dry up, take profit in steps, exit both ways. Everything stays editable.
+          Starting points, not advice: move to another pool while out of range, hold a token and come back on a turn, take profit, stop loss, confirmed stop
+          loss (30 minutes), trailing stop, auto re-range, compound daily, compound when fees add up, leave when fees dry up, take profit in steps, exit both
+          ways. Everything stays editable.
         </p>
         <p>
           A strategy expires (30 days by default; set under Settings). When both sides have run and are off, the position closes and everything goes to your
@@ -267,6 +301,34 @@ export const SECTIONS: DocSection[] = [
           <p>
             In storage each side is one 256-bit slot; the UI’s “falls/rises” sides map to the contract’s lower/upper sides through the pool’s token order. A
             move is the order’s second leg (<code>Plan</code>): see <a href="#storage">Order storage</a> and <a href="#encoding">Encoding a strategy</a>.
+          </p>
+        </Dev>
+      </Section>
+    ),
+  },
+  {
+    id: "assistant",
+    title: "The assistant",
+    group: "guide",
+    keywords: "assistant ai gemini chat describe natural language build strategy ask",
+    render: () => (
+      <Section id="assistant" title="The assistant" lead="Describe the strategy in words; it fills in the same steps you could pick by hand.">
+        <p>
+          In the builder, press <Kbd>Ask Alucard</Kbd> (or <Kbd>⌘K</Kbd>) and say what should happen, for example “if ETH drops out of my range, move it
+          into USDT/USDC and come back when it&apos;s back in range”. If something it needs is missing (which way, what to do, how much), it asks one
+          question with options to click. When it has enough, it fills in the steps and lists them in plain words, with <Kbd>Undo</Kbd> and{" "}
+          <Kbd>Replay on real history</Kbd>. A change (“also take 25% profit every 5% up”) keeps the side you did not mention.
+        </p>
+        <Callout title="It cannot do more than the builder">
+          The answer is turned into the builder&apos;s own types (unknown kinds dropped, numbers clamped) and checked with the same validation as a
+          hand-built strategy; if that refuses it, the assistant is asked once more with the reason. It never signs anything: you read the steps, replay
+          them, then save as usual.
+        </Callout>
+        <Dev>
+          <p>
+            <code>frontend/app/api/assistant/route.ts</code> calls Gemini on the server (keys in <code>GEMINI_API_KEYS</code>, rotated; an overloaded
+            model is skipped). <code>frontend/lib/assistant.ts</code> builds the prompt (the pool, its price and range, the pools a move can use, the
+            templates as examples) and <code>coerceRules</code> maps the answer onto <code>Rules</code>.
           </p>
         </Dev>
       </Section>
@@ -308,40 +370,45 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
     render: () => (
       <Section id="backtest" title="Backtesting" lead="See what your strategy would have done on real history before you use it.">
         <p>
-          In the editor, press <Kbd>Backtest</Kbd>. Every swap of the history you pick is replayed against your position and strategy, the way the contract
-          would run it (the engine takes the exact words the contract would store). Two kinds of history:
+          In the builder, press <Kbd>Backtest</Kbd> (or <Kbd>Replay on real history</Kbd> after the assistant builds). The engine takes the exact words the
+          contract would store and replays them swap by swap: conditions, holds, the keeper&apos;s delay, withdrawals, swaps with your slippage limit,
+          re-ranges, moves and the way back, repeats, and the keeper fee.
         </p>
         <ul>
           <li>
-            <strong>This pool</strong> (the default): the last six months of your pool&apos;s price, from every round of its two tokens&apos; Chainlink feeds,
-            read from the chain when you press the button, with the pool&apos;s own fee tier. Works for every pool on the token list, new ones included. A
-            testnet pool has almost no traders, so the swaps are the arbitrage trades that keep it on the Chainlink price: fees are a lower bound.
+            <strong>Real mainnet swaps of your pair</strong> (the default): a testnet pool has no traders, so the replay uses every swap of the Ethereum
+            mainnet Uniswap v3 pool with the same two tokens: ETH/USDC 0.05% and 0.30%, WBTC/USDC, WBTC/WETH, USDC/USDT, DAI/USDC, LINK/WETH, from 5 April
+            to 3 October 2026 (up to a million swaps). Real prices, real volume, real fees. Your range and price levels keep their distance from the price.
           </li>
           <li>
-            <strong>Mainnet ETH/USDC</strong>: every real swap of Ethereum&apos;s ETH/USDC pools (5 April to 3 October 2026: 96 thousand swaps in the 0.30%
-            pool, 1 million in the 0.05% pool), with real traders and real fees. For other pairs, your range and triggers are scaled to ETH&apos;s price path.
+            <strong>Chainlink path</strong>: your own pool&apos;s price rebuilt from its tokens&apos; Chainlink rounds on the chain you are on, with only the
+            arbitrage trades that follow it (fees are a lower bound).
+          </li>
+          <li>
+            <strong>Shown next to</strong> the same position without the strategy and simply holding the tokens, in USD at each moment&apos;s prices.
+            Alucard does not rate strategies; the numbers are for you to judge.
+          </li>
+          <li>
+            <strong>Every 30-day window</strong> repeats the test from each week&apos;s start. The windows overlap, so the page says how many independent
+            periods they amount to.
+          </li>
+          <li>
+            <strong>Fast:</strong> 180 days of a million swaps replay in about 0.2 seconds.
           </li>
         </ul>
-        <ul>
-          <li>
-            <strong>Shown next to:</strong> the same position without a strategy, and simply holding the tokens. The numbers are for you to judge; Alucard
-            does not rate strategies.
-          </li>
-          <li>
-            <strong>Every 30-day window</strong> repeats the test from each week’s start, so one lucky or unlucky period cannot mislead you.
-          </li>
-          <li>
-            <strong>Costs counted:</strong> your keeper fee, swap fees and price impact of conversions.
-          </li>
-        </ul>
+        <Callout title="How we know it runs what the contract runs">
+          On 2,000 random strategies, the engine&apos;s steps fire at exactly the same swaps as the contract&apos;s (<code>test/EditorParity.t.sol</code>),
+          and a re-range-both-ways scenario is tested on both. Money outcomes are not yet compared against the contract.
+        </Callout>
         <Callout kind="warn" title="What a backtest cannot tell you">
-          The past does not predict the future. Your own swaps do not move later prices in the replay, and price manipulation and MEV are not modelled.
-          While the money is moved into another pool, the replay counts it as the shared token: that pool’s fees are not included.
-          On your own pool, ordinary traders are missing, so fees are understated; on mainnet ETH/USDC, other pairs use ETH’s price path.
+          The past does not predict the future. Not modelled: steps the ~2% Chainlink check would have delayed (the replay assumes deep pools stay on
+          Chainlink), fees earned in the pool a move goes into (the money counts as held there), liquidity added or removed between swaps, and your own
+          swaps moving later prices.
         </Callout>
         <Dev>
           <p>
-            Runs on the server, not in your browser: see <a href="#backtest-api">Backtest API</a>.
+            Runs on the server (numpy, no GPU needed: it is a chain of decisions, each depending on the last), not in your browser: see{" "}
+            <a href="#backtest-api">Backtest API</a>. Tests: <code>frontend/api/test_chain_history.py</code>.
           </p>
         </Dev>
       </Section>
@@ -353,26 +420,51 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
     group: "guide",
     keywords: "safety security manipulation flash loan slippage expiry payout withdraw chainlink pushed price",
     render: () => (
-      <Section id="safety" title="Safety and limits" lead="What protects your position, and what to be aware of.">
+      <Section id="safety" title="Safety and limits" lead="What protects your position, how each attack is stopped, and what to be aware of.">
         <Cards
           items={[
-            { icon: ShieldCheck, title: "Prices Chainlink agrees with", text: "A pool's price counts only while it is within about 2% of Chainlink's. Pushing a pool to fire someone's strategy means pushing it away from Chainlink, and then it does not count, however long it is held." },
-            { icon: ArrowLeftRight, title: "Nothing runs at a pushed price", text: "Before any step, and before entering another pool, the price must be near Chainlink's. Swaps stop at your slippage limit." },
-            { icon: Layers, title: "Payouts are never stuck", text: "If a transfer to you fails (e.g. a contract wallet that refuses ETH), it is held for you to withdraw to any address." },
-            { icon: LineChart, title: "Always yours", text: "Withdraw everything at any time, wherever the money is. After expiry anyone can close it, and the tokens still go to you." },
+            { icon: ShieldCheck, title: "Prices Chainlink agrees with", text: "A pool's price counts only within about 2% of Chainlink's. A push further than that does not count, however long it is held." },
+            { icon: ArrowLeftRight, title: "Nothing runs at a pushed price", text: "Before every step and before entering another pool the price is checked again. Swaps stop at your slippage limit." },
+            { icon: Layers, title: "Payouts are never stuck", text: "A transfer that fails is held for you to withdraw to any address, and nobody else's order can spend it." },
+            { icon: LineChart, title: "Always yours", text: "Cancel and withdraw at any time, wherever the money is. After expiry anyone can close it, and the tokens still go to you." },
           ]}
         />
-        <Callout kind="warn">
-          Not audited. No upgrades. The only admin is the token list (which tokens have a Chainlink price): its changes wait two days, and its owner can set
-          how far a pool may be from Chainlink for steps to run. Testnet only.
+        <h3>Attacks, and what stops them</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Attack</th>
+              <th>What stops it</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Push a pool&apos;s price to fire someone&apos;s stop</td><td>Conditions count a price only within ~2% of Chainlink (<code>Rules.tickOf</code>); a push further away is ignored, however long it is held. A real move moves Chainlink too and runs at once.</td></tr>
+            <tr><td>Sandwich or flash-loan the step&apos;s own swap</td><td>The price is checked against Chainlink right before the step (<code>Rules.checkPrice</code>), and the swap stops at the owner&apos;s slippage limit.</td></tr>
+            <tr><td>Move the money into a pushed pool</td><td>The destination pool&apos;s price is checked the same way before anything is added there.</td></tr>
+            <tr><td>Skip or fake an “only if it lasts” hold</td><td>The condition must be seen true by <code>poke</code> and still true at the run; a price further than the band from Chainlink can neither start nor reset a hold.</td></tr>
+            <tr><td>Trail a stop from a pushed high</td><td><code>poke</code> records a new best price only when the price is near Chainlink.</td></tr>
+            <tr><td>A keeper overcharging</td><td>The fee is the owner&apos;s: a share of what the step moves (at most 1%), whatever the gas price. A side runs at most once a minute.</td></tr>
+            <tr><td>Spending ETH held for another owner</td><td>An order in an ETH pool must pay its own ETH (<code>msg.value</code>); held payouts are only withdrawable by their owner.</td></tr>
+            <tr><td>Blocking a payout (a wallet that refuses or burns gas)</td><td>ETH is sent with a gas limit; a failed payout is kept as owed for the owner to withdraw anywhere, so the keeper&apos;s run still succeeds.</td></tr>
+            <tr><td>A strategy that loops or cannot run</td><td>The contract validates every side and every move on creation and update (<code>Rules.checkSide</code>, <code>checkLegs</code>), the same rules the builder shows.</td></tr>
+            <tr><td>A stale or missing Chainlink price</td><td>No step runs (it waits); cancelling still works because it never checks prices.</td></tr>
+            <tr><td>The admin changing feeds to steer prices</td><td>Changing or removing a feed, or loosening the band, waits two days after being announced, so owners can leave first.</td></tr>
+          </tbody>
+        </table>
+        <Callout kind="warn" title="Known limits">
+          Not audited; testnets only. Inside the ~2% band a pushed price still counts: a keeper can move the price against a step&apos;s swap (on top of the
+          slippage limit), push a position just out of its range and back, or reset a hold. Set levels and margins wider than the band. One band for every
+          pair (too wide for two stablecoins). The admin can tighten the band at once, which makes steps wait (never touches funds). Planned fixes are on
+          the roadmap: swaps anchored to Chainlink, holds judged on Chainlink&apos;s price, a band per pair.
         </Callout>
         <Dev>
           <p>
-            <code>Rules.tickOf</code> reads a pool&apos;s tick and says whether it is within <code>PriceFeeds.maxDeviationTicks</code> (200 on Sepolia) of{" "}
+            <code>Rules.tickOf</code> reads a pool&apos;s tick and says whether it is within <code>PriceFeeds.maxDeviationTicks</code> (200) of{" "}
             <code>PriceFeeds.pairTick</code>. Pool conditions are only true with such a price; <code>Rules.checkPrice</code> reverts{" "}
             <code>PriceMoved</code> before every step and before entering another pool otherwise, and with no Chainlink price at all. No price history
-            is kept: swaps pay nothing for strategies. A side runs at most once a minute (<code>MIN_GAP</code>). On Sepolia nobody arbitrages the test
-            pools, so <code>frontend/scripts/arb.ts</code> does: it keeps every pool on Chainlink.
+            is kept: swaps pay nothing for strategies. A side runs at most once a minute (<code>MIN_GAP</code>). On testnets nobody arbitrages the pools,
+            so <code>frontend/scripts/arb.ts</code> keeps every pool on Chainlink. Tests: <code>test/Manipulation.t.sol</code>,{" "}
+            <code>Safety.t.sol</code>, <code>KeeperFee.t.sol</code>, <code>Feeds.t.sol</code>.
           </p>
         </Dev>
       </Section>
@@ -399,7 +491,7 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
           fixed once created; while the money is moved, you can change when it comes back.
         </p>
         <h3>Which pools can a move go into?</h3>
-        <p>Any Alucard pool that shares a token with yours. On mainnet that would be any pool with the hook; on Sepolia, the eight pools listed under Addresses.</p>
+        <p>Any Alucard pool that shares a token with yours. On mainnet that would be any pool with the hook; on each testnet, the eight pools listed under Addresses.</p>
       </Section>
     ),
   },
@@ -491,58 +583,52 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
     group: "dev",
     keywords: "addresses deployment sepolia etherscan pools tokens",
     render: () => (
-      <Section dev id="addresses" title="Addresses" lead={`${CHAIN_LABEL} (chain id ${CHAIN_ID}); switch networks in the header for the other one. Source of truth: deployments/*.json.`}>
-        <table>
-          <thead>
-            <tr>
-              <th>Contract</th>
-              <th>Address</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(
-              [
-                ["RuleHook", CORE.ruleHook],
-                ["ConditionalOrders", CORE.conditionalOrders],
-                ["Rules", CORE.rules],
-                ["PriceFeeds", CORE.priceFeeds],
-                ["TestFaucet", CORE.faucet],
-                ["Uniswap PoolManager", CORE.poolManager],
-                ["Uniswap PositionManager", CORE.positionManager],
-                ["Swap router (hookmate)", CORE.swapRouter],
-                ["Permit2", CORE.permit2],
-              ] as [string, string][]
-            ).map(([n, a]) => (
-              <tr key={n}>
-                <td>{n}</td>
-                <td>
-                  <A a={a} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <h3>Test tokens</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Token</th>
-              <th>Decimals</th>
-              <th>Address</th>
-            </tr>
-          </thead>
-          <tbody>
-            {TOKENS.filter((t) => !t.native).map((t) => (
-              <tr key={t.symbol}>
-                <td>t{t.symbol}</td>
-                <td>{t.decimals}</td>
-                <td>
-                  <A a={t.address} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <Section dev id="addresses" title="Addresses" lead="Both testnets, the same contracts and pools on each. Source of truth: deployments/*.json.">
+        {DEPLOYMENTS.map((d) => (
+          <div key={d.id}>
+            <h3>
+              {d.label} (chain id {d.id})
+            </h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Contract</th>
+                  <th>Address</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(
+                  [
+                    ["RuleHook", "ruleHook"],
+                    ["ConditionalOrders", "conditionalOrders"],
+                    ["Rules", "rules"],
+                    ["PriceFeeds", "priceFeeds"],
+                    ["TestFaucet", "faucet"],
+                    ["Uniswap PoolManager", "poolManager"],
+                    ["Uniswap PositionManager", "positionManager"],
+                    ["Swap router (hookmate)", "swapRouter"],
+                    ["Permit2", "permit2"],
+                  ] as [string, string][]
+                ).map(([n, k]) => (
+                  <tr key={n}>
+                    <td>{n}</td>
+                    <td>
+                      <A a={d.core[k]} explorer={d.explorer} />
+                    </td>
+                  </tr>
+                ))}
+                {Object.entries(d.tokens).map(([sym, a]) => (
+                  <tr key={sym}>
+                    <td>Test token t{sym}</td>
+                    <td>
+                      <A a={a} explorer={d.explorer} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
         <h3>Pool table</h3>
         <table>
           <thead>
@@ -558,7 +644,7 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
               <tr key={p.index}>
                 <td>{p.index}</td>
                 <td>
-                  {p.token0.symbol} / {p.token1.symbol} · {p.key.fee / 10_000}%
+                  {p.base.symbol} / {p.quote.symbol} · {p.key.fee / 10_000}%
                 </td>
                 <td>{p.key.tickSpacing}</td>
                 <td>{p.hooked ? "RuleHook" : "none"}</td>
