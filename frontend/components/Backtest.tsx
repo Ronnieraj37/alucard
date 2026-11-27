@@ -47,6 +47,8 @@ type Windows = {
   worstVsNoRules: number;
   bestVsNoRules: number;
   windowDays: number;
+  independent?: number;
+  caveats?: string[];
 };
 
 // "own": this pool, rebuilt from the chain (its tokens' Chainlink prices, arbitrage trades); the others are real mainnet
@@ -429,7 +431,7 @@ function WindowsResult({ r }: { r: Windows }) {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Tile label={`Windows of ${r.windowDays} days`} value={String(r.count)} sub="one starting every week" />
+        <Tile label={`Windows of ${r.windowDays} days`} value={String(r.count)} sub={`one starting every week; they overlap, ~${r.independent ?? Math.max(1, Math.round(r.count / 4))} independent`} />
         <Tile label="Strategy beat no strategy" value={`${r.beatNoRules} of ${r.count}`} />
         <Tile label="Strategy beat holding" value={`${r.beatHold} of ${r.count}`} />
         <Tile
@@ -454,7 +456,12 @@ function WindowsResult({ r }: { r: Windows }) {
           dots
         />
       </div>
-      <Caveats items={["Each point is a separate backtest that starts on that date and runs for 30 days.", "Past results do not predict future ones."]} />
+      <Caveats
+        items={[
+          `Each point is a separate backtest that starts on that date and runs for ${r.windowDays} days. Windows start a week apart, so they overlap: treat “${r.beatNoRules} of ${r.count}” as about ${r.independent ?? Math.max(1, Math.round(r.count / 4))} independent periods, not ${r.count}.`,
+          ...(r.caveats ?? ["Past results do not predict future ones."]),
+        ]}
+      />
     </>
   );
 }

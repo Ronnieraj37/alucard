@@ -477,12 +477,14 @@ class Sim:
         self._avg_cache: dict[tuple, tuple] = {}
         self.failed = 0
 
-    def usd(self, a0: float, a1: float, sp: float) -> float:
+    def usd(self, a0: float, a1: float, sp: float, k: int | None = None) -> float:
+        """Value in USD at swap row k: the quote token's USD price of that moment (the window's start when k is None)."""
         s = self.s
         price = float(s.price(sp))
         h0, h1 = a0 / 10**s.dec0, a1 / 10**s.dec1
         v = h0 + h1 * price if not s.base_is0 else h0 * price + h1  # in quote units
-        return v * self.quote_usd
+        q = s.quote_usd
+        return v * (1.0 if q is None else float(q[self.i0 if k is None else k]))
 
     @property
     def quote_usd(self) -> float:
@@ -667,7 +669,7 @@ class Sim:
             for idx in [x for x in self.samples_wanted if i < x <= k]:
                 r = idx - i
                 a0, a1 = amounts(st.L, s.sp1[idx], sa, sb)
-                self.samples[idx] = self.usd(st.w0 + a0 + f0[r], st.w1 + a1 + f1[r], s.sp1[idx])
+                self.samples[idx] = self.usd(st.w0 + a0 + f0[r], st.w1 + a1 + f1[r], s.sp1[idx], idx)
                 self.ranges[idx] = (st.tl, st.tu)
             st.f0, st.f1 = float(f0[-1]), float(f1[-1])
             dur = np.diff(s.ts[i : k + 1])
@@ -676,7 +678,7 @@ class Sim:
             st.live_s += float(np.sum(dur))
         else:
             for idx in [x for x in self.samples_wanted if i < x <= k]:
-                self.samples[idx] = self.usd(st.w0 + st.held0, st.w1 + st.held1, s.sp1[idx])
+                self.samples[idx] = self.usd(st.w0 + st.held0, st.w1 + st.held1, s.sp1[idx], idx)
 
     # ---- swaps
     def swap(self, w0: float, w1: float, zero_for_one: bool, k: int, stop: float | None = None):
@@ -757,7 +759,7 @@ class Sim:
             remove_l = (new.L if d.remove_bps >= BPS else new.L * d.remove_bps / BPS) if d.actions & ACT_REMOVE else 0.0
             a0, a1 = amounts(remove_l, sp, sa, sb)
             f0, f1 = new.f0, new.f1  # every modifyLiquidity collects all fees
-            new.fees_usd += self.usd(f0, f1, sp)
+            new.fees_usd += self.usd(f0, f1, sp, k)
             out0, out1 = a0 + f0, a1 + f1
             new.L -= remove_l
             new.f0 = new.f1 = 0.0
@@ -793,9 +795,9 @@ class Sim:
                 res1, res0, w1, w0 = r_sold, res0 + r_bought, w1 - r_sold, w0 - r_bought
         return new, w0, w1, res0, res1, pay0, pay1, note
 
-    def _pay_keeper(self, new: State, res0: float, res1: float, sp: float) -> tuple[float, float]:
+    def _pay_keeper(self, new: State, res0: float, res1: float, sp: float, k: int | None = None) -> tuple[float, float]:
         """The keeper takes its whole fee: nothing of it comes back to the owner."""
-        new.keeper_usd += self.usd(res0, res1, sp)
+        new.keeper_usd += self.usd(res0, res1, sp, k)
         return 0.0, 0.0
 
     def _start_side(self, d: Side, k: int) -> Side:
@@ -855,7 +857,7 @@ class Sim:
                     c0, c1 = amounts(la, sp, sa, sb)
                     w0, w1 = w0 - c0, w1 - c1
                     new.L += la
-                    note.append(f"re-added {fmt(self.usd(c0, c1, sp))} USD")
+                    note.append(f"re-added {fmt(self.usd(c0, c1, sp, k))} USD")
 
         nd.last_run = stored_time(float(s.ts[k]))
         again = d.repeat
@@ -875,7 +877,7 @@ class Sim:
         else:
             new.sides[slot] = Side(edge=d.edge, last_run=nd.last_run)  # cleared: the run time stays (the fee clock)
 
-        back0, back1 = self._pay_keeper(new, res0, res1, sp)
+        back0, back1 = self._pay_keeper(new, res0, res1, sp, k)
         new.w0 += w0 + pay0 + back0
         new.w1 += w1 + pay1 + back1
         new.runs += 1
@@ -940,7 +942,7 @@ class Sim:
         new.home = to_home
         new.other_sides = left_sides
         new.sides = {n: self._start_side(replace(x, edge=edges[0] if n == "lower" else edges[1]), k) for n, x in next_sides.items()}
-        back0, back1 = self._pay_keeper(new, res0, res1, sp)
+        back0, back1 = self._pay_keeper(new, res0, res1, sp, k)
         new.w0 += w0 + pay0 + back0
         new.w1 += w1 + pay1 + back1
         new.runs += 1
@@ -1127,12 +1129,13 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
 
     def value(st_: State, sim_: Sim) -> float:
         a0, a1 = amounts(st_.L, sp_end, sqrt_at(st_.tl), sqrt_at(st_.tu)) if st_.L > 0 else (0.0, 0.0)
-        return sim_.usd(st_.w0 + a0 + st_.f0 + st_.held0, st_.w1 + a1 + st_.f1 + st_.held1, sp_end)
+        return sim_.usd(st_.w0 + a0 + st_.f0 + st_.held0, st_.w1 + a1 + st_.f1 + st_.held1, sp_end, i1 - 1)
 
+    # every value is in USD of its own moment (an ETH-quoted pair at that moment's ETH price)
     v_rules, v_plain = value(final, sim), value(plain_final, plain)
-    v_hold = sim.usd(a0_in, a1_in, sp_end)
-    fees_rules = final.fees_usd + sim.usd(final.f0, final.f1, sp_end)
-    fees_plain = plain_final.fees_usd + plain.usd(plain_final.f0, plain_final.f1, sp_end)
+    v_hold = sim.usd(a0_in, a1_in, sp_end, i1 - 1)
+    fees_rules = final.fees_usd + sim.usd(final.f0, final.f1, sp_end, i1 - 1)
+    fees_plain = plain_final.fees_usd + plain.usd(plain_final.f0, plain_final.f1, sp_end, i1 - 1)
 
     t, price, strat, pl_, hold, lo, hi = [], [], [], [], [], [], []
     for idx in sample_idx:
@@ -1141,7 +1144,7 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
         price.append(float(s.price(spx)))
         strat.append(sim.samples.get(idx, None))
         pl_.append(plain.samples.get(idx, None))
-        hold.append(sim.usd(a0_in, a1_in, spx))
+        hold.append(sim.usd(a0_in, a1_in, spx, idx))
         r = sim.ranges.get(idx)
         if r:
             x, y = sorted((float(s.price(sqrt_at(r[0]))), float(s.price(sqrt_at(r[1])))))
@@ -1205,7 +1208,7 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
             "Swaps: only the arbitrage trades that keep the pool on the Chainlink price (to the edge of its fee band). "
             "Real pools also have ordinary traders, so fees here are a lower bound.",
         ] if s.source == "chainlink" else []) + ([
-            "Values are in USD at the quote token's price at the start of the window.",
+            "Values are in USD at each moment's price of the quote token (an ETH-quoted pair at that moment's ETH price).",
         ] if s.quote_usd is not None else []) + [
             "Real swaps from the recorded window; past results do not predict future ones." if s.source == "recorded"
             else "Past results do not predict future ones.",
@@ -1228,8 +1231,10 @@ def run_windows(req: dict, window_days: int = 30, every_days: int = 7) -> dict:
     t0, t1 = float(s.ts[0]), float(s.ts[-1])
     out = []
     start = t0
+    caveats: list[str] = []
     while start + window_days * 86400 <= t1:
         r = run({**req, "start": start, "days": window_days}, s)
+        caveats = r.get("caveats", caveats)
         out.append({"start": r["start"], "rules": r["rules"]["final"], "noRules": r["noRules"]["final"], "hold": r["hold"]["final"], "runs": r["rules"]["runs"]})
         start += every_days * 86400
     beat_plain = sum(1 for x in out if x["rules"] > x["noRules"])
@@ -1245,4 +1250,7 @@ def run_windows(req: dict, window_days: int = 30, every_days: int = 7) -> dict:
         "bestVsNoRules": diffs[-1] if diffs else 0.0,
         "windowDays": window_days,
         "everyDays": every_days,
+        # windows start every few days, so they overlap: this many share no days
+        "independent": max(1, int((t1 - t0) // (window_days * 86400))),
+        "caveats": caveats,
     }
