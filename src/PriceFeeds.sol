@@ -116,7 +116,8 @@ contract PriceFeeds {
         emit FeedSet(token, aggregator, maxAge);
     }
 
-    /// @dev Take a token off the list. Open orders keep running; new orders with it are refused.
+    /// @dev Take a token off the list. Open orders with it can no longer run a step (no Chainlink price, so every step
+    /// waits) but can always be cancelled; new orders with it are refused.
     function _remove(address token) internal {
         delete feeds[token];
         uint256 n = _tokens.length;

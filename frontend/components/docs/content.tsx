@@ -212,7 +212,7 @@ export const SECTIONS: DocSection[] = [
         <p>
           Add <strong>a second condition</strong> (both, or either one), and <strong>only if it lasts</strong>: the condition must stay true for that many
           minutes in a row (up to a day) before the step runs, so a short wick does not count. Every price counts only while it is within about 2% of
-          Chainlink&apos;s, so nobody can push a pool to fire your strategy, and any pool of listed tokens can be watched, with or without our hook.
+          Chainlink&apos;s, so nobody can push a pool to fire a level more than ~2% from the real price, and any pool of listed tokens can be watched, with or without our hook.
         </p>
         <h3>Then: steps</h3>
         <table>
