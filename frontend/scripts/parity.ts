@@ -93,6 +93,7 @@ function triggersFor(lane: "down" | "up"): Trigger[] {
     { kind: "otherPool", poolIndex: 3, price: down ? 0.96 : 1.04 }, // a hookless pool: any pool can be watched
     { kind: "chainlink", price: down ? 0.965 : 1.035 }, // the pair's Chainlink price
     { kind: "chainlink", poolIndex: 2, price: down ? 0.955 : 1.045 }, // another pool's pair on Chainlink
+    { kind: "card", cardId: 1 }, // a "when" card (test/EditorParity.t.sol registers card #1)
     { kind: "timer", hours: 1 },
     { kind: "trail", trailPct: 3 },
     { kind: "fees", feesPct: 0.5 },
@@ -204,6 +205,7 @@ function condInDomain(checker: number, value: number, pool: number): boolean {
   if (checker === 3) return value >= 1 && pool === 0;
   if (checker === 4) return value >= 1 && value <= 92_108;
   if (checker === 5) return Math.abs(value) < 887_272; // a Chainlink price level, like a pool's
+  if (checker === 8) return value === 1 && pool === 0; // the one registered "when" card
   if (checker === 6) return value >= 1 && value <= 10_000 && pool === 0;
   if (checker === 7) return value >= 1 && pool === 0;
   return false;
@@ -220,6 +222,24 @@ function sidesInDomain(words: bigint[]): boolean {
     if (s.combine !== 0 && !condInDomain(s.checker2, s.value2, s.checkPool2)) return false;
   }
   return true;
+}
+
+/** A leg whose two sides both read a price, in pools quoted the opposite way round: the contract accepts it (each side
+ * is its own slot), but the editor draws a leg as "if the price falls" / "if it rises", and here both sides mean the
+ * same direction of the base token. When the editor cannot draw such a leg (by design; only a direct contract call
+ * makes one), the case is left out of the comparison and counted (see `stats`). */
+let INEXPRESSIBLE = 0;
+function opposedSides(lowerWord: bigint, upperWord: bigint, legPool: number): boolean {
+  const reads = (checker: number) => checker === 2 || checker === 4 || checker === 5;
+  const quoted = (w: bigint) => {
+    const d = decodeSide(w);
+    const pool = reads(d.checker) ? d.checkPool : d.combine && reads(d.checker2) ? d.checkPool2 : null;
+    if (pool === null) return null;
+    return POOLS.find((q) => q.index === (pool || legPool))?.baseIs0 ?? null;
+  };
+  const lo = quoted(lowerWord);
+  const up = quoted(upperWord);
+  return lo !== null && up !== null && lo !== up;
 }
 
 function editorCanBuild(c: Omit<Case, "ok">): boolean {
@@ -332,6 +352,11 @@ function acceptanceFor(baseIs0: boolean) {
     const k = key(c);
     if (seen.has(k)) return;
     seen.add(k);
+    const opposed = opposedSides(c.lower, c.upper, OWN.index) || (c.away.kind !== 0 && opposedSides(c.awayLower, c.awayUpper, c.away.poolIndex));
+    if (opposed && !editorCanBuild(c)) {
+      INEXPRESSIBLE++;
+      return;
+    }
     cases.push({ ...c, ok: editorCanBuild(c) });
   };
   let lanes = 0;
@@ -409,7 +434,7 @@ function paths(): Path[] {
 function engineRules(): Rules[] {
   // everything the editor builds except swaps (the contract's own swap would move later prices, the replay's not),
   // other pools (the synthetic path has one pool) and fee conditions (the replay has no other traders paying fees)
-  const skip = (t?: Trigger | null) => t?.kind === "otherPool" || (t?.kind === "chainlink" && !!t.poolIndex) || t?.kind === "fees" || t?.kind === "apr";
+  const skip = (t?: Trigger | null) => t?.kind === "otherPool" || t?.kind === "card" || (t?.kind === "chainlink" && !!t.poolIndex) || t?.kind === "fees" || t?.kind === "apr";
   const out: Rules[] = [];
   for (const lane of ["down", "up"] as const)
     for (const l of lanesFor(lane)) {
@@ -560,6 +585,7 @@ if (mode === "count") {
   const { cases, valid, lanes } = acceptanceCases();
   console.log(`${lanes} strategies built with the editor's blocks, ${valid} valid`);
   console.log(`${cases.length} acceptance cases: ${cases.filter((c) => c.ok).length} the editor can build, ${cases.filter((c) => !c.ok).length} it cannot`);
+  console.log(`${INEXPRESSIBLE} left out: a leg whose two sides read pools quoted the opposite way round, which the editor cannot draw`);
 } else {
   console.error("usage: parity.ts count | cases <from> <n> | engineCount | engine <from> <n> | stats");
   process.exit(2);

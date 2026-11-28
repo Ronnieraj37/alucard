@@ -614,11 +614,44 @@ function How() {
   );
 }
 
+/* ------------------------------------------------------------------ 7b · your own WHEN card */
+
+function Cards() {
+  const facts = [
+    ["It only decides when", "What the step does, and every guard on it, stays with the vault. A card cannot move money."],
+    ["Read-only, gas-capped", "Called with staticcall and 200,000 gas. Only a clean true counts; anything else is “not now”."],
+    ["Anyone publishes, owners choose", "Register once for a permanent card number. Card #1: a USDC depeg alarm."],
+  ];
+  return (
+    <>
+      <Head eyebrow="Bring your own WHEN" title="Any contract that says true or false is a card." />
+      <div className="cd">
+        <pre className="cd-code in" style={d(250)}>{`interface IAlucardCondition {
+  /// true = the step may run now
+  function isMet(
+    address vault,
+    uint256 orderId,
+    bool upper
+  ) external view returns (bool);
+}`}</pre>
+        <div className="cd-facts">
+          {facts.map(([h, t], k) => (
+            <div key={h} className="fact in" style={d(420 + k * 140)}>
+              <h3>{h}</h3>
+              <p>{t}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* ------------------------------------------------------------------ 8 · built */
 
 function Built() {
   const facts = [
-    ["Your strategy, card by card", "Two conditions, and / or, holds, repeats, run limits"],
+    ["Your strategy, card by card", "Two conditions, and / or, holds, repeats, run limits, your own WHEN cards"],
     ["Move to any pool and back", "Into any pool sharing a token, or hold one; back by your own rule"],
     ["Prices near Chainlink", "A push does nothing; a real move runs at once. No step sells into a push"],
     ["Any v4 pool", "Hookless or ours, as long as both tokens have a Chainlink feed"],
@@ -649,7 +682,7 @@ function Built() {
         <div className="proof">
           <div className="in" style={d(900)}>
             <p className="num ruby">
-              <Count to={43554} delay={900} duration={1800} />
+              <Count to={48186} delay={900} duration={1800} />
             </p>
             <p className="s-small">strategy shapes, editor = contract</p>
           </div>
@@ -661,7 +694,7 @@ function Built() {
           </div>
           <div className="in" style={d(1100)}>
             <p className="num">
-              <Count to={154} delay={1100} duration={1800} />
+              <Count to={159} delay={1100} duration={1800} />
             </p>
             <p className="s-small">contract tests, attacks included</p>
           </div>
@@ -864,11 +897,18 @@ export const SLIDES: Slide[] = [
     notes: "Every strategy has four parts. When: the conditions, two of them with and or or, and a hold so it has to stay true. Then: the steps, including a move to another pool that comes back by your own rule. Limits: slippage, the keeper fee, how many times it can run, when it expires, all checked by the contract. And the keeper: anyone can call execute once the condition holds, and is paid your fee, 0.1% by default and at most 1%. The money stays inside Uniswap v4 until you withdraw. The example on screen is one side, illustrative.",
   },
   {
+    id: "cards",
+    title: "Your own WHEN card",
+    theme: "night",
+    C: Cards,
+    notes: "The built-in conditions cover prices, ranges, time and fees. For anything else, anyone can write a WHEN card: a contract with one function, isMet, that returns true or false. Register it once and it gets a permanent card number; an owner picks it in the builder like any other condition, and combines it with and, or, and only if it lasts. It only decides when: the vault still does the what, with every guard. It is called read-only with a gas cap, and anything but a clean true means not now. Card number one on both testnets is an example: a USDC depeg alarm.",
+  },
+  {
     id: "built",
     title: "Built and live",
     theme: "paper",
     C: Built,
-    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A pool’s price counts only near Chainlink, and no step sells into a push; a real move runs at once. You can also add a Chainlink price condition. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 43,554 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run at the same swaps and end within 0.1% of each other’s money on the strategies that test covers, 154 contract tests including the in-band pushes an outside review asked about. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
+    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A pool’s price counts only near Chainlink, and no step sells into a push; a real move runs at once. You can also add a Chainlink price condition, or your own WHEN card. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 48,186 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run at the same swaps and end within 0.1% of each other’s money on the strategies that test covers, 159 contract tests including the in-band pushes an outside review asked about. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
   },
   {
     id: "now",

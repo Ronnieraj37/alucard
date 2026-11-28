@@ -62,6 +62,7 @@ contract EditorParityTest is RuleSetup {
         PoolKey memory four = PoolKey(currency1, Currency.wrap(address(t2)), 100, 1, IHooks(hook));
         poolManager.initialize(four, Constants.SQRT_PRICE_1_1);
         require(rules.registerPool(four) == 4, "pool #4");
+        rules.registerCondition(address(oracle0)); // "when" card #1 (any contract: the acceptance test only names it)
         // the Chainlink band stays off here (conditions also read pools #2-#4, whose feeds do not follow the replay);
         // test/PriceGuard.t.sol tests the band
     }

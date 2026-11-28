@@ -787,3 +787,10 @@
 .us-when { margin-top: 18px !important; font-size: 36px; line-height: 1.18; letter-spacing: -0.8px; color: var(--night-text); }
 .us-when span { color: var(--night-soft); }
 .us-then { margin-top: 14px !important; font-size: 25px; line-height: 1.38; color: var(--night-soft); }
+
+/* your own WHEN card */
+.cd { margin-top: 64px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 72px; align-items: start; }
+.cd-code { margin: 0; padding: 36px 40px; border-radius: 22px; background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px var(--night-line); color: var(--night-text); font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 27px; line-height: 1.55; white-space: pre; }
+.cd-facts { display: flex; flex-direction: column; }
+.dk-night .cd-facts .fact { border-top-color: var(--night-line); }
+.dk-night .cd-facts .fact p { color: var(--night-soft); }

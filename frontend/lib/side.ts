@@ -103,7 +103,7 @@ export function decodeSide(v: bigint): Side {
 
 // ---------------------------------------------------------------- contract constants
 
-export const CHECK = { OFF: 0, EDGE: 1, TICK: 2, TIME: 3, TRAIL: 4, LINK: 5, FEES: 6, APR: 7 } as const;
+export const CHECK = { OFF: 0, EDGE: 1, TICK: 2, TIME: 3, TRAIL: 4, LINK: 5, FEES: 6, APR: 7, EXTERNAL: 8 } as const;
 export const ACT = { KEEP_FEES: 1, REMOVE: 2, SWAP: 4, ADD: 8, MOVE: 16 } as const;
 export const COMBINE = { NONE: 0, AND: 1, OR: 2 } as const;
 export const ADD_SAME = 0;

@@ -83,7 +83,7 @@ export const SECTIONS: DocSection[] = [
           <p>
             Four contracts. <code>RuleHook</code> is the Uniswap v4 hook (afterInitialize, beforeSwap, afterSwap): it fills limit orders inside swaps. <code>ConditionalOrders</code> holds positions that have a strategy, inside the PoolManager (owner = the contract, salt =
             order id). <code>Rules</code> holds the pool table (any pool of listed tokens) and does conditions, the Chainlink check, validation and price math. <code>PriceFeeds</code> is the Chainlink token list. Each stays
-            under the 24 KB size limit. Source: <code>src/</code>, tests: <code>test/</code> (154 Foundry tests).
+            under the 24 KB size limit. Source: <code>src/</code>, tests: <code>test/</code> (159 Foundry tests).
           </p>
         </Dev>
       </Section>
@@ -241,6 +241,7 @@ export const SECTIONS: DocSection[] = [
             <tr><td>Reaches a price</td><td>The price drops below (falls side) or rises above (rises side) a price you choose.</td></tr>
             <tr><td>Turns from its best price</td><td>A trailing stop: the price falls x% from its highest (or rises x% from its lowest) since the side started.</td></tr>
             <tr><td>Price in another pool</td><td>The same, watching another Alucard pool’s price.</td></tr>
+            <tr><td>My own condition</td><td>A “when” card: any contract that answers true or false (see <a href="#cards">Your own WHEN card</a>).</td></tr>
             <tr><td>Chainlink price</td><td>Chainlink’s (the market’s) price drops below or rises above a level. A push of the pool cannot fire it; add it with “and” to a pool level to have Chainlink confirm it.</td></tr>
             <tr><td>On a timer</td><td>A set time has passed since the side last ran.</td></tr>
             <tr><td>Fees earned</td><td>The fees since they were last collected reach x% of the position.</td></tr>
@@ -301,7 +302,7 @@ export const SECTIONS: DocSection[] = [
           <li><strong>Re-ranging moves the range itself</strong>, so a side that watches “leaves my range” follows the new range on the other side too (tested on the contract and on the backtest engine).</li>
         </ul>
         <h3>What is refused, and why</h3>
-        <p>The builder greys these out with the reason, and the contract refuses them too (the two are checked against each other on 43,554 strategy shapes):</p>
+        <p>The builder greys these out with the reason, and the contract refuses them too (the two are checked against each other on 48,186 strategy shapes):</p>
         <table>
           <thead>
             <tr>
@@ -340,6 +341,56 @@ export const SECTIONS: DocSection[] = [
           <p>
             In storage each side is one 256-bit slot; the UI’s “falls/rises” sides map to the contract’s lower/upper sides through the pool’s token order. A
             move is the order’s second leg (<code>Plan</code>): see <a href="#storage">Order storage</a> and <a href="#encoding">Encoding a strategy</a>.
+          </p>
+        </Dev>
+      </Section>
+    ),
+  },
+  {
+    id: "cards",
+    title: "Your own WHEN card",
+    group: "guide",
+    keywords: "card custom condition contract callback isMet external when plugin developer register",
+    render: () => (
+      <Section id="cards" title="Your own WHEN card" lead="Any contract that answers true or false can decide when a side runs.">
+        <p>
+          The built-in conditions cover prices, ranges, time and fees. For anything else, a depeg, volatility, another protocol&apos;s state, write a{" "}
+          <strong>“when” card</strong>: a contract with one function. Register it once to get its card number, then pick <Kbd>My own condition</Kbd>{" "}
+          in the builder and enter the number (or paste the address; the app registers it). Combine it with any built-in condition using “and” / “or”,
+          and with “only if it lasts”.
+        </p>
+        <Code lang="solidity">{`interface IAlucardCondition {
+    /// true = the step may run now
+    function isMet(address vault, uint256 orderId, bool upper) external view returns (bool);
+}`}</Code>
+        <ul>
+          <li>
+            <strong>It only decides when.</strong> What the step does, and every guard on it (the Chainlink band, swaps that wait rather than sell into a
+            push, the keeper fee cap, once a minute at most), stays with the vault. A card cannot move money.
+          </li>
+          <li>
+            <strong>Read-only, 200,000 gas.</strong> The card is called with <code>staticcall</code>. Only a clean <code>true</code> counts: a
+            revert, running out of gas, a write or any other answer means “not now”.
+          </li>
+          <li>
+            <strong>Anyone can publish one; each owner chooses.</strong> Card numbers are permanent (card #12 always points to the same contract).
+            Using a card is the order owner&apos;s choice, and they can cancel or update the order at any time.
+          </li>
+          <li>
+            <strong>Card #1 is an example</strong> on both testnets: true while USDC&apos;s Chainlink price is below $0.99 (
+            <code>src/examples/DepegCondition.sol</code>). Copy it to write your own.
+          </li>
+        </ul>
+        <Callout kind="warn" title="Read a card before you use it">
+          A card can fire at a bad moment or never; one that reads a price someone can push can be pushed; one behind a proxy can change later. The
+          backtest cannot run a card&apos;s code on history, so a side that uses one is not replayed.
+        </Callout>
+        <Dev>
+          <p>
+            <code>Rules.registerCondition(address)</code> returns the card number (the same one if it is already registered). A side uses it as{" "}
+            <code>checker = 8</code>, <code>value</code> = the card number, <code>checkPool = 0</code>. <code>Rules.met</code> calls{" "}
+            <code>isMet</code> with <code>Rules.CONDITION_GAS</code> and refuses to start without enough gas for it (<code>LowGas</code>), so a
+            keeper cannot starve a card into “false”. Tests: <code>test/Conditions.t.sol</code>.
           </p>
         </Dev>
       </Section>
@@ -489,6 +540,7 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
             <tr><td>A keeper overcharging</td><td>The fee is the owner&apos;s: a share of what the step moves (at most 1%), whatever the gas price. A side runs at most once a minute.</td></tr>
             <tr><td>Spending ETH held for another owner</td><td>An order in an ETH pool must pay its own ETH (<code>msg.value</code>); held payouts are only withdrawable by their owner.</td></tr>
             <tr><td>Blocking a payout (a wallet that refuses or burns gas)</td><td>ETH is sent with a gas limit; a failed payout is kept as owed for the owner to withdraw anywhere, so the keeper&apos;s run still succeeds.</td></tr>
+            <tr><td>A “when” card that misbehaves</td><td>It is called read-only with 200,000 gas; a revert, a write, running out of gas or any answer but a clean true means “not now”. It only decides when: it cannot move money or skip a guard.</td></tr>
             <tr><td>A strategy that loops or cannot run</td><td>The contract validates every side and every move on creation and update (<code>Rules.checkSide</code>, <code>checkLegs</code>), the same rules the builder shows.</td></tr>
             <tr><td>A stale feed, or an L2 sequencer outage</td><td>A feed older than its heartbeat (plus slack), non-positive or reverting gives no price, and no step runs; with a sequencer uptime feed set, nothing runs while it is down or in the hour after. Cancelling never checks prices.</td></tr>
             <tr><td>The admin changing feeds or bands to steer or pause</td><td>Every change of a listed token&apos;s feed or of a band, tighter or looser, waits two days after it is announced, so owners can leave first. The default band can never be switched off.</td></tr>
@@ -777,6 +829,12 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
               </td>
             </tr>
             <tr>
+              <td>A “when” card</td>
+              <td>
+                <code>checker=8</code>, <code>value</code> = the card number (<code>Rules.registerCondition</code>), <code>checkPool = 0</code>
+              </td>
+            </tr>
+            <tr>
               <td>Every h hours</td>
               <td>
                 <code>checker=3</code>, <code>value = h × 60</code>
@@ -853,7 +911,7 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
         </ul>
         <p>
           <code>scripts/check-rules.ts</code> encodes every template on every pool and dry-runs <code>createOrder</code> against the contract, and{" "}
-          <code>test/EditorParity.t.sol</code> checks that the editor accepts exactly what the contract accepts (43,554 cases) and that the backtest engine runs
+          <code>test/EditorParity.t.sol</code> checks that the editor accepts exactly what the contract accepts (48,186 cases) and that the backtest engine runs
           orders exactly where the contract does (2,000 orders).
         </p>
       </Section>
@@ -1052,7 +1110,7 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
     render: () => (
       <Section dev id="local-dev" title="Run it locally">
         <Code lang="bash">{`# contracts
-forge test                                   # 154 tests (EditorParity needs the app installed below)
+forge test                                   # 159 tests (EditorParity needs the app installed below)
 
 # app + backtest API
 cd frontend && npm install && npm run setup:api

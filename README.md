@@ -32,13 +32,13 @@ it would have done, and runs it exactly as written.
 | **What Alucard adds** | A **strategy attached to the position**: two sides ("if ETH falls", "if ETH rises"), each a short chain of steps. Steps include **moving the whole position into another pool and coming back by the LP's own rule**: a round trip between Uniswap pools that existing tools do not offer. |
 | **How you build it** | A flow of small step cards (When → Then → Come back when → Back into), or **say it to the assistant** (Gemini): it asks back when something is missing, then fills in the same cards. It cannot build anything the contract would refuse, and it never signs. |
 | **Why you can trust it** | **A pool's price counts only within ~2% of Chainlink's** (0.5% for two stablecoins), so a bigger push fires nothing, however long it is held. **No step sells into a push**: every swap must fill within the owner's slippage of Chainlink's price, or the step waits while the position keeps earning. Want Chainlink itself to confirm a level? Add the **Chainlink price** condition with "and". The owner can always cancel and withdraw. Keepers earn only the fee the owner set. The admin has no instant power: every feed or band change waits 2 days ([details](#safety-model-what-you-are-trusting)). |
-| **Proof it does what it says** | The backtest engine runs the **same order words** as the contract; on 2,000 random orders its steps fire at exactly the same swaps as the contract's, **and the owner ends with the same money (all within 0.1%, 1,987 within 0.01%)** on the strategies that test covers (no swap-to-one-token steps, moves into other pools or fee conditions). 154 contract tests, 43,554 editor-vs-contract cases, every template dry-run against both live deployments. |
+| **Proof it does what it says** | The backtest engine runs the **same order words** as the contract; on 2,000 random orders its steps fire at exactly the same swaps as the contract's, **and the owner ends with the same money (all within 0.1%, 1,987 within 0.01%)** on the strategies that test covers (no swap-to-one-token steps, moves into other pools or fee conditions). 159 contract tests, 48,186 editor-vs-contract cases, every template dry-run against both live deployments. |
 
 ## What you can build
 
 | | Options |
 |---|---|
-| **When** | leaves my range (± a margin) · reaches a price · turns x% from its best price (trailing) · a price in another pool · on a timer · fees earned reach x% · fee rate below x% a year · two of them with and / or · only if it lasts (true for N minutes in a row, up to a day) |
+| **When** | leaves my range (± a margin) · reaches a price · turns x% from its best price (trailing) · a price in another pool · Chainlink's price reaches a level · on a timer · fees earned reach x% · fee rate below x% a year · **your own "when" card** (any contract that answers true or false) · two of them with and / or · only if it lasts (true for N minutes in a row, up to a day) |
 | **Then** | move the money to another pool · withdraw some or all · swap to one token · re-range around the price · compound · send fees out · repeat (with a run limit; price levels step) |
 | **Where** | **any Uniswap v4 pool of two listed tokens**, with our hook or without one |
 | **Move into** | **any pool that shares a token** with yours (swapped into the shared token on the way, added in a range around that pool's price), or hold one token |
@@ -54,6 +54,23 @@ and the engine). Combinations that would loop (a repeating fixed price on a re-r
 mainnet Uniswap v3 pool with the same two tokens (ETH/USDC 0.05% and 0.30%, WBTC/USDC, WBTC/WETH, USDC/USDT, DAI/USDC,
 LINK/WETH; 5 April – 3 October 2026; up to a million swaps) and shows the result next to the same position without the
 strategy and next to just holding. 180 days of a million swaps replay in about 0.2 s.
+
+## Your own WHEN card
+
+For a condition the builder does not have (a depeg, volatility, another protocol's state), anyone can write a contract
+with one function and register it once (`Rules.registerCondition`) for a permanent card number:
+
+```solidity
+interface IAlucardCondition {
+    function isMet(address vault, uint256 orderId, bool upper) external view returns (bool); // true = run now
+}
+```
+
+It only decides **when**: what the step does, and every guard on it, stays with the vault. It is called read-only
+(`staticcall`) with 200,000 gas, and anything but a clean `true` (a revert, a write, running out of gas, another answer)
+means "not now". Using a card is each owner's choice. Card #1 on both testnets is an example, a USDC depeg alarm
+(`src/examples/DepegCondition.sol`). The backtest cannot run a card's code on history, so a side using one is not
+replayed. Tests: `test/Conditions.t.sol`.
 
 ## How it works
 
@@ -78,7 +95,7 @@ flowchart LR
 | Contract | Size | What it does |
 |---|---|---|
 | `ConditionalOrders` | 21.5 KB | Holds positions that have a strategy (owner = this contract, salt = order id) and the tokens of a move. Runs a step when `Rules` says its condition is true and the price is near Chainlink; pays the caller the owner's keeper fee. |
-| `Rules` | 18.3 KB | The pool table (any v4 pool of two listed tokens, hookless or ours) and the logic: is a condition true (`met`), is the price believable (`checkPrice`), is a strategy valid (`checkSide`, `checkLegs`), Chainlink-anchored swap limits, ranges. |
+| `Rules` | 19.3 KB | The pool table (any v4 pool of two listed tokens, hookless or ours) and the logic: is a condition true (`met`, including "when" cards), is the price believable (`checkPrice`), is a strategy valid (`checkSide`, `checkLegs`), Chainlink-anchored swap limits, ranges. |
 | `RuleHook` | 16.4 KB | The v4 hook: limit orders filled inside the swap that crosses them (at most 3 per swap; a 0.1% reward for filling the rest). |
 | `PriceFeeds` | 8.3 KB | The token list: a Chainlink feed per token, how far a pool may be from Chainlink (200 ticks, ~2%; 50 ticks for two stablecoins), an optional L2 sequencer check. Every change waits 2 days. |
 
@@ -141,9 +158,9 @@ adopted yet.
 
 | Check | Result |
 |---|---|
-| `forge test` (fuzz included) | 154 passing |
+| `forge test` (fuzz included) | 159 passing |
 | Branch coverage of the four contracts and their libraries (`forge coverage --ir-minimum`) | 79% (lines 96%, functions 97%) |
-| Strategy shapes the editor builds vs what the contract accepts (`test/EditorParity.t.sol`) | 43,554 cases, 0 mismatches |
+| Strategy shapes the editor builds vs what the contract accepts (`test/EditorParity.t.sol`) | 48,186 cases, 0 mismatches |
 | Backtest engine vs contract: when each step fires (holds and re-centring included) | 2,000 random orders, same swaps |
 | Backtest engine vs contract: what the owner ends with (value over just holding, at the last price; strategies without swap-to-one-token steps, moves into other pools or fee conditions, on synthetic price paths) | all 2,000 within 0.1%; 1,987 within 0.01%; largest gap 0.028% |
 | Backtest engine tests (`frontend/api/test_chain_history.py`) | 10 passing |
@@ -181,6 +198,7 @@ From each project's public docs (November 2026); a dash means we found no such f
 | The editor never builds what the contract refuses | `frontend/lib/rules.ts` (`validate`), `test/EditorParity.t.sol` |
 | The assistant cannot exceed the editor | `frontend/lib/assistant.ts` (`coerceRules`), `frontend/app/api/assistant/route.ts` |
 | Keepers earn only the owner's fee | `test/KeeperFee.t.sol` |
+| A "when" card can only decide when, and a bad one never fires | `src/Rules.sol` (`registerCondition`, `_askCard`), `test/Conditions.t.sol` |
 | What you trust, and the known limits | [Safety model](#safety-model-what-you-are-trusting) below |
 | Live addresses on both chains | [`deployments/README.md`](deployments/README.md) |
 
@@ -191,10 +209,10 @@ between them (and follows your wallet).
 
 | Contract | Ethereum Sepolia (11155111) | Unichain Sepolia (1301) |
 |---|---|---|
-| RuleHook | [`0x26Cc…90c0`](https://sepolia.etherscan.io/address/0x26Cc9Dff279Cb44193B9010fBFAcd998C1a090c0) | [`0xA8eb…90c0`](https://sepolia.uniscan.xyz/address/0xA8eb7A311dBA7358C5305D6baFfCe8d5d22A90c0) |
-| ConditionalOrders | [`0x9909…04B3`](https://sepolia.etherscan.io/address/0x9909261057eE2165aA9a2317b960Aa51812D04B3) | [`0x7182…1FD2`](https://sepolia.uniscan.xyz/address/0x718221B1f8433927b3aAF2BcC3c6Eb092a1a1FD2) |
-| Rules | [`0x36dD…7389`](https://sepolia.etherscan.io/address/0x36dD90fcB4c0208b20800CA53d6622293D4f7389) | [`0x5859…ae3e`](https://sepolia.uniscan.xyz/address/0x585906FF1FC8A14C62c77b72c24FcaDEcFc0ae3e) |
-| PriceFeeds | [`0x0e3f…F67a`](https://sepolia.etherscan.io/address/0x0e3f6F323727E8db4513cAC1667a659ED902F67a) | [`0x6B87…6e68`](https://sepolia.uniscan.xyz/address/0x6B870F34c6C6a6c94635604095c9f007Ca026e68) |
+| RuleHook | [`0x72a1…50C0`](https://sepolia.etherscan.io/address/0x72a17aFf8abee41Cc3801858bD9B77c9c25a50C0) | [`0x5Fcc…D0C0`](https://sepolia.uniscan.xyz/address/0x5Fcc28aaFa5864DaD180878788b4E34605ACD0C0) |
+| ConditionalOrders | [`0x225C…179e`](https://sepolia.etherscan.io/address/0x225CE2a16dd09335E5116701AF5d1011488D179e) | [`0xAC8a…6d21`](https://sepolia.uniscan.xyz/address/0xAC8aD0C04B8eDc28be2f027D7e9aCb65f9c76d21) |
+| Rules | [`0xd57e…3e98`](https://sepolia.etherscan.io/address/0xd57e8Db9E52c8C7a2d088027aab905cFF1f83e98) | [`0xd1f7…0Dc8`](https://sepolia.uniscan.xyz/address/0xd1f76e4c009A2129e34Ab44093AB2f0C82AA0Dc8) |
+| PriceFeeds | [`0x83cB…3365`](https://sepolia.etherscan.io/address/0x83cB2d2f61f1d5668973AD658779D9C83e083365) | [`0x5177…8E15`](https://sepolia.uniscan.xyz/address/0x5177362B391742FfAb54dbBf142fCdb0f7318E15) |
 
 On Unichain Sepolia every token but DAI has a real Chainlink feed (USDT too, which Sepolia lacks); DAI uses a fixed $1
 mock there. Full addresses, tokens, pools and faucets: [`deployments/README.md`](deployments/README.md).

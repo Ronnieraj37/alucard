@@ -7,6 +7,7 @@
 
 import {
   BadgeCheck,
+  Puzzle,
   AlertTriangle,
   ArrowDownRight,
   ArrowLeft,
@@ -42,7 +43,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type Abi, isAddress } from "viem";
 import { useReadContract } from "wagmi";
+import { explorerAddress } from "@/lib/chain";
+import { useTx } from "@/lib/tx";
 import Assistant from "@/components/Assistant";
 import Backtest, { type BacktestRange } from "@/components/Backtest";
 import { Field, PoolIcons, Suffix } from "@/components/ui";
@@ -102,6 +106,7 @@ const ICONS: Record<string, LucideIcon> = {
   apr: Coins,
   otherPool: Crosshair,
   chainlink: BadgeCheck,
+  card: Puzzle,
   withdraw: ArrowDownRight,
   convert: Shuffle,
   follow: MoveHorizontal,
@@ -117,6 +122,7 @@ const TITLES: Record<string, string> = {
   apr: "Fee rate falls",
   otherPool: "Price in another pool",
   chainlink: "Chainlink price",
+  card: "My own condition",
   withdraw: "Withdraw",
   convert: "Swap",
   follow: "Follow the price",
@@ -179,6 +185,13 @@ function triggerOptions(pool: Pool, lane: LaneId, price: number, range: [number,
       hint: "The market price, not this pool's: a push of the pool cannot fire it. Add it with “and” to confirm a level.",
       icon: BadgeCheck,
       apply: set(t("chainlink")),
+    },
+    {
+      id: "card",
+      label: "My own condition (a contract)",
+      hint: "A “when” card: any contract that answers true or false. Card #1 is a USDC depeg alarm.",
+      icon: Puzzle,
+      apply: set(t("card")),
     },
   ];
   // "fee rate falls" uses the contract's lower slot: offer it in the lane that maps there
@@ -1129,6 +1142,59 @@ function BackFields({
   );
 }
 
+/** A "when" card: pick it by number, or paste a contract address (registered here if it is new). */
+function CardFields({ t, onChange }: { t: Trigger; onChange: (t: Trigger) => void }) {
+  const [text, setText] = useState(t.cardId ? String(t.cardId) : "");
+  const tx = useTx();
+  const addr = isAddress(text.trim()) ? (text.trim() as `0x${string}`) : undefined;
+  const { data: idOf, refetch } = useReadContract({ address: CORE.rules, abi: rulesAbi, functionName: "conditionIdOf", args: addr ? [addr] : undefined, query: { enabled: !!addr } });
+  const { data: count } = useReadContract({ address: CORE.rules, abi: rulesAbi, functionName: "conditionCount" });
+  const { data: cardAddr } = useReadContract({ address: CORE.rules, abi: rulesAbi, functionName: "conditionAt", args: t.cardId ? [t.cardId] : undefined, query: { enabled: !!t.cardId } });
+  useEffect(() => {
+    if (addr && idOf) onChange({ ...t, cardId: Number(idOf) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idOf, addr]);
+  const register = () =>
+    tx.run(async () => {
+      await tx.send("Register the card", { address: CORE.rules, abi: rulesAbi as Abi, functionName: "registerCondition", args: [addr!] });
+      await refetch();
+    }, "Registered");
+  return (
+    <>
+      <Field label="Card number, or a contract address" hint={count ? `${count} card${Number(count) === 1 ? "" : "s"} registered on this network` : undefined}>
+        <input
+          className="input"
+          value={text}
+          placeholder="1, or 0x…"
+          onChange={(e) => {
+            const v = e.target.value;
+            setText(v);
+            if (/^\d+$/.test(v.trim())) onChange({ ...t, cardId: Number(v.trim()) });
+            else if (!isAddress(v.trim())) onChange({ ...t, cardId: undefined });
+          }}
+        />
+      </Field>
+      {addr && idOf === 0 && (
+        <button className="btn btn-light self-start" disabled={tx.state.busy} onClick={register}>
+          Register this contract as a card
+        </button>
+      )}
+      {t.cardId && cardAddr && cardAddr !== "0x0000000000000000000000000000000000000000" && (
+        <p className="text-[12px] text-[var(--muted)]">
+          Card #{t.cardId}:{" "}
+          <a className="underline underline-offset-4" href={explorerAddress(cardAddr)} target="_blank" rel="noreferrer">
+            {cardAddr.slice(0, 6)}…{cardAddr.slice(-4)}
+          </a>
+        </p>
+      )}
+      <p className="rounded-[8px] bg-[var(--amber-lt)] px-3 py-2 text-[12px] leading-relaxed text-[var(--amber)]">
+        The contract decides when this side runs; read its code first. It cannot touch your money, and every guard still applies, but it can fire at a
+        bad moment or never. A contract behind a proxy can change later. The backtest cannot replay it.
+      </p>
+    </>
+  );
+}
+
 /** The settings of one condition. Reads the watched pool's price for hints and quick buttons. */
 function TriggerFields({ pool, price, lane, t, onChange }: { pool: Pool; price: number; lane: LaneId; t: Trigger; onChange: (t: Trigger) => void }) {
   const num = (s: string) => (s === "" ? NaN : Number(s));
@@ -1173,6 +1239,7 @@ function TriggerFields({ pool, price, lane, t, onChange }: { pool: Pool; price: 
           <Chips values={[-10, -5, 5, 10]} current={undefined} label={(d) => `${d > 0 ? "+" : ""}${d}%`} onPick={(d) => onChange({ ...t, price: from * (1 + d / 100) })} />
         </Field>
       )}
+      {t.kind === "card" && <CardFields t={t} onChange={onChange} />}
       {t.kind === "trail" && (
         <Field label={lane === "down" ? `How far ${pool.base.symbol} falls from its high` : `How far ${pool.base.symbol} rises from its low`} hint="The best price is remembered on-chain; keepers update it.">
           <Suffix value={t.trailPct ?? 5} suffix="%" onChange={(x) => onChange({ ...t, trailPct: num(x) })} />

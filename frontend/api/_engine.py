@@ -313,6 +313,7 @@ def stored_time(t: float) -> float:
 # x ticks from the window's first price (a log-price shift, so "5% below today" stays "5% below the window's start").
 
 CHECK_FEES, CHECK_APR = 6, 7
+CHECK_EXTERNAL = 8  # a "when" card (a contract): it cannot be replayed on history, so it never fires here
 ACT_MOVE = 16
 LEG_IDLE, LEG_RANGE, LEG_CENTERED = 1, 2, 3
 MIN_GAP = 60  # ConditionalOrders.MIN_GAP: a side runs at most once in this many seconds after its last run
@@ -553,6 +554,8 @@ class Sim:
         ts = self.s.ts[i:j]
         if checker == CHECK_TIME:
             return ts >= d.last_run + value * 60
+        if checker == CHECK_EXTERNAL:
+            return np.zeros(j - i, dtype=bool)
         if checker in (CHECK_FEES, CHECK_APR):
             ok, bps = self.fee_bps(st, i, j)
             if checker == CHECK_FEES:
@@ -1223,6 +1226,10 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
             "A step whose swap cannot sell everything within your slippage waits and is tried again (shown as refused): "
             "if that happens often, your position is large next to the pool, so raise the slippage.",
             "Your own swaps do not move later prices in the replay, and they use the pool's liquidity at that moment.",
+        ] + ([
+            "A side that uses your own “when” card (a contract) is not replayed: the replay cannot run its code on history, so "
+            "that condition is never true here.",
+        ] if any(x.checker == CHECK_EXTERNAL or x.checker2 == CHECK_EXTERNAL for x in list(created.values())) else []) + [
             "Fees assume your position is small next to the pool.",
             "A keeper runs each rule a fixed delay after its condition is met; price manipulation and MEV are not modelled.",
             "Trailing stops: the best price is updated at every swap (it assumes someone pokes each new best, as the keeper does).",

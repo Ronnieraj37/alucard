@@ -22,7 +22,11 @@ const pool = POOLS.find((p) => p.name === "WETH_USDC_3000")!;
 const stable = POOLS.find((p) => p.name === "USDC_USDT_100")!;
 const move = (trigger: Rules["down"]["trigger"]) => ({ trigger, actions: [{ kind: "move" as const }], repeat: true });
 
+// ONLY=<words>: create just the examples whose name contains them
+const ONLY = process.env.ONLY;
+
 async function create(name: string, rules: Rules, pct: number) {
+  if (ONLY && !name.includes(ONLY)) return;
   const [sqrtX96, t] = await client.readContract({ address: CORE.rules, abi: rulesAbi, functionName: "poolState", args: [pool.index] });
   const range = rangeAround(pool, Number(t), pct);
   const v = validate(pool, rules, range);
@@ -75,6 +79,12 @@ async function main() {
     "send the fees out every 2 minutes, 3 times",
     { down: emptyLane(), up: { trigger: { kind: "timer", hours: 2 / 60 }, actions: [{ kind: "collect" }], repeat: true, maxRuns: 3 } },
     1,
+  );
+
+  await create(
+    "leave if USDC loses its peg (when card #1)",
+    { down: { trigger: { kind: "card", cardId: 1 }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false }, up: emptyLane() },
+    3,
   );
 }
 

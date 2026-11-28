@@ -11,6 +11,7 @@ import {RuleHook} from "../../src/RuleHook.sol";
 import {ConditionalOrders} from "../../src/ConditionalOrders.sol";
 import {PriceFeeds} from "../../src/PriceFeeds.sol";
 import {Rules} from "../../src/Rules.sol";
+import {DepegCondition} from "../../src/examples/DepegCondition.sol";
 import {MockAggregator} from "../../src/testnet/MockAggregator.sol";
 import {Net} from "./Net.sol";
 
@@ -67,6 +68,9 @@ contract DeployCore is Script {
         RuleHook hook = new RuleHook{salt: salt}(poolManager);
         Rules rules = new Rules(poolManager, address(hook), feeds);
         ConditionalOrders orders = new ConditionalOrders(poolManager, rules);
+        // "when" card #1, an example anyone can use or copy: USDC's Chainlink price below $0.99
+        DepegCondition usdcDepeg = new DepegCondition(f.usdc, 0.99e8, f.dailyAge);
+        rules.registerCondition(address(usdcDepeg));
         vm.stopBroadcast();
         require(address(hook) == hookAddress, "hook address mismatch");
 
@@ -78,6 +82,7 @@ contract DeployCore is Script {
         json = vm.serializeAddress("core", "conditionalOrders", address(orders));
         json = vm.serializeAddress("core", "rules", address(rules));
         json = vm.serializeAddress("core", "priceFeeds", address(feeds));
+        json = vm.serializeAddress("core", "usdcDepegCard", address(usdcDepeg));
         if (f.usdt == address(0)) json = vm.serializeAddress("core", "usdtMockFeed", usdtUsd);
         if (f.dai == address(0)) json = vm.serializeAddress("core", "daiMockFeed", daiUsd);
         json = vm.serializeUint("core", "chainId", block.chainid);

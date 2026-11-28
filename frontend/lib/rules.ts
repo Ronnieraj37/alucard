@@ -15,7 +15,7 @@ export type { Side } from "./side";
 
 export type LaneId = "down" | "up"; // base price falls / rises
 
-export type TriggerKind = "leave" | "price" | "otherPool" | "chainlink" | "timer" | "trail" | "fees" | "apr";
+export type TriggerKind = "leave" | "price" | "otherPool" | "chainlink" | "timer" | "trail" | "fees" | "apr" | "card";
 export type Trigger = {
   kind: TriggerKind;
   bufferPct?: number; // leave: how far past the range edge
@@ -25,6 +25,7 @@ export type Trigger = {
   trailPct?: number; // trail: how far the price turns back from its best
   feesPct?: number; // fees: fees earned, in % of the position
   aprPct?: number; // apr: the fee rate per year, in %
+  cardId?: number; // card: a "when" card's number in Rules (a contract that answers true or false)
   /** a way back "the price is back in my range": a price level at the range's edge (bufferPct inside it) */
   backIn?: boolean;
 };
@@ -246,6 +247,7 @@ function encodeTrigger(c: Ctx, laneId: LaneId, t: Trigger): Cond {
     return { checker: CHECK.LINK, value: Math.round(tickAtPrice(w, t.price ?? 0)), checkPool: pool(w) };
   }
   if (t.kind === "trail") return { checker: CHECK.TRAIL, value: ticksForMove(t.trailPct ?? 5, laneId === "up"), checkPool: pool(watchedBy(c.own, t, c.watch)) };
+  if (t.kind === "card") return { checker: CHECK.EXTERNAL, value: Math.round(t.cardId ?? 0), checkPool: 0 };
   if (t.kind === "fees") return { checker: CHECK.FEES, value: Math.round((t.feesPct ?? 1) * 100), checkPool: 0 };
   if (t.kind === "apr") return { checker: CHECK.APR, value: Math.round((t.aprPct ?? 5) * 100), checkPool: 0 };
   return { checker: CHECK.TIME, value: Math.max(1, Math.round((t.hours ?? 24) * 60)), checkPool: 0 };
@@ -427,6 +429,7 @@ function decodeTrigger(c: Ctx, laneId: LaneId, checker: number, value: number, c
     if (w && w.index !== c.watch.index) t.poolIndex = w.index; // follows a pool other than the one this leg watches
     return t;
   }
+  if (checker === CHECK.EXTERNAL) return { kind: "card", cardId: value };
   if (checker === CHECK.FEES) return { kind: "fees", feesPct: value / 100 };
   if (checker === CHECK.APR) return { kind: "apr", aprPct: value / 100 };
   return { kind: "timer", hours: round2(value / 60) };
@@ -561,6 +564,7 @@ function triggerErrors(c: Ctx, laneId: LaneId, t: Trigger, which: string): strin
     const ok = t.trailPct! > 0 && (laneId === "up" || t.trailPct! < 100) && ticksForMove(t.trailPct!, laneId === "up") <= MAX_TRAIL_TICKS;
     if (!ok) e.push(`The trailing distance${which} must be above 0% (and a fall of less than 100%).`);
   }
+  if (t.kind === "card" && !(Number.isInteger(t.cardId) && t.cardId! >= 1 && t.cardId! < 8_388_608)) e.push(`Choose a registered “when” card${which}.`);
   if (t.kind === "fees" && !(Math.round((t.feesPct ?? 0) * 100) >= 1 && t.feesPct! <= 100)) e.push(`The fees earned${which} must be 0.01% to 100% of the position.`);
   if (t.kind === "apr" && !(Math.round((t.aprPct ?? 0) * 100) >= 1 && t.aprPct! * 100 < 8_388_608)) e.push(`Set the fee rate${which} (above 0% a year).`);
   if (c.idle && (t.kind === "leave" || t.kind === "fees" || t.kind === "apr")) e.push(`While waiting there is no position: this condition${which} cannot be used.`);
@@ -695,8 +699,8 @@ export const allErrors = (v: Validation) => [...v.down, ...v.up, ...v.general, .
 
 export function laneTitle(p: Pool, id: LaneId, lane?: Lane) {
   const t = lane?.trigger;
-  if (t && (t.kind === "timer" || t.kind === "fees" || t.kind === "apr") && (!lane!.trigger2 || lane!.trigger2.kind === t.kind)) {
-    return t.kind === "timer" ? "On a timer" : "On fees earned";
+  if (t && (t.kind === "timer" || t.kind === "fees" || t.kind === "apr" || t.kind === "card") && (!lane!.trigger2 || lane!.trigger2.kind === t.kind)) {
+    return t.kind === "timer" ? "On a timer" : t.kind === "card" ? "On my own condition" : "On fees earned";
   }
   const w = lane ? watched(p, lane) : p;
   return id === "down" ? `If ${w.base.symbol} falls` : `If ${w.base.symbol} rises`;
@@ -735,6 +739,8 @@ export function describeTrigger(p: Pool, id: LaneId, t: Trigger): string {
       return `fees earn less than ${t.aprPct}% a year`;
     case "timer":
       return `every ${every(t.hours ?? 24)}`;
+    case "card":
+      return `card #${t.cardId ?? "?"} says yes`;
   }
 }
 
@@ -946,6 +952,8 @@ export function defaultTrigger(kind: TriggerKind, p: Pool, lane: LaneId, price: 
       return { kind, aprPct: 5 };
     case "timer":
       return { kind, hours: 24 };
+    case "card":
+      return { kind };
   }
 }
 

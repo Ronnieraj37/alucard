@@ -44,7 +44,7 @@ Alucard runs the LP's own strategy on a Uniswap v4 position: conditions (pool pr
 
 ## Evidence on Hand
 
-- 154 Foundry tests, 43,554 editor-vs-contract parity cases with 0 mismatches, 2,000 engine-vs-contract replays firing at the same swaps and ending within 0.1% of the same money (on the strategies that test covers), 10 engine tests, every template dry-run against both live deployments, end to end on both chains and on a fork.
+- 159 Foundry tests, 48,186 editor-vs-contract parity cases with 0 mismatches, 2,000 engine-vs-contract replays firing at the same swaps and ending within 0.1% of the same money (on the strategies that test covers), 10 engine tests, every template dry-run against both live deployments, end to end on both chains and on a fork.
 - Live deployments on Ethereum Sepolia and Unichain Sepolia (addresses in `deployments/`).
 - No users, testimonials, TVL or partners yet: never invent them.
 
