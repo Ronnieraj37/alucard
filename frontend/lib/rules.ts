@@ -72,7 +72,6 @@ export const ACTION_ORDER: ActionKind[] = ["collect", "withdraw", "convert", "re
 export const emptyLane = (): Lane => ({ trigger: null, actions: [], repeat: false });
 export const emptyRules = (): Rules => ({ down: emptyLane(), up: emptyLane() });
 const moveLane = (trigger: Trigger | null): Lane => ({ trigger, actions: [{ kind: "move" }], repeat: true });
-export const emptyPlan = (): PlanB => ({ where: "wait", returnTo: "recentre", back: { down: moveLane(null), up: moveLane(null) } });
 
 /** The way back of the money a lane takes out: a fall out of the range comes back on a rise, and the other way. */
 export const backLaneOf = (exit: LaneId): LaneId => (exit === "down" ? "up" : "down");
@@ -257,7 +256,6 @@ function encodeLane(c: Ctx, lane: Lane, laneId: LaneId, slot: Slot): Side {
   const s = offSide();
   if (!live(lane)) return s;
   const p = c.own;
-  const upper = slot === "upper";
   const follow = get(lane, "follow");
   const move = get(lane, "move");
   const spacing = p.key.tickSpacing;
@@ -539,10 +537,6 @@ export function decodeStrategy(home: Pool, livePool: number, lowerWord: bigint, 
   return { rules, liveIsHome };
 }
 
-/** One-leg decode, kept for callers that only have two sides. */
-export function decodeRules(p: Pool, lower: Side, upper: Side): Rules {
-  return decodeLanes(homeCtx(p), lower, upper);
-}
 
 // ---------------------------------------------------------------- validation (mirrors Rules.checkSide / checkLegs)
 
@@ -989,18 +983,6 @@ export function defaultTrigger(kind: TriggerKind, p: Pool, lane: LaneId, price: 
   }
 }
 
-export function defaultAction(kind: ActionKind): Action {
-  switch (kind) {
-    case "withdraw":
-      return { kind, pct: 100 };
-    case "convert":
-      return { kind, to: "quote" };
-    case "follow":
-      return { kind, widthPct: 5 };
-    default:
-      return { kind };
-  }
-}
 
 // ---------------------------------------------------------------- contract calls
 

@@ -8,7 +8,7 @@ import { type Abi } from "viem";
 import { useAccount, usePublicClient, useReadContract } from "wagmi";
 import { Menu, TokenBox, TokenIcon, TokenPill, TxLine } from "@/components/ui";
 import { QUOTER, quoterAbi } from "@/lib/abis-extra";
-import { conditionalOrdersAbi, routerAbi, ruleHookAbi, rulesAbi } from "@/lib/generated/abis";
+import { routerAbi, ruleHookAbi, rulesAbi } from "@/lib/generated/abis";
 import { CORE, POOLS, type Pool, type Token, TOKENS, fmt, priceAtTick, toRaw } from "@/lib/pools";
 import { useTokenBalance, useTx } from "@/lib/tx";
 import { getLogsSinceDeploy } from "@/lib/logs";

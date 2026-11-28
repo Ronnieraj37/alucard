@@ -1,152 +1,140 @@
 /* The watch movement drawn on the pitch deck's cover and closing slides (components/watch/Movement.tsx). */
 /* ---------------------------------------------------------------- the movement drawing */
-.mv {
+.mv{
   display: block;
   width: 100%;
   height: auto;
   overflow: visible;
 }
-.mv-case {
+.mv-case{
   fill: #fbfbfc;
   stroke: var(--ink);
   stroke-width: 1.5;
   filter: drop-shadow(0 18px 30px rgba(27, 29, 34, 0.16));
 }
-.mv-plate {
+.mv-plate{
   stroke: var(--steel2);
   stroke-width: 1;
 }
-.mv-perlage {
+.mv-perlage{
   fill: rgba(255, 255, 255, 0.18);
   stroke: rgba(27, 29, 34, 0.05);
   stroke-width: 0.8;
 }
-.mv-ring-text {
+.mv-ring-text{
   font-family: var(--font-marcellus), Georgia, serif;
   font-size: 11px;
   letter-spacing: 0.32em;
   fill: var(--ink3);
 }
-.mv-wheel {
+.mv-wheel{
   fill: #e9d8b4;
   stroke: var(--gilt);
   stroke-width: 1;
 }
-.mv-rim {
+.mv-rim{
   fill: rgba(243, 244, 245, 0.85);
   stroke: var(--gilt);
   stroke-width: 1;
 }
-.mv-spoke {
+.mv-spoke{
   stroke: #c7ab76;
   stroke-width: 7;
   stroke-linecap: round;
 }
-.mv-hub {
+.mv-hub{
   fill: var(--steel);
   stroke: var(--ink2);
   stroke-width: 1;
 }
-.mv-chaton {
+.mv-chaton{
   fill: #d7c39a;
   stroke: var(--gilt);
   stroke-width: 0.8;
 }
-.mv-jewel {
+.mv-jewel{
   fill: var(--ruby);
 }
-.mv-jewel-hi {
+.mv-jewel-hi{
   fill: #ff9aa9;
   opacity: 0.8;
 }
-.mv-screw {
+.mv-screw{
   fill: var(--blued);
   stroke: #1c3361;
   stroke-width: 1;
 }
-.mv-screw-sm {
+.mv-screw-sm{
   fill: var(--blued);
 }
-.mv-slot {
+.mv-slot{
   stroke: #0e1a33;
   stroke-width: 1.6;
 }
-.mv-bridge {
+.mv-bridge{
   fill: var(--steel);
 }
-.mv-stripe {
+.mv-stripe{
   fill: rgba(255, 255, 255, 0.55);
 }
-.mv-bridge-edge {
+.mv-bridge-edge{
   fill: none;
   stroke: var(--ink2);
   stroke-width: 1.2;
 }
-.mv-engrave {
+.mv-engrave{
   font-family: var(--font-marcellus), Georgia, serif;
   font-size: 15px;
   letter-spacing: 0.34em;
   fill: var(--gilt);
 }
-.mv-engrave-sm {
-  font-size: 8.5px;
-  letter-spacing: 0.3em;
-}
-.mv-cock {
+.mv-cock{
   fill: var(--steel);
   stroke: var(--ink2);
   stroke-width: 1.2;
 }
-.mv-balance-rim {
+.mv-balance-rim{
   fill: none;
   stroke: var(--gilt);
   stroke-width: 6;
 }
-.mv-balance-arm {
+.mv-balance-arm{
   stroke: var(--gilt);
   stroke-width: 4;
 }
-.mv-hairspring {
+.mv-hairspring{
   fill: none;
   stroke: var(--blued);
   stroke-width: 0.9;
   opacity: 0.9;
 }
-.mv-rotor-body {
+.mv-rotor-body{
   fill: var(--steel);
   stroke: var(--ink2);
   stroke-width: 1.2;
 }
-.mv-rotor-arm {
+.mv-rotor-arm{
   stroke: var(--ink2);
   stroke-width: 1;
   opacity: 0.35;
 }
-.mv-bevel {
+.mv-bevel{
   fill: none;
   stroke: #fff;
   stroke-width: 7;
   opacity: 0.85;
 }
-.mv-fork {
+.mv-fork{
   fill: none;
   stroke: var(--ink2);
   stroke-width: 3;
   stroke-linecap: round;
 }
-.mv-pallet-stone {
+.mv-pallet-stone{
   fill: var(--ruby);
 }
 
-.mv-rotor-text {
-  font-family: var(--font-archivo), Arial, sans-serif;
-  font-weight: 600;
-  font-size: 20px;
-  letter-spacing: 0.3em;
-  fill: var(--ink2);
-}
-
-.mv-spin {
+.mv-spin{
   animation: mv-spin linear infinite;
   transform-box: fill-box;
   transform-origin: center;
@@ -156,10 +144,10 @@
     transform: rotate(360deg);
   }
 }
-.mv-tick {
+.mv-tick{
   animation-timing-function: steps(150);
 }
-.mv-balance {
+.mv-balance{
   animation: mv-balance 0.3s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
   transform-box: fill-box;
   transform-origin: center;
@@ -172,7 +160,7 @@
     transform: rotate(110deg);
   }
 }
-.mv-breathe {
+.mv-breathe{
   animation: mv-breathe 0.3s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
   transform-box: fill-box;
   transform-origin: center;
@@ -185,7 +173,7 @@
     transform: scale(1.04) rotate(8deg);
   }
 }
-.mv-rotor {
+.mv-rotor{
   animation: mv-rotor 14s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
   transform-box: view-box;
   transform-origin: 300px 300px;
@@ -203,7 +191,7 @@
   .mv-spin,
   .mv-balance,
   .mv-breathe,
-  .mv-rotor {
+  .mv-rotor{
     animation: none;
   }
 }

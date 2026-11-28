@@ -8,7 +8,7 @@ import { useAccount } from "wagmi";
 import { Empty, PoolIcons, TxLine } from "@/components/ui";
 import { conditionalOrdersAbi } from "@/lib/generated/abis";
 import { type PlainPosition, type RulePosition, useMyPositions } from "@/lib/positions";
-import { CORE, fmt, maxUsable, minUsable, priceAtTick, priceRange } from "@/lib/pools";
+import { CORE, fmt, maxUsable, minUsable, priceRange } from "@/lib/pools";
 import { useTx } from "@/lib/tx";
 
 export default function Positions() {

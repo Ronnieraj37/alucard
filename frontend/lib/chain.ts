@@ -40,11 +40,9 @@ function pick(): ChainId {
 
 export const CHAIN_ID: ChainId = pick();
 export const CHAIN = CHAINS[CHAIN_ID].chain;
-export const CHAIN_LABEL = CHAINS[CHAIN_ID].label;
 export const DEPLOYMENT = DEPLOYED[CHAIN_ID];
 export const EXPLORER = CHAIN.blockExplorers?.default.url ?? "https://sepolia.etherscan.io";
 export const explorerAddress = (a: string) => `${EXPLORER}/address/${a}`;
-export const explorerTx = (h: string) => `${EXPLORER}/tx/${h}`;
 
 /** Switch the app to another chain: remembered, then the page reloads with that chain's deployment. */
 export function setChain(id: ChainId) {

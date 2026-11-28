@@ -136,9 +136,6 @@ POOL_LABELS = {
 # a condition that watches another pool reads this pool's history (the same pair at another fee tier)
 OTHER_POOL = {"eth_usdc_030": "eth_usdc_005", "eth_usdc_005": "eth_usdc_030"}
 CHAIN_PREFIX = "sepolia:"  # "sepolia:<pool index>": one of our pools, history from Chainlink (chain_series)
-_SYMBOL_DECIMALS = {"WETH": 18, "WBTC": 8, "USDC": 6, "USDT": 6, "DAI": 18, "LINK": 18, "ETH": 18}
-
-
 def arb_swaps(ts, t1per0, L: float, fee_pips: int) -> dict:
     """The swaps that keep a pool on an outside price: after each new price an arbitrageur trades the pool to the edge
     of its fee band (price x (1 - fee) or price / (1 - fee)), the cheapest trade that removes the profit. Liquidity L is
@@ -287,16 +284,6 @@ def min_usable(s: int) -> int:
 
 def max_usable(s: int) -> int:
     return math.floor(MAX_TICK / s) * s
-
-
-def ticks_for_pct(pct: float) -> int:
-    return max(0, round(math.log(1 + pct / 100) / LN))
-
-
-def ticks_for_move(pct: float, rise: bool) -> int:
-    """Ticks for a base-price move of pct: a rise (up lane) or a fall (down lane). Same as lib/rules.ts."""
-    x = math.log(1 + pct / 100) if rise else -math.log(1 - min(pct, 99.99) / 100)
-    return max(1, round(x / LN))
 
 
 def stored_time(t: float) -> float:

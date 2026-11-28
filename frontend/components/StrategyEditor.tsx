@@ -24,7 +24,6 @@ import {
   GitMerge,
   Layers,
   LineChart as LineChartIcon,
-  Link2,
   LogOut,
   MoveHorizontal,
   Percent,
@@ -1339,42 +1338,6 @@ function AdvancedFields({ value, onChange }: { value: Advanced; onChange: (a: Ad
         </a>
       </p>
     </div>
-  );
-}
-
-function AdvancedBox({ value, onChange }: { value: Advanced; onChange: (a: Advanced) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <section className="ed-list">
-      <button className="flex h-11 w-full items-center justify-between gap-2 px-[14px] text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className="text-[13.5px] text-[var(--ink)]">Settings</span>
-        <span className="flex items-center gap-2 text-[12.5px] text-[var(--muted)]">
-          keeper {value.keeperFeeBps / 100}% · slippage {value.slippagePct}% · {value.expiryDays}d
-          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
-        </span>
-      </button>
-      <div className={`grid transition-[grid-template-rows] duration-200 ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
-        <div className="min-h-0 overflow-hidden">
-          <div className="flex flex-col gap-3 border-t border-[var(--line2)] px-[14px] py-4">
-            <Field label="Keeper fee per run" hint="Paid to whoever runs a step, from what it moves">
-              <Suffix value={value.keeperFeeBps / 100} suffix="%" onChange={(x) => onChange({ ...value, keeperFeeBps: Math.min(100, Math.round(Number(x) * 100)) })} />
-            </Field>
-            <Field label="Swap slippage limit" hint="How far a swap may move the price">
-              <Suffix value={value.slippagePct} suffix="%" onChange={(x) => onChange({ ...value, slippagePct: Number(x) })} />
-            </Field>
-            <Field label="Strategy expires after" hint="Then anyone can close it; the money still goes to you">
-              <Suffix value={value.expiryDays} suffix="days" onChange={(x) => onChange({ ...value, expiryDays: Math.max(1, Number(x)) })} />
-            </Field>
-            <p className="text-[12px] text-[var(--muted)]">
-              Prices count only near Chainlink, and no step sells into a push.{" "}
-              <a className="underline decoration-[var(--line)] underline-offset-4 hover:text-[var(--ink)]" href="/docs#safety" target="_blank" rel="noreferrer">
-                How it&apos;s protected
-              </a>
-            </p>
-          </div>
-        </div>
-      </div>
-    </section>
   );
 }
 

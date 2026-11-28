@@ -95,9 +95,6 @@ export const POOLS: Pool[] = Object.entries(deployment.pools as Record<string, R
 
 export const poolByIndex = (i: number) => POOLS.find((p) => p.index === i);
 
-/** Pools of the same pair (any fee), for "price in another pool" triggers and as swap venues. */
-export const samePair = (p: Pool) =>
-  POOLS.filter((q) => q.index !== p.index && q.key.currency0 === p.key.currency0 && q.key.currency1 === p.key.currency1);
 
 // ---------------------------------------------------------------- price math
 
@@ -182,4 +179,3 @@ export function fmt(n: number, digits = 5): string {
 }
 
 export const toRaw = (amount: number, decimals: number) => BigInt(Math.floor(amount * 10 ** Math.min(decimals, 12))) * 10n ** BigInt(Math.max(0, decimals - 12));
-export const fromRaw = (raw: bigint, decimals: number) => Number(raw) / 10 ** decimals;

@@ -262,7 +262,7 @@ const USES = [
   { tag: "Leave when fees dry up", when: "the fee APR falls below 10%", then: "Take my liquidity out." },
   { tag: "Take profit in steps", when: "ETH rises 10%", then: "Withdraw 25%, again every 5% higher, four times." },
   { tag: "Trailing stop", when: "ETH falls 8% from its best", then: "Withdraw everything and swap to USDC." },
-  { tag: "Ignore wicks", when: "it stays out of range for 30 min", then: "Then exit. A quick spike does nothing." },
+  { tag: "Your own condition", when: "my contract says yes", then: "Paste any contract that answers yes or no: a depeg, volatility, any logic." },
 ];
 
 function Uses() {
@@ -283,8 +283,8 @@ function Uses() {
         ))}
       </div>
       <p className="s-lead in" style={{ ...d(1200), marginTop: 44 }}>
-        Pick the cards, or type the sentence to the assistant. Mix them: a plan for each direction, two conditions with and / or, repeats. Today’s tools
-        offer a few of these as fixed buttons.
+        Pick the cards, or type the sentence to the assistant. Mix them: a plan for each direction, two conditions with and / or, “only if it lasts”,
+        repeats. Today’s tools offer a few of these as fixed buttons.
       </p>
     </>
   );
@@ -507,13 +507,146 @@ function Guard() {
   );
 }
 
+/* ------------------------------------------------------------------ 4b · every problem, and the fix */
+
+const FIXES = [
+  ["Out of range, it earns nothing", "It leaves, re-ranges, or parks in another pool and comes back: by your rules"],
+  ["It ends up 100% in the token that fell", "Swap to a stablecoin, or move into a stable pool, the moment it leaves"],
+  ["Someone has to watch, day and night", "Any keeper runs it on-chain, paid only the fee you set (at most 1%)"],
+  ["Fee rates swing; a dead pool keeps your money", "“Fees earn less than 10% a year” is a trigger: it leaves"],
+  ["Tools give a few fixed buttons", "Your own steps and conditions, and any contract you paste as a condition"],
+  ["You can’t know if a strategy works", "Replay it on real mainnet swaps first; the replay matches the contract within 0.1%"],
+];
+
+function Fixes() {
+  return (
+    <>
+      <Head eyebrow="What goes wrong for LPs today" title="Every problem, and what Alucard does about it." />
+      <div className="ls fx">
+        <div className="ls-h in" style={d(200)}>
+          <span>The problem</span>
+          <span className="ruby">Alucard</span>
+        </div>
+        {FIXES.map(([a, b], k) => (
+          <div key={a} className="ls-row in" style={d(320 + k * 130)}>
+            <span className="ls-them">{a}</span>
+            <span className="ls-us" style={d(480 + k * 130)}>
+              {b}
+            </span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ 5b · your position, at a glance */
+
+const PS_STEPS = [
+  { at: 0, badge: "● In range", tone: "ok", line: "In range, earning fees. Watching: WETH leaves my range below.", price: 1712, down: "Watching", back: "—" },
+  { at: 0.22, badge: "● Out of range", tone: "warn", line: "Out of range: not earning fees. Watching: WETH leaves my range below.", price: 1671, down: "Ready: a keeper runs it now", back: "—" },
+  { at: 0.4, badge: "● Moved to USDT/USDC", tone: "blue", line: "Moved to USDT/USDC, earning fees there. Watching: WETH is back in my range.", price: 1642, down: "Ran 2 min ago: moved into USDT/USDC", back: "Waiting: WETH 1,642, range from 1,686" },
+  { at: 0.72, badge: "● In range", tone: "ok", line: "In range, earning fees. Watching: WETH leaves my range below.", price: 1701, down: "Watching (ready for next time)", back: "Ran 1 min ago: back into the same range" },
+];
+
+function Position() {
+  const { p } = useTimeline(14000, { loop: true, delay: 600, rest: 0.4 });
+  const k = PS_STEPS.reduce((acc, x, i) => (p >= x.at ? i : acc), 0);
+  const st = PS_STEPS[k];
+  const lo = 1686;
+  const hi = 1727;
+  const x = (v: number) => ((v - 1620) / (1760 - 1620)) * 100;
+  return (
+    <>
+      <Head eyebrow="Your position, at a glance" title="Always know what it does, and what comes next." />
+      <div className="ps">
+        <div className="ps-card in" style={d(200)}>
+          <div className="ps-top">
+            <span className="ps-pair">WETH / USDC · 0.3%</span>
+            <span className={`ps-badge ${st.tone}`}>{st.badge}</span>
+          </div>
+          <p className="ps-line">{st.line}</p>
+          <div className="ps-bar">
+            <i className="ps-range" style={{ left: `${x(lo)}%`, width: `${x(hi) - x(lo)}%` }} />
+            <b className="ps-dot" style={{ left: `${x(st.price)}%` }}>
+              <em>{st.price.toLocaleString("en-US")}</em>
+            </b>
+          </div>
+          <div className="ps-rows">
+            <div>
+              <span>If WETH falls · move into USDT/USDC</span>
+              <b className={k === 1 ? "go" : ""}>{st.down}</b>
+            </div>
+            <div>
+              <span>Way back · when WETH is back in my range</span>
+              <b>{st.back}</b>
+            </div>
+            <div>
+              <span>If a step must wait</span>
+              <b className="dim">It says why: “its swap cannot sell within your slippage”</b>
+            </div>
+          </div>
+        </div>
+        <div className="ps-facts">
+          {[
+            ["One line says it all", "In range and earning, out of range, moved and where, holding: the status reads like a sentence."],
+            ["Every side, in plain words", "What it watches, whether it is ready, when it last ran, and why it waits, if it does."],
+            ["Before you commit", "Replay the same strategy on real mainnet swaps, against holding and against no strategy."],
+          ].map(([h, t], i) => (
+            <div key={h} className="fact in" style={d(420 + i * 140)}>
+              <h3>{h}</h3>
+              <p>{t}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ 6b · every attack, and what stops it */
+
+const ATTACKS = [
+  ["Push the pool to fire your stop", "A pool’s price counts only within ~2% of Chainlink (0.5% for stablecoins)"],
+  ["Push it a little, then sell you cheap", "Every swap must fill within your slippage of Chainlink, or the step waits"],
+  ["Reset your “only if it lasts”", "Only prices near Chainlink, in every pool the side reads, can restart it"],
+  ["Overcharge as the keeper", "The fee is yours to set: at most 1% of what the step moves, whatever the gas"],
+  ["Steer the feeds, or pause everyone", "No instant admin power: every change waits two days; no upgrades, no pause"],
+  ["Act on an old price, or an L2 outage", "No step runs without a fresh price; cancelling always works"],
+];
+
+function Attacks() {
+  return (
+    <>
+      <Head eyebrow="Reviewed, attacked, fixed" title="Every attack we know of, and what stops it." />
+      <div className="ls fx">
+        <div className="ls-h in" style={d(200)}>
+          <span>The attack</span>
+          <span className="ruby">What stops it</span>
+        </div>
+        {ATTACKS.map(([a, b], k) => (
+          <div key={a} className="ls-row in" style={d(320 + k * 130)}>
+            <span className="ls-them">{a}</span>
+            <span className="ls-us" style={d(480 + k * 130)}>
+              {b}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="s-small in" style={{ ...d(1300), marginTop: 28 }}>
+        Each one is a test the attacker must lose, run on every change (test/Manipulation.t.sol, Safety.t.sol, Conditions.t.sol). Not audited yet.
+      </p>
+    </>
+  );
+}
+
 /* ------------------------------------------------------------------ 6 · landscape */
 
 function Landscape() {
   const rows = [
-    ["What you can set", "A few presets: exit at a price, re-range, compound", "Your own strategy: conditions, steps, moves to another pool and back"],
+    ["What you can set", "A few presets: exit at a price, re-range, compound", "Your own strategy: conditions, steps, moves to another pool and back, your own condition contract"],
     ["Where it runs", "The platform’s own vaults or pools", "Any Uniswap v4 pool of listed tokens, with or without our hook"],
-    ["What it trusts", "The pool price, or the operator", "A pool’s price only while Chainlink agrees with it"],
+    ["What it trusts", "The pool price, or the operator", "A pool’s price only near Chainlink; no step sells into a push"],
     ["Who runs it", "The platform’s own bot", "Any keeper, paid the fee you set"],
     ["Before you commit", "No replay of your strategy", "Replay on real history, exactly as the contract runs"],
   ];
@@ -718,10 +851,10 @@ function Built() {
 
 function Now() {
   const steps = [
-    ["Bring your positions", "Strategies on v3 and v4 positions people already hold"],
-    ["Moves with two swaps", "Between pools with no token in common"],
-    ["More places to wait", "Hold a moved token in a lending vault, not only in a pool"],
-    ["More conditions", "Volatility, volume, another pool’s fee rate"],
+    ["Audit and mainnet", "An external audit, then Unichain and Ethereum mainnet"],
+    ["Bring your positions", "Move a v3 or v4 position you already hold into a strategy"],
+    ["A strategy gallery", "Share strategies and conditions, ranked by their replays in rising, falling and sideways markets"],
+    ["Moves with two swaps", "Between pools with no token in common, and into lending vaults"],
   ];
   return (
     <>
@@ -734,76 +867,6 @@ function Now() {
             <h3>{h}</h3>
             <p>{s}</p>
           </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-/* ------------------------------------------------------------------ 10 · next */
-
-function Flow({ path, dur, n, back = false }: { path: string; dur: number; n: number; back?: boolean }) {
-  return (
-    <>
-      {Array.from({ length: n }, (_, k) => (
-        <circle key={k} r={back ? 4 : 6} className={back ? "nx-dot back" : "nx-dot"}>
-          <animateMotion dur={`${dur}s`} begin={`${(k * dur) / n}s`} repeatCount="indefinite" path={path} {...(back ? { keyPoints: "1;0", keyTimes: "0;1", calcMode: "linear" } : {})} />
-        </circle>
-      ))}
-    </>
-  );
-}
-
-function Next() {
-  const A = "M400,280 L632,280";
-  const B = "M1032,262 C1150,262 1150,130 1264,130";
-  const C = "M1032,298 C1150,298 1150,430 1264,430";
-  return (
-    <>
-      <Head eyebrow="Next: liquidity that lends to liquidity" title="A lending vault for LPs, inside Alucard and out." />
-      <div className="nx in" style={d(250)}>
-        <svg width="1664" height="560" viewBox="0 0 1664 560" aria-hidden="true">
-          {[A, B, C].map((p) => (
-            <path key={p} d={p} className="nx-path" />
-          ))}
-          <Flow path={A} dur={2.4} n={4} />
-          <Flow path={B} dur={2.6} n={4} />
-          <Flow path={C} dur={2.6} n={4} />
-          <Flow path={A} dur={3.2} n={3} back />
-          <Flow path={B} dur={3.4} n={2} back />
-          <Flow path={C} dur={3.4} n={2} back />
-          <text x="516" y="262" textAnchor="middle" className="nx-t">
-            capital
-          </text>
-          <text x="516" y="314" textAnchor="middle" className="nx-t back">
-            interest
-          </text>
-        </svg>
-        <div className="vbox" style={{ left: 0, top: 180 }}>
-          <p className="s-eyebrow">Lenders</p>
-          <h3>Deposit any token</h3>
-          <p>Receive a share token that grows with interest</p>
-        </div>
-        <div className="vbox vault" style={{ left: 632, top: 170, height: 220 }}>
-          <p className="s-eyebrow">Vault</p>
-          <h3>Lends only into LP positions</h3>
-          <p>Repaid in either token at the Chainlink price</p>
-        </div>
-        <div className="vbox" style={{ left: 1264, top: 30 }}>
-          <p className="s-eyebrow">Alucard LPs</p>
-          <h3>Up to 2× leverage</h3>
-          <p>Only with de-lever rules attached</p>
-        </div>
-        <div className="vbox" style={{ left: 1264, top: 330 }}>
-          <p className="s-eyebrow">Outside v3 / v4 LPs</p>
-          <h3>Borrow against a position</h3>
-          <p>Same rules, same limits</p>
-        </div>
-      </div>
-      <div className="nx-more in" style={d(700)}>
-        <span>Also next</span>
-        {["Hidden rules (commit-reveal)", "An audit", "Mainnet"].map((x) => (
-          <b key={x}>{x}</b>
         ))}
       </div>
     </>
@@ -869,6 +932,13 @@ export const SLIDES: Slide[] = [
     notes: "So what does a rule look like? In Uniswap today, once you add liquidity there is nothing to configure. With Alucard: if ETH falls out of my range, park the money in the USDT/USDC pool and bring it back when ETH recovers. If it leaves my range, re-range. Fee rates swing a lot, so you can make them a trigger: if the APR drops below 10%, take my liquidity out. Take profit in steps on the way up, a trailing stop on the way down, and ignore quick wicks with a hold. Other tools give you a few of these as fixed buttons; here you combine them however you want.",
   },
   {
+    id: "fixes",
+    title: "Every problem, fixed",
+    theme: "paper",
+    C: Fixes,
+    notes: "Here is what goes wrong for a liquidity provider today, and what Alucard does about each. Out of range, the position earns nothing: it leaves, re-ranges, or parks in another pool and comes back, by your rules. It ends up all in the token that fell: it can swap to a stablecoin or move into a stable pool the moment it leaves. Someone has to watch day and night: any keeper runs it on-chain, paid only the fee you set. Fee rates swing: a falling fee rate is a trigger. Tools give a few fixed buttons: here you set your own steps, and even paste your own condition contract. And you can replay it on real mainnet swaps before you commit; the replay matches the contract within 0.1%.",
+  },
+  {
     id: "build",
     title: "Build a strategy",
     theme: "enamel",
@@ -876,18 +946,11 @@ export const SLIDES: Slide[] = [
     notes: "This plays once, slowly. Pause with P, or the button, and scrub the line if you want to hold a step. Two sides, if it falls and if it rises. Each step offers only what fits, and the one that does not fit stays on screen with the reason. The sentence underneath is the strategy in plain words, the same one the contract runs.",
   },
   {
-    id: "guard",
-    title: "The price guard",
-    theme: "paper",
-    C: Guard,
-    notes: "Every price a strategy reads is checked against Chainlink. A pool’s price counts only while it is within about 2% of Chainlink, half a percent for two stablecoins, so pushing the pool past someone’s stop does nothing, however long you hold it. Inside that band a push can reach a level, but the step still cannot sell into it: every swap must fill within your slippage of Chainlink, or the step waits while the position keeps earning. If you want Chainlink itself to confirm a level, add the Chainlink price condition. When the market really moves, Chainlink moves too, and a keeper runs the step at once.",
-  },
-  {
-    id: "landscape",
-    title: "What exists today",
-    theme: "paper",
-    C: Landscape,
-    notes: "Today’s tools give you a short menu: exit at a target price, move the range, compound fees. They watch the pool price, or an operator, and their own bot runs it. Alucard is the parts: conditions, steps, a move to another pool and back. Anyone can run a step and is paid the fee you set, a share of what the step moves, whatever the gas price. Before you commit, you replay that exact strategy on real history, with an engine we test against the contract run for run.",
+    id: "position",
+    title: "Your position at a glance",
+    theme: "enamel",
+    C: Position,
+    notes: "This is the position page, as it plays out. In range, earning fees, and it says what it is watching. The price falls out of the range: the side says it is ready, and a keeper runs it. Now it says the money moved into USDT/USDC and is earning fees there, and the way back says exactly how far WETH is from the range. When WETH comes back, it is back in the same range and ready for next time. If a step ever has to wait, it says why, in plain words. And before saving any of this, you replay it on real history.",
   },
   {
     id: "how",
@@ -904,6 +967,27 @@ export const SLIDES: Slide[] = [
     notes: "The built-in conditions cover prices, ranges, time and fees. For anything else, anyone can write a contract with one function, isMet, that returns true or false, and paste its address into the builder. The builder checks it on the spot: is a contract there, does it answer, what does it say now, can it be upgraded. There is no registry: the order keeps that one address, only if it uses one, and clears it when it closes. It only decides when; the vault still does the what, with every guard. It is called read-only with a gas cap, and anything but a clean true means not now. An example is live on both testnets: a USDC depeg alarm.",
   },
   {
+    id: "guard",
+    title: "The price guard",
+    theme: "paper",
+    C: Guard,
+    notes: "Every price a strategy reads is checked against Chainlink. A pool’s price counts only while it is within about 2% of Chainlink, half a percent for two stablecoins, so pushing the pool past someone’s stop does nothing, however long you hold it. Inside that band a push can reach a level, but the step still cannot sell into it: every swap must fill within your slippage of Chainlink, or the step waits while the position keeps earning. If you want Chainlink itself to confirm a level, add the Chainlink price condition. When the market really moves, Chainlink moves too, and a keeper runs the step at once.",
+  },
+  {
+    id: "attacks",
+    title: "Every attack, and what stops it",
+    theme: "paper",
+    C: Attacks,
+    notes: "We had the contracts attacked on paper by outside reviewers, and every attack became a test the attacker must lose. Pushing the pool to fire your stop does nothing: a pool's price counts only near Chainlink. Pushing it a little and then selling you cheap does not work: every swap must fill within your slippage of Chainlink, or the step simply waits. Your hold cannot be reset by a pushed price. A keeper cannot overcharge: the fee is yours, capped at 1%. The admin has no instant power: every change waits two days, and there are no upgrades and no pause. And nothing runs on an old price. It is not audited yet; that is the next step.",
+  },
+  {
+    id: "landscape",
+    title: "What exists today",
+    theme: "paper",
+    C: Landscape,
+    notes: "Today’s tools give you a short menu: exit at a target price, move the range, compound fees. They watch the pool price, or an operator, and their own bot runs it. Alucard is the parts: conditions, steps, a move to another pool and back. Anyone can run a step and is paid the fee you set, a share of what the step moves, whatever the gas price. Before you commit, you replay that exact strategy on real history, with an engine we test against the contract run for run.",
+  },
+  {
     id: "built",
     title: "Built and live",
     theme: "paper",
@@ -915,14 +999,7 @@ export const SLIDES: Slide[] = [
     title: "What’s next",
     theme: "enamel",
     C: Now,
-    notes: "What comes after what’s live. Strategies on v3 and v4 positions people already hold, because that’s where the idle money is. Moves between pools that share no token, which need two swaps. A place to hold a moved token in a lending vault, not only in a pool. And more conditions: volatility, volume, another pool’s fee rate. Each one is another option in the same editor.",
-  },
-  {
-    id: "next",
-    title: "Next: lending vault",
-    theme: "night",
-    C: Next,
-    notes: "Where this goes, after the editor that’s live. A lending vault for liquidity providers. Lenders deposit and get a share token that grows with interest. The vault only lends into LP positions: borrowed money never reaches a wallet. Alucard LPs can take up to 2× leverage, but only with de-lever rules attached, and LPs in outside v3 and v4 pools can borrow against their positions under the same rules. Repayment can be in either token at the Chainlink price. After that: hidden rules, an audit, and mainnet.",
+    notes: "Next: an external audit, then Unichain and Ethereum mainnet. Bring a v3 or v4 position you already hold into a strategy, since that is where the idle money is. A gallery where people share strategies and condition contracts, ranked by their replays in rising, falling and sideways markets, not by votes. And moves between pools with no token in common, and into lending vaults while the money waits.",
   },
   {
     id: "close",
