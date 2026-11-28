@@ -172,7 +172,7 @@ adopted yet.
 
 Tests are written from what an LP should be able to expect (`test/Safety.t.sol`, `Feeds.t.sol`, `LimitSafety.t.sol`,
 `Manipulation.t.sol`, `Strategies.t.sol`, `KeeperFee.t.sol`, `Execution.t.sol`): owners kept apart in the same range,
-money back on cancel for any range and size, a push held for hours fires nothing while a real move fires at once, holds
+money back on cancel for any range and size, a push far from Chainlink held for hours fires nothing while a real move fires at once, holds
 that a push cannot skip or start (only delay), nobody can spend ETH held for another owner, no move into a pushed pool, value
 kept through a move but for the swap fee and the keeper's fee, strategies on a hookless pool, re-ranging both ways.
 

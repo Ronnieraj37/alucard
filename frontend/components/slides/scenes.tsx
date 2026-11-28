@@ -416,97 +416,6 @@ function Build() {
   );
 }
 
-/* ------------------------------------------------------------------ 5 · the price guard */
-
-const GD_W = 1080;
-const GD_H = 460;
-const gdC = (t: number) => (t < 0.62 ? 1700 : t < 0.8 ? 1700 - 110 * ease((t - 0.62) / 0.18) : 1590);
-const gdQ = (t: number) => {
-  const c = gdC(t);
-  if (t >= 0.25 && t < 0.3) return c - 115 * ease((t - 0.25) / 0.05);
-  if (t >= 0.3 && t < 0.5) return c - 115 + 4 * Math.sin(t * 90);
-  if (t >= 0.5 && t < 0.58) return c - 115 * (1 - ease((t - 0.5) / 0.08));
-  return c + 6 * Math.sin(t * 70);
-};
-const GD_STOP = 1650;
-const gdY = (v: number) => GD_H - 40 - ((v - 1540) / (1760 - 1540)) * (GD_H - 80);
-const gdPath = (f: (t: number) => number, upTo: number) => {
-  const pts: string[] = [];
-  for (let k = 0; k <= 200; k++) {
-    const t = k / 200;
-    if (t > upTo) break;
-    pts.push(`${k ? "L" : "M"}${(t * GD_W).toFixed(1)},${gdY(f(t)).toFixed(1)}`);
-  }
-  return pts.join(" ");
-};
-
-function Guard() {
-  const clock = useTimeline(20600, { loop: false, delay: 400, rest: 1 });
-  const { p } = clock;
-  const q = gdQ(p);
-  const c = gdC(p);
-  const out = Math.abs(q - c) > c * 0.02;
-  const below = q < GD_STOP;
-  const ran = p >= 0.82;
-  const status = ran
-    ? { t: "The market really fell: Chainlink follows, the keeper runs the step", cls: "go" }
-    : below && out
-      ? { t: "Pushed below the stop, Chainlink didn’t move: it does not count", cls: "no" }
-      : p >= 0.5 && p < 0.62
-        ? { t: "Arbitrage takes the push back", cls: "" }
-        : { t: "Watching: the pool is on Chainlink", cls: "" };
-  const band = (() => {
-    const n = 40;
-    const edge = (f: number) =>
-      Array.from({ length: n + 1 }, (_, k) => {
-        const t = (k / n) * p;
-        return `${(t * GD_W).toFixed(1)},${gdY(gdC(t) * f).toFixed(1)}`;
-      });
-    const top = edge(1.02);
-    const bot = edge(0.98);
-    return `M${top.join(" L")} L${[...bot].reverse().join(" L")} Z`;
-  })();
-  return (
-    <>
-      <Head eyebrow="Why a push can’t hurt you" title="A push does nothing. A real move runs at once." />
-      <div className="gd">
-        <div className="gd-chart in" style={d(250)}>
-          <svg width={GD_W} height={GD_H} viewBox={`0 0 ${GD_W} ${GD_H}`} aria-label="A pool's price pushed below a stop does not fire it; when Chainlink moves, it runs">
-            <path d={band} className="gd-band" />
-            <line x1="0" x2={GD_W} y1={gdY(GD_STOP)} y2={gdY(GD_STOP)} className="gd-stop" />
-            <text x={GD_W - 8} y={gdY(GD_STOP) - 10} textAnchor="end" className="gd-label">
-              your stop · WETH leaves the range
-            </text>
-            <path d={gdPath(gdC, p)} className="gd-link" />
-            <path d={gdPath(gdQ, p)} className="gd-pool" />
-            <circle cx={p * GD_W} cy={gdY(q)} r="11" className={`gd-dot ${out ? "out" : ""}`} />
-            {ran && <circle cx={0.82 * GD_W} cy={gdY(gdQ(0.82))} r="22" className="gd-ran" />}
-          </svg>
-          <div className="gd-legend">
-            <span className="l-link">Chainlink</span>
-            <span className="l-band">±2% band</span>
-            <span className="l-pool">the pool’s price</span>
-          </div>
-          <p className={`gd-status ${status.cls}`}>{status.t}</p>
-        </div>
-        <div className="gd-facts">
-          {[
-            ["±2% of Chainlink", "A pool’s price counts only inside the band (±0.5% for stablecoins). Held for hours, a push still fires nothing."],
-            ["Never sells into a push", "Every swap fills within your slippage of Chainlink, or the step waits. Add a Chainlink condition to confirm a level."],
-            ["No lag in a real crash", "Chainlink moves with the market and the step runs at once. No price history: swaps pay nothing extra."],
-          ].map(([h, t], k) => (
-            <div key={h} className="gd-fact in" style={d(400 + k * 140)}>
-              <h3>{h}</h3>
-              <p>{t}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-      <Run {...clock} />
-    </>
-  );
-}
-
 /* ------------------------------------------------------------------ 4b · every problem, and the fix */
 
 const FIXES = [
@@ -786,7 +695,7 @@ function Built() {
   const facts = [
     ["Your strategy, card by card", "Two conditions, and / or, holds, repeats, run limits, your own condition contract"],
     ["Move to any pool and back", "Into any pool sharing a token, or hold one; back by your own rule"],
-    ["Prices near Chainlink", "A push does nothing; a real move runs at once. No step sells into a push"],
+    ["Prices near Chainlink", "A push past ~2% does nothing; no step sells into a smaller one"],
     ["Any v4 pool", "Hookless or ours, as long as both tokens have a Chainlink feed"],
     ["A fee you set", "Keepers are paid your fee per step, whatever the gas price"],
     ["Limit orders in the swap", "The hook fills them while trades happen, no bot needed"],
@@ -965,13 +874,6 @@ export const SLIDES: Slide[] = [
     theme: "night",
     C: Cards,
     notes: "The built-in conditions cover prices, ranges, time and fees. For anything else, anyone can write a contract with one function, isMet, that returns true or false, and paste its address into the builder. The builder checks it on the spot: is a contract there, does it answer, what does it say now, can it be upgraded. There is no registry: the order keeps that one address, only if it uses one, and clears it when it closes. It only decides when; the vault still does the what, with every guard. It is called read-only with a gas cap, and anything but a clean true means not now. An example is live on both testnets: a USDC depeg alarm.",
-  },
-  {
-    id: "guard",
-    title: "The price guard",
-    theme: "paper",
-    C: Guard,
-    notes: "Every price a strategy reads is checked against Chainlink. A pool’s price counts only while it is within about 2% of Chainlink, half a percent for two stablecoins, so pushing the pool past someone’s stop does nothing, however long you hold it. Inside that band a push can reach a level, but the step still cannot sell into it: every swap must fill within your slippage of Chainlink, or the step waits while the position keeps earning. If you want Chainlink itself to confirm a level, add the Chainlink price condition. When the market really moves, Chainlink moves too, and a keeper runs the step at once.",
   },
   {
     id: "attacks",
