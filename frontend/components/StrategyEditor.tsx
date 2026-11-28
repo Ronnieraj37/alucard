@@ -1222,7 +1222,7 @@ function AdvancedFields({ value, onChange }: { value: Advanced; onChange: (a: Ad
         <Suffix value={value.expiryDays} suffix="days" onChange={(x) => onChange({ ...value, expiryDays: Math.max(1, Number(x)) })} />
       </Field>
       <p className="text-[12px] text-[var(--muted)]">
-        Prices count only within ~2% of Chainlink, so nobody can push a pool to fire it.{" "}
+        A step needs Chainlink to agree with the pool, so nobody can push a pool to fire it.{" "}
         <a className="underline decoration-[var(--line)] underline-offset-4 hover:text-[var(--ink)]" href="/docs#safety" target="_blank" rel="noreferrer">
           How it&apos;s protected
         </a>
@@ -1255,7 +1255,7 @@ function AdvancedBox({ value, onChange }: { value: Advanced; onChange: (a: Advan
               <Suffix value={value.expiryDays} suffix="days" onChange={(x) => onChange({ ...value, expiryDays: Math.max(1, Number(x)) })} />
             </Field>
             <p className="text-[12px] text-[var(--muted)]">
-              Prices count only within ~2% of Chainlink, so nobody can push a pool to fire it.{" "}
+              A step needs Chainlink to agree with the pool, so nobody can push a pool to fire it.{" "}
               <a className="underline decoration-[var(--line)] underline-offset-4 hover:text-[var(--ink)]" href="/docs#safety" target="_blank" rel="noreferrer">
                 How it&apos;s protected
               </a>

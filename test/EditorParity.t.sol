@@ -181,10 +181,11 @@ contract EditorParityTest is RuleSetup {
         uint256[] path;
         uint256[] swaps;
         uint256[][] events; // swap index << 1 | (upper side)
+        uint256[] ratio; // engine: final value / value of just holding the deposit, x1e18
     }
 
     function _batch(bytes memory data) internal pure returns (Batch memory b) {
-        (b.ts, b.ticks, b.lower, b.upper, b.home, b.away, b.awayLower, b.awayUpper, b.path, b.swaps, b.events) =
+        (b.ts, b.ticks, b.lower, b.upper, b.home, b.away, b.awayLower, b.awayUpper, b.path, b.swaps, b.events, b.ratio) =
             abi.decode(
                 data,
                 (
@@ -198,7 +199,8 @@ contract EditorParityTest is RuleSetup {
                     uint256[],
                     uint256[],
                     uint256[],
-                    uint256[][]
+                    uint256[][],
+                    uint256[]
                 )
             );
     }
@@ -220,22 +222,36 @@ contract EditorParityTest is RuleSetup {
         require(_tick() == t, "price not at the path's tick");
     }
 
+    /// Money: besides when each order runs, how much the owner ends with. For each order, the value of what the owner
+    /// gets back (cancelling at the end of the path) over the value of just holding the deposited tokens, both at the
+    /// last price, from the engine and from the contract. Differences are reported in basis points of that value.
+    struct Money {
+        uint256 compared;
+        uint256 within1;
+        uint256 within10;
+        uint256 worst;
+        uint256 worstCase;
+        uint256 sum;
+    }
+
     function test_engineRunsOrdersWhereTheContractDoes() public {
         vm.pauseGasMetering();
         uint256 total = abi.decode(_ffi("engineCount"), (uint256));
         uint256 same;
         uint256 differ;
         uint256 runs;
+        Money memory m;
         uint256 chunk = 400;
         for (uint256 from; from < total; from += chunk) {
             uint256 mem = _fmp();
             Batch memory b = _batch(_ffi(string.concat("engine ", vm.toString(from), " ", vm.toString(chunk))));
             for (uint256 i; i < b.lower.length; ++i) {
                 uint256 caseMem = _fmp();
-                uint256[] memory got = _replay(b, i);
+                (uint256[] memory got, uint256 ratio) = _replay(b, i);
                 runs += got.length;
                 if (_equal(got, b.events[i])) {
                     same++;
+                    _tally(m, ratio, b.ratio[i], from + i);
                 } else {
                     differ++;
                     if (differ <= 10) _logDiff(from + i, b, i, got);
@@ -247,11 +263,28 @@ contract EditorParityTest is RuleSetup {
         console.log("orders replayed", total);
         console.log("  same runs as the engine", same, "different", differ);
         console.log("  runs in total", runs);
+        console.log("money, orders compared", m.compared);
+        console.log("  within 0.01% of the engine", m.within1);
+        console.log("  within 0.1% of the engine", m.within10);
+        console.log("  mean difference, millionths", m.compared == 0 ? 0 : m.sum / m.compared);
+        console.log("  largest difference, millionths", m.worst, "case", m.worstCase);
         assertEq(differ, 0, "the backtest engine and the contract disagree");
         assertGt(runs, total, "too few runs: the paths do not exercise the rules");
+        assertEq(m.within10, m.compared, "the engine's money is more than 0.1% from the contract's");
     }
 
-    function _replay(Batch memory b, uint256 i) internal returns (uint256[] memory got) {
+    function _tally(Money memory m, uint256 contractRatio, uint256 engineRatio, uint256 c) internal view {
+        uint256 d = contractRatio > engineRatio ? contractRatio - engineRatio : engineRatio - contractRatio;
+        uint256 ppm = FullMath.mulDiv(d, 1e6, engineRatio); // millionths of the engine's value
+        m.compared++;
+        m.sum += ppm;
+        if (ppm <= 100) m.within1++;
+        if (ppm <= 1000) m.within10++;
+        if (ppm > m.worst) (m.worst, m.worstCase) = (ppm, c);
+        if (ppm > 1000) console.log("  MONEY: case, millionths", c, ppm);
+    }
+
+    function _replay(Batch memory b, uint256 i) internal returns (uint256[] memory got, uint256 ratio) {
         uint256 snap = vm.snapshotState();
         uint32[] memory ts = b.ts[b.path[i]];
         int24[] memory ticks = b.ticks[b.path[i]];
@@ -272,39 +305,63 @@ contract EditorParityTest is RuleSetup {
         p.away = b.away[i];
         p.awayLower = b.awayLower[i];
         p.awayUpper = b.awayUpper[i];
+        uint256[2] memory before = [_bal(currency0, alice), _bal(currency1, alice)];
         vm.prank(alice);
         uint256 id = orders.createOrder(p);
+        uint256[2] memory paid = [before[0] - _bal(currency0, alice), before[1] - _bal(currency1, alice)];
 
         got = new uint256[](4 * b.swaps[i] + 8);
         uint256 n;
         for (uint256 k = 1; k < b.swaps[i]; ++k) {
             vm.warp(ts[k]);
             _moveTo(ticks[k]);
-            // a keeper that looks after every swap: run what can run, poke what can be poked, until nothing changes
-            for (uint256 pass; pass < 4; ++pass) {
-                bool acted;
-                for (uint256 s; s < 2; ++s) {
-                    bool upper = s == 1;
-                    if (orders.getOrder(id).owner == address(0)) break;
-                    if (rules.canExecute(orders, id, upper)) {
-                        vm.prank(keeper);
-                        try orders.execute(id, upper) {
-                            got[n++] = (k << 1) | s;
-                            acted = true;
-                        } catch {}
-                    } else {
-                        try orders.poke(id, upper) {
-                            acted = true;
-                        } catch {}
-                    }
-                }
-                if (!acted) break;
-            }
+            n = _keep(id, k, got, n);
         }
         assembly ("memory-safe") {
             mstore(got, n)
         }
+        ratio = _ratioAtEnd(id, before, paid);
         vm.revertToState(snap);
+    }
+
+    /// @dev A keeper that looks after every swap: run what can run, poke what can be poked, until nothing changes.
+    /// Runs are written to `got` from `n`; returns the new count.
+    function _keep(uint256 id, uint256 k, uint256[] memory got, uint256 n) internal returns (uint256) {
+        for (uint256 pass; pass < 4; ++pass) {
+            bool acted;
+            for (uint256 s; s < 2; ++s) {
+                bool upper = s == 1;
+                if (orders.getOrder(id).owner == address(0)) break;
+                if (rules.canExecute(orders, id, upper)) {
+                    vm.prank(keeper);
+                    try orders.execute(id, upper) {
+                        got[n++] = (k << 1) | s;
+                        acted = true;
+                    } catch {}
+                } else {
+                    try orders.poke(id, upper) {
+                        acted = true;
+                    } catch {}
+                }
+            }
+            if (!acted) break;
+        }
+        return n;
+    }
+
+    /// @dev The owner closes the order (if it is still open); what they got back over what they paid in, both valued
+    /// in token1 at the pool's last price.
+    function _ratioAtEnd(uint256 id, uint256[2] memory before, uint256[2] memory paid) internal returns (uint256) {
+        if (orders.getOrder(id).owner != address(0)) {
+            vm.prank(alice);
+            orders.cancel(id);
+        }
+        uint256 back0 = _bal(currency0, alice) - (before[0] - paid[0]);
+        uint256 back1 = _bal(currency1, alice) - (before[1] - paid[1]);
+        (uint160 sp,,,) = poolManager.getSlot0(poolId);
+        uint256 px = FullMath.mulDiv(FullMath.mulDiv(sp, sp, 1 << 96), 1e18, 1 << 96); // token1 per token0, x1e18
+        uint256 hold = FullMath.mulDiv(paid[0], px, 1e18) + paid[1];
+        return FullMath.mulDiv(FullMath.mulDiv(back0, px, 1e18) + back1, 1e18, hold);
     }
 
     function _equal(uint256[] memory a, uint256[] memory b) internal pure returns (bool) {

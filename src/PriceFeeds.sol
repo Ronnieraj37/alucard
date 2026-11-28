@@ -28,11 +28,17 @@ interface ITokenDecimals {
 ///
 /// Open orders depend on the feeds, so a listed token's feed can only be changed or removed FEED_DELAY after the change
 /// was announced with `queueFeed`. Listing a new token takes effect at once: no open order uses it yet.
+///
+/// The band (how far a pool may be from Chainlink) has a default and an optional tighter value per pair (two
+/// stablecoins need far less room than ETH and a stablecoin). Both are set while deploying; once `lockBands` is called,
+/// every change of either, tighter or looser, waits FEED_DELAY after it is announced, and the default can no longer be
+/// switched off. The admin has no instant power over open orders.
 contract PriceFeeds {
     error NotOwner();
     error BadFeed();
     error NotListed();
     error NotQueued();
+    error BandOff();
 
     uint256 public constant FEED_DELAY = 2 days;
 
@@ -60,11 +66,26 @@ contract PriceFeeds {
 
     mapping(address token => Queued) public queued;
 
+    /// @notice A pair's own band in ticks (0 = the default `maxDeviationTicks`), by `pairId`.
+    mapping(bytes32 pair => uint24) public pairBand;
+    /// @notice Announced band changes, by `pairId` (bytes32(0) = the default band). Kept apart from feed changes.
+    mapping(bytes32 pair => Queued) public queuedBand;
+    /// @notice Once true, every band change waits FEED_DELAY after `queueBand`.
+    bool public bandsLocked;
+    /// @notice On an L2, Chainlink's sequencer uptime feed (0 = none). While the sequencer is down, and for
+    /// SEQUENCER_GRACE after it comes back, no price is given: prices from before the outage are not acted on.
+    address public sequencer;
+    uint256 public constant SEQUENCER_GRACE = 1 hours;
+
     event FeedSet(address indexed token, address indexed aggregator, uint32 maxAge);
     event FeedRemoved(address indexed token);
     event FeedQueued(address indexed token, address aggregator, uint32 maxAge, uint64 readyAt);
     event MaxDeviationSet(uint24 ticks);
     event MaxDeviationQueued(uint24 ticks, uint64 readyAt);
+    event PairBandSet(address indexed tokenA, address indexed tokenB, uint24 ticks);
+    event BandQueued(bytes32 indexed pair, uint24 ticks, uint64 readyAt);
+    event BandsLocked();
+    event SequencerSet(address feed);
     event OwnerChanged(address indexed owner);
 
     constructor(address _owner) {
@@ -131,24 +152,50 @@ contract PriceFeeds {
         emit FeedRemoved(token);
     }
 
-    /// @notice Set the band. The first setting (at deployment) and tightening it apply at once: a tighter band can only
-    /// make steps wait, never fire one. Loosening or switching it off waits FEED_DELAY after `queueMaxDeviation`.
+    /// @notice Set the default band. Before `lockBands` it applies at once; after, only a change announced with
+    /// `queueBand(0, 0, ticks)` FEED_DELAY earlier, and never 0 (off).
     function setMaxDeviationTicks(uint24 ticks) external onlyOwner {
-        uint24 cur = maxDeviationTicks;
-        if (cur != 0 && (ticks == 0 || ticks > cur)) {
-            Queued memory q = queued[address(0)];
-            if (q.readyAt == 0 || block.timestamp < q.readyAt || q.change != keccak256(abi.encode(ticks))) revert NotQueued();
-            delete queued[address(0)];
-        }
+        if (bandsLocked && ticks == 0) revert BandOff();
+        _takeQueued(bytes32(0), ticks);
         maxDeviationTicks = ticks;
         emit MaxDeviationSet(ticks);
     }
 
-    /// @notice Announce a looser band (or switching it off); `setMaxDeviationTicks` can apply it FEED_DELAY from now.
-    function queueMaxDeviation(uint24 ticks) external onlyOwner {
+    /// @notice Set a pair's own band (0 = back to the default). Same rules as the default band.
+    function setPairBand(address tokenA, address tokenB, uint24 ticks) external onlyOwner {
+        bytes32 id = pairId(tokenA, tokenB);
+        _takeQueued(id, ticks);
+        pairBand[id] = ticks;
+        emit PairBandSet(tokenA, tokenB, ticks);
+    }
+
+    /// @notice Announce a band change: the default with tokenA = tokenB = 0, otherwise that pair's.
+    function queueBand(address tokenA, address tokenB, uint24 ticks) external onlyOwner {
+        bytes32 id = tokenA == address(0) && tokenB == address(0) ? bytes32(0) : pairId(tokenA, tokenB);
         uint64 readyAt = uint64(block.timestamp + FEED_DELAY);
-        queued[address(0)] = Queued(keccak256(abi.encode(ticks)), readyAt);
-        emit MaxDeviationQueued(ticks, readyAt);
+        queuedBand[id] = Queued(keccak256(abi.encode(ticks)), readyAt);
+        emit BandQueued(id, ticks, readyAt);
+    }
+
+    /// @notice Set the L2 sequencer uptime feed. Only before `lockBands` (while deploying).
+    function setSequencer(address feed) external onlyOwner {
+        if (bandsLocked) revert NotQueued();
+        sequencer = feed;
+        emit SequencerSet(feed);
+    }
+
+    /// @notice End deployment: from now on every band change waits FEED_DELAY. Cannot be undone.
+    function lockBands() external onlyOwner {
+        if (maxDeviationTicks == 0) revert BandOff();
+        bandsLocked = true;
+        emit BandsLocked();
+    }
+
+    function _takeQueued(bytes32 id, uint24 ticks) internal {
+        if (!bandsLocked) return;
+        Queued memory q = queuedBand[id];
+        if (q.readyAt == 0 || block.timestamp < q.readyAt || q.change != keccak256(abi.encode(ticks))) revert NotQueued();
+        delete queuedBand[id];
     }
 
     function transferOwnership(address to) external onlyOwner {
@@ -166,6 +213,18 @@ contract PriceFeeds {
     // Views
     // ---------------------------------------------------------------
 
+    /// @notice The key of a pair, whichever order its tokens are given in.
+    function pairId(address tokenA, address tokenB) public pure returns (bytes32) {
+        (tokenA, tokenB) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        return keccak256(abi.encode(tokenA, tokenB));
+    }
+
+    /// @notice How far (in ticks) a pool of the two tokens may be from their Chainlink price. 0 = not checked (tests).
+    function bandOf(address tokenA, address tokenB) external view returns (uint24) {
+        uint24 b = pairBand[pairId(tokenA, tokenB)];
+        return b != 0 ? b : maxDeviationTicks;
+    }
+
     function isListed(address token) external view returns (bool) {
         return feeds[token].aggregator != address(0);
     }
@@ -179,12 +238,14 @@ contract PriceFeeds {
     function priceOf(address token) external view returns (bool ok, uint256 price, uint8 decimals) {
         Feed memory f = feeds[token];
         (ok, price) = _price(f);
+        if (!_sequencerUp()) ok = false;
         decimals = f.feedDecimals;
     }
 
     /// @notice The Chainlink price of token1 per token0 as a Uniswap tick (raw units, like a pool of the two).
     /// `ok` is false when either price is missing or stale, or the ratio is outside what a tick can express.
     function pairTick(address token0, address token1) external view returns (bool ok, int24 tick) {
+        if (!_sequencerUp()) return (false, 0);
         Feed memory f0 = feeds[token0];
         Feed memory f1 = feeds[token1];
         (bool ok0, uint256 p0) = _price(f0);
@@ -199,6 +260,16 @@ contract PriceFeeds {
         uint256 sqrtPriceX96 = ratioX96 <= type(uint160).max ? Math.sqrt(ratioX96 << 96) : Math.sqrt(ratioX96) << 48;
         if (sqrtPriceX96 < TickMath.MIN_SQRT_PRICE || sqrtPriceX96 >= TickMath.MAX_SQRT_PRICE) return (false, 0);
         return (true, TickMath.getTickAtSqrtPrice(uint160(sqrtPriceX96)));
+    }
+
+    /// @dev True without a sequencer feed; otherwise the sequencer is up (answer 0) and has been for SEQUENCER_GRACE.
+    function _sequencerUp() internal view returns (bool) {
+        if (sequencer == address(0)) return true;
+        try IAggregator(sequencer).latestRoundData() returns (uint80, int256 answer, uint256 startedAt, uint256, uint80) {
+            return answer == 0 && startedAt != 0 && block.timestamp >= startedAt + SEQUENCER_GRACE;
+        } catch {
+            return false;
+        }
     }
 
     /// @dev Last answer of a feed, if positive and within maxAge. Never reverts. Answers of

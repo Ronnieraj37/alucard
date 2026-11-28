@@ -317,13 +317,14 @@ contract ConditionalOrders is IUnlockCallback {
             changed = true;
         }
         if (sd.holdMinutes != 0) {
-            bool isMet = rules.met(address(this), orderId, o.poolIndex, o.lowerState, o.upperState, upper);
+            // a hold starts when the pool and Chainlink both say the condition is true, and is forgotten only when
+            // Chainlink says it no longer is: pushing the pool can neither start nor reset it
             uint32 armed = armedAt(orderId, upper);
-            // a hold is forgotten only on a price that can be believed: a push away from Chainlink (or no Chainlink
-            // price) says nothing about the condition, so it can neither start nor reset a hold
-            (bool near,) = rules.tickOf(o.poolIndex);
-            if (isMet == (armed == 0) && (isMet || near)) {
-                _setArmed(orderId, upper, isMet ? uint32(block.timestamp) : 0);
+            bool flip = armed == 0
+                ? rules.met(address(this), orderId, o.poolIndex, o.lowerState, o.upperState, upper)
+                : !rules.metOnChainlink(address(this), orderId, o.poolIndex, o.lowerState, o.upperState, upper);
+            if (flip) {
+                _setArmed(orderId, upper, armed == 0 ? uint32(block.timestamp) : 0);
                 changed = true;
             }
         }

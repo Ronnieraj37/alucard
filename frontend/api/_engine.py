@@ -3,7 +3,9 @@
 It runs the exact order the app's editor sends to the contract (the packed words of lib/rules.ts encodeRules), the way
 src/ConditionalOrders.sol and src/Rules.sol run it:
   * every pool condition reads the pool's price after each swap. The contract also requires that price to be near
-    Chainlink; recorded pools are arbitraged to the market, so here that check always passes
+    Chainlink and Chainlink's own price to be past the level too; recorded pools are arbitraged to the market, so here
+    Chainlink is taken to be the pool's price (the real feed updates on a ~0.5% move or hourly, so on chain a condition
+    can be true a little later than here)
   * a hold ("only if it lasts") needs the condition true for the whole time, from the first swap it was true at
     (a keeper pokes it there) to the run
   * TIME counts from the side's last run; FEES and APR from the fees the position earned since they were collected
@@ -1102,6 +1104,8 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
         st = State(tl=tl, tu=tu)
         unit0, unit1 = amounts(1.0, sp_in, sa, sb)
         st.L = deposit / Sim(s, i0, i1, p, None).usd(unit0, unit1, sp_in)
+        if req.get("liquidity"):  # an exact position size (scripts/parity_engine.py: the contract test's order)
+            st.L = float(req["liquidity"])
         return st
 
     n_samples = 240
@@ -1212,8 +1216,9 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
         ] if s.quote_usd is not None else []) + [
             "Real swaps from the recorded window; past results do not predict future ones." if s.source == "recorded"
             else "Past results do not predict future ones.",
-            "Conditions read the pool's price after each swap. On chain a step also needs that price within about 2% of Chainlink; "
-            "the replay assumes it is (arbitrage keeps deep pools there), so a step refused in a crash is not modelled.",
+            "Conditions read the pool's price after each swap. On chain Chainlink must agree (its price past the level too, and "
+            "the pool near it); the replay takes Chainlink to be the pool's price, so a step that waits for the feed to update "
+            "(it updates on about a 0.5% move or hourly) runs a little later on chain than here.",
             "Your own swaps do not move later prices in the replay, and they use the pool's liquidity at that moment.",
             "Fees assume your position is small next to the pool.",
             "A keeper runs each rule a fixed delay after its condition is met; price manipulation and MEV are not modelled.",

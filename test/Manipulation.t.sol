@@ -174,6 +174,86 @@ contract ManipulationTest is RuleSetup {
         assertGe(_tick(), before - 500 - 1); // the order's own swap stopped 5% past the price before it
     }
 
+    // ---------------------------------------------------------------- pushes INSIDE the band (an external review's
+    // "experiment 1": move the pool less than 2% from Chainlink and see what it can make a strategy do)
+
+    /// @dev Push the pool's price (not Chainlink's) down or up until it is past `target`, in small swaps.
+    function _pushTo(int24 target) internal {
+        bool down = target < _tick();
+        for (uint256 i; i < 400 && (down ? _tick() > target : _tick() < target); ++i) _swap(down, 0.02e18);
+    }
+
+    /// A price level 1% below: the pool is pushed past it (1.5%, inside the band). Chainlink does not agree, so the
+    /// condition is not true. A real move fires it.
+    function test_aPushInsideTheBandDoesNotFire() public {
+        uint256 id = _create(_exit(OrderState.CHECK_TICK, -100), _off());
+        _wait(2 minutes);
+        _pushTo(-150);
+        assertLt(_tick(), -100);
+        assertGt(_tick(), -200); // inside the band: the old guard alone would have let it fire
+        assertFalse(rules.canExecute(orders, id, false));
+        vm.expectRevert(ConditionalOrders.ConditionNotMet.selector);
+        _run(id, false);
+        _market(); // Chainlink follows: a real move
+        _run(id, false);
+        assertEq(orders.getOrder(id).owner, address(0));
+    }
+
+    /// A hold that has started cannot be reset by pushing the pool back over the level inside the band: only
+    /// Chainlink saying the condition stopped forgets it.
+    function test_aPushInsideTheBandCannotResetAHold() public {
+        OrderState.Side memory low = _exit(OrderState.CHECK_TICK, -300);
+        low.holdMinutes = 30;
+        uint256 id = _create(low, _off());
+        _pushTo(-400);
+        _market();
+        orders.poke(id, false);
+        uint256 armed = orders.armedAt(id, false);
+        assertGt(armed, 0);
+        _wait(10 minutes);
+        _pushTo(-250); // pool back above the level, 150 ticks from Chainlink
+        vm.expectRevert(ConditionalOrders.NothingToPoke.selector);
+        orders.poke(id, false);
+        assertEq(orders.armedAt(id, false), armed);
+        _pushTo(-400); // the push ends
+        _wait(20 minutes); // 30 minutes since it started
+        _run(id, false);
+        assertEq(orders.getOrder(id).owner, address(0));
+    }
+
+    /// A trailing stop remembers Chainlink's best price, so pushing the pool up inside the band cannot raise it
+    /// (which would make the stop fire early on the way back).
+    function test_aPushInsideTheBandCannotRaiseATrailingHigh() public {
+        uint256 id = _create(_exit(OrderState.CHECK_TRAIL, 300), _off());
+        (OrderState.Side memory lo,) = _state(id);
+        int24 start = lo.best;
+        _pushTo(150);
+        vm.expectRevert(ConditionalOrders.NothingToPoke.selector);
+        orders.poke(id, false);
+        _market(); // a real rise is remembered
+        orders.poke(id, false);
+        (lo,) = _state(id);
+        assertGt(lo.best, start + 100);
+    }
+
+    /// The step's own swap is anchored to Chainlink: with the pool pushed 1.5% down (inside the band) and a 0.5%
+    /// slippage limit, the step does not sell at the pushed price. The token comes back unsold.
+    function test_aStepDoesNotSellBelowChainlink() public {
+        OrderState.Side memory low = _exit(OrderState.CHECK_TIME, 1);
+        low.actions |= OrderState.ACT_SWAP;
+        low.swapToToken1 = true;
+        ConditionalOrders.CreateParams memory p = _params(low, _off());
+        p.maxSlippage = 5; // 50 ticks, about 0.5%
+        uint256 id = _submit(alice, p);
+        _wait(2 minutes);
+        _pushTo(-150);
+        int24 pushed = _tick();
+        uint256 t0 = _bal(currency0, alice);
+        _run(id, false);
+        assertEq(_tick(), pushed); // nothing was sold into the push
+        assertGt(_bal(currency0, alice), t0); // token0 came back as it was
+    }
+
     // ---------------------------------------------------------------- ladders after a gap
 
     /// The price jumps past several rungs of a ladder at once. Each run steps one rung and the next can run a minute

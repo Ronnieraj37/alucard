@@ -158,22 +158,75 @@ contract FeedsTest is Test {
         vm.stopPrank();
     }
 
-    /// The band can be tightened at once (that only makes steps wait), but loosening or switching it off is announced
-    /// two days ahead, like a feed change.
-    function test_loosingTheBandWaitsTwoDays() public {
+    /// While deploying, bands apply at once. After `lockBands` every change, tighter or looser, is announced two days
+    /// ahead (the admin cannot pause steps or loosen the guard on the spot), and the default can never be switched off.
+    function test_afterLockingEveryBandChangeWaitsTwoDays() public {
         feeds.setMaxDeviationTicks(200);
-        feeds.setMaxDeviationTicks(150); // tighter: at once
-        assertEq(feeds.maxDeviationTicks(), 150);
+        feeds.setMaxDeviationTicks(150); // before locking: at once
+        feeds.lockBands();
+        vm.expectRevert(PriceFeeds.NotQueued.selector);
+        feeds.setMaxDeviationTicks(100); // tighter: waits too
         vm.expectRevert(PriceFeeds.NotQueued.selector);
         feeds.setMaxDeviationTicks(300);
-        vm.expectRevert(PriceFeeds.NotQueued.selector);
+        vm.expectRevert(PriceFeeds.BandOff.selector);
         feeds.setMaxDeviationTicks(0);
-        feeds.queueMaxDeviation(0);
+        feeds.queueBand(address(0), address(0), 100);
         vm.warp(block.timestamp + 2 days - 1);
         vm.expectRevert(PriceFeeds.NotQueued.selector);
-        feeds.setMaxDeviationTicks(0);
+        feeds.setMaxDeviationTicks(100);
         vm.warp(block.timestamp + 1);
-        feeds.setMaxDeviationTicks(0);
-        assertEq(feeds.maxDeviationTicks(), 0);
+        feeds.setMaxDeviationTicks(100);
+        assertEq(feeds.maxDeviationTicks(), 100);
+        vm.expectRevert(PriceFeeds.NotQueued.selector); // used up
+        feeds.setMaxDeviationTicks(100);
+    }
+
+    /// A pair can have its own (tighter) band; whichever order its tokens are named in, it is the same pair.
+    function test_aPairCanHaveItsOwnBand() public {
+        feeds.setMaxDeviationTicks(200);
+        address a = address(wbtcToken);
+        address b = address(0xBEEF);
+        assertEq(feeds.bandOf(a, b), 200);
+        feeds.setPairBand(b, a, 20);
+        assertEq(feeds.bandOf(a, b), 20);
+        assertEq(feeds.bandOf(address(1), b), 200);
+        feeds.lockBands();
+        vm.expectRevert(PriceFeeds.NotQueued.selector);
+        feeds.setPairBand(a, b, 0);
+        feeds.queueBand(a, b, 0);
+        vm.warp(block.timestamp + 2 days);
+        feeds.setPairBand(a, b, 0); // back to the default
+        assertEq(feeds.bandOf(a, b), 200);
+    }
+
+    /// A band change and a change of the ETH feed (the zero address) are announced separately: one never replaces the
+    /// other.
+    function test_aBandChangeDoesNotTouchTheEthFeedQueue() public {
+        feeds.setMaxDeviationTicks(200);
+        feeds.lockBands();
+        (bytes32 before,) = feeds.queued(address(0));
+        feeds.queueBand(address(0), address(0), 100);
+        (bytes32 afterwards,) = feeds.queued(address(0));
+        assertEq(afterwards, before);
+    }
+
+    /// On an L2, while the sequencer is down and for an hour after it is back, Chainlink prices are not used: no
+    /// step runs on a price from before the outage.
+    function test_noPriceWhileTheSequencerIsDownOrJustBack() public {
+        MockAggregator seq = new MockAggregator(0, 0); // 0 = up
+        feeds.setSequencer(address(seq));
+        seq.setUpdatedAt(block.timestamp - 2 hours); // up for two hours
+        (bool ok,) = feeds.pairTick(address(0), address(usdcToken));
+        assertTrue(ok);
+        seq.setAnswer(1); // down
+        (ok,) = feeds.pairTick(address(0), address(usdcToken));
+        assertFalse(ok);
+        seq.setAnswer(0);
+        seq.setUpdatedAt(block.timestamp - 10 minutes); // back ten minutes ago
+        (ok,) = feeds.pairTick(address(0), address(usdcToken));
+        assertFalse(ok);
+        vm.warp(block.timestamp + 1 hours);
+        (ok,) = feeds.pairTick(address(0), address(usdcToken));
+        assertTrue(ok);
     }
 }

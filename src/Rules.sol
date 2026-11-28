@@ -22,10 +22,13 @@ import {ConditionalOrders} from "./ConditionalOrders.sol";
 /// swap limits, the range a leg enters, how much to swap before adding, and liquidity for amounts. The vault itself
 /// only moves tokens and keeps state.
 ///
-/// Prices: conditions read a pool's price of the moment, but only while it is within `PriceFeeds.maxDeviationTicks`
-/// of the pair's Chainlink price. Pushing a pool's price to fire someone's strategy means pushing it away from
-/// Chainlink, and a price that far away never makes a condition true and never lets a step run. No price history is
-/// kept, so swaps pay nothing for strategies, and strategies work on any pool of listed tokens, with or without a hook.
+/// Prices: a price condition is true only when the pool's price AND the pair's Chainlink price are both past the
+/// level, and the pool is within the pair's band of Chainlink (`PriceFeeds.bandOf`). Pushing a pool to fire someone's
+/// strategy therefore does nothing on its own: Chainlink has to agree. A hold ("only if it lasts") starts when both
+/// agree and is forgotten only when Chainlink says the condition is no longer true, so a push cannot reset it. A
+/// trailing stop remembers Chainlink's best price, so a push cannot raise it. Swaps of a step stop at the owner's
+/// slippage from the better of the pool's and Chainlink's price, so a step never sells far below Chainlink.
+/// No price history is kept, so swaps pay nothing for strategies, and strategies work on any pool of listed tokens.
 ///
 /// Pools: a 24-bit table (a side names the pools its conditions read in 24 bits). Anyone can add a pool whose two
 /// tokens are listed, hookless or using the limit-order hook (a pool with another hook could take a cut of swaps).
@@ -69,6 +72,7 @@ contract Rules {
         int24 upper;
         bool isUpper; // which side is checked
         uint32 feeClock; // when the position's fees were last collected
+        bool onChainlink; // judge price conditions by Chainlink alone (an unknown price counts as still true)
         OrderState.Side sd;
     }
 
@@ -107,27 +111,34 @@ contract Rules {
     // Prices
     // ---------------------------------------------------------------
 
-    /// @notice A pool's tick now, and whether it can be believed: within the list's band of Chainlink.
+    /// @notice A pool's tick now, and whether it can be believed: within the pair's band of Chainlink.
     function tickOf(uint24 poolIndex) public view returns (bool ok, int24 tick) {
-        PoolKey memory key = _pools[poolIndex];
-        (, tick,,) = poolManager.getSlot0(key.toId());
-        ok = _near(key, tick);
+        (ok, tick,,) = _prices(_pools[poolIndex]);
     }
 
-    /// @notice Reverts (PriceMoved) unless `key`'s price is within `PriceFeeds.maxDeviationTicks` of the pair's
-    /// Chainlink price (no Chainlink price counts as too far). Runs swap and deposit at this price: this keeps them
-    /// from running at a price someone pushed.
+    /// @notice A pool's tick, and the pair's Chainlink price as a tick (`linked` false when the band is off, in tests,
+    /// or when Chainlink has no fresh price). `near`: the pool is within the band of Chainlink.
+    function pricesOf(uint24 poolIndex) external view returns (bool near, int24 tick, bool linked, int24 link) {
+        return _prices(_pools[poolIndex]);
+    }
+
+    /// @notice Reverts (PriceMoved) unless `key`'s price is within the pair's band of its Chainlink price (no
+    /// Chainlink price counts as too far). Runs swap and deposit at this price: this keeps them from running at a
+    /// price someone pushed.
     function checkPrice(PoolKey calldata key) external view {
-        (, int24 tick,,) = poolManager.getSlot0(key.toId());
-        if (!_near(key, tick)) revert PriceMoved();
+        (bool near,,,) = _prices(key);
+        if (!near) revert PriceMoved();
     }
 
-    function _near(PoolKey memory key, int24 tick) internal view returns (bool) {
-        uint24 band = feeds.maxDeviationTicks();
-        if (band == 0) return true; // not checked (tests)
-        (bool ok, int24 link) = feeds.pairTick(Currency.unwrap(key.currency0), Currency.unwrap(key.currency1));
-        if (!ok) return false;
-        return (tick > link ? uint256(int256(tick) - link) : uint256(int256(link) - tick)) <= band;
+    function _prices(PoolKey memory key) internal view returns (bool near, int24 tick, bool linked, int24 link) {
+        (, tick,,) = poolManager.getSlot0(key.toId());
+        address t0 = Currency.unwrap(key.currency0);
+        address t1 = Currency.unwrap(key.currency1);
+        uint24 band = feeds.bandOf(t0, t1);
+        if (band == 0) return (true, tick, false, 0); // not checked (tests)
+        (linked, link) = feeds.pairTick(t0, t1);
+        if (!linked) return (false, tick, false, 0);
+        near = (tick > link ? uint256(int256(tick) - link) : uint256(int256(link) - tick)) <= band;
     }
 
     // ---------------------------------------------------------------
@@ -144,6 +155,31 @@ contract Rules {
         view
         returns (bool)
     {
+        return _met(vault, orderId, poolIndex, lowerWord, upperWord, upper, false);
+    }
+
+    /// @notice The same condition judged by Chainlink's price alone, where a missing Chainlink price counts as "still
+    /// true". The vault forgets a hold only when this is false: a pushed pool price cannot reset a hold.
+    function metOnChainlink(
+        address vault,
+        uint256 orderId,
+        uint24 poolIndex,
+        uint256 lowerWord,
+        uint256 upperWord,
+        bool upper
+    ) external view returns (bool) {
+        return _met(vault, orderId, poolIndex, lowerWord, upperWord, upper, true);
+    }
+
+    function _met(
+        address vault,
+        uint256 orderId,
+        uint24 poolIndex,
+        uint256 lowerWord,
+        uint256 upperWord,
+        bool upper,
+        bool onChainlink
+    ) internal view returns (bool) {
         OrderState.Side memory lo = OrderState.decodeSide(lowerWord);
         OrderState.Side memory up = OrderState.decodeSide(upperWord);
         OrderState.Side memory sd = upper ? up : lo;
@@ -155,6 +191,7 @@ contract Rules {
             upper: up.edge,
             isUpper: upper,
             feeClock: lo.lastRun > up.lastRun ? lo.lastRun : up.lastRun,
+            onChainlink: onChainlink,
             sd: sd
         });
         bool a = _cond(c, sd.checker, sd.value, sd.checkPool);
@@ -163,8 +200,8 @@ contract Rules {
         return a;
     }
 
-    /// @notice The price a side's trailing condition reads now. `trails` is false for a side without one; `ok` is
-    /// false while that pool's price is too far from Chainlink to be remembered.
+    /// @notice The price a side's trailing condition remembers: Chainlink's (the pool's while the band is off, in
+    /// tests). `trails` is false for a side without one; `ok` is false while that pool is too far from Chainlink.
     function trailTick(uint24 poolIndex, uint256 word) external view returns (bool trails, bool ok, int24 tick) {
         OrderState.Side memory sd = OrderState.decodeSide(word);
         uint24 pool;
@@ -173,7 +210,12 @@ contract Rules {
         } else if (sd.combine != OrderState.COMBINE_NONE && sd.checker2 == OrderState.CHECK_TRAIL) {
             (trails, pool) = (true, sd.checkPool2);
         }
-        if (trails) (ok, tick) = tickOf(pool == 0 ? poolIndex : pool);
+        if (trails) {
+            bool linked;
+            int24 link;
+            (ok, tick, linked, link) = _prices(_pools[pool == 0 ? poolIndex : pool]);
+            if (linked) tick = link;
+        }
     }
 
     /// @notice Fees the order's position has earned since they were last collected, in bps of the position's value,
@@ -234,9 +276,19 @@ contract Rules {
                 elapsed >= MIN_APR_TIME
                     && FullMath.mulDiv(fees, BPS * 365 days, elapsed) < base * uint256(uint24(value));
         }
-        // the pool price conditions: EDGE, TICK, TRAIL. A price too far from Chainlink never makes them true.
-        (bool live, int24 tick) = tickOf(pool == 0 ? c.poolIndex : pool);
-        if (!live) return false;
+        // the price conditions: EDGE, TICK, TRAIL. True only when the pool is near Chainlink and both prices are past
+        // the level (the pool's alone while the band is off, in tests).
+        (bool near, int24 tick, bool linked, int24 link) = _prices(_pools[pool == 0 ? c.poolIndex : pool]);
+        if (c.onChainlink) {
+            if (linked) return _past(c, checker, value, link);
+            return near ? _past(c, checker, value, tick) : true; // no Chainlink price: it cannot be said false
+        }
+        if (!near) return false;
+        return _past(c, checker, value, tick) && (!linked || _past(c, checker, value, link));
+    }
+
+    /// @dev Whether a price (as a tick) is past a price condition's level.
+    function _past(Ctx memory c, uint8 checker, int24 value, int24 tick) internal pure returns (bool) {
         int256 t = tick;
         if (checker == OrderState.CHECK_EDGE) {
             return c.isUpper ? t >= int256(c.upper) + value : t < int256(c.lower) - value;
@@ -305,9 +357,11 @@ contract Rules {
     // Price math for runs (the price of the moment: the vault checks it is near Chainlink first)
     // ---------------------------------------------------------------
 
-    /// @notice Price limit for a swap: `slippage` steps of 10 ticks past the price before it.
+    /// @notice Price limit for a swap: `slippage` steps of 10 ticks past the better of the pool's price and
+    /// Chainlink's (for the seller). A pool pushed against the swap leaves it unsold rather than sold below Chainlink.
     function swapLimit(PoolKey calldata key, bool zeroForOne, uint8 slippage) external view returns (uint160) {
-        (, int24 tick,,) = poolManager.getSlot0(key.toId());
+        (, int24 tick, bool linked, int24 link) = _prices(key);
+        if (linked && (zeroForOne ? link > tick : link < tick)) tick = link;
         int256 slip = int256(uint256(slippage)) * 10;
         int256 t = zeroForOne ? int256(tick) - slip : int256(tick) + slip;
         if (t <= TickMath.MIN_TICK) t = TickMath.MIN_TICK + 1;

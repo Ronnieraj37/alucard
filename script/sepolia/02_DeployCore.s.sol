@@ -25,6 +25,7 @@ import {Net} from "./Net.sol";
 /// OUT_DIR (default ./deployments) lets a rehearsal on a fork write somewhere else.
 contract DeployCore is Script {
     uint24 constant MAX_DEVIATION_TICKS = 200;
+    uint24 constant STABLE_PAIR_TICKS = 50;
 
     function run() external {
         string memory dir = vm.envOr("OUT_DIR", string("./deployments"));
@@ -48,6 +49,15 @@ contract DeployCore is Script {
         // a pool's price must be within ~2% of Chainlink for a strategy step to run (frontend/scripts/arb.ts keeps
         // the test pools there, as arbitrageurs do on mainnet)
         feeds.setMaxDeviationTicks(MAX_DEVIATION_TICKS);
+        // two stablecoins need far less room: ~0.5% between any two of them
+        address usdc = vm.parseJsonAddress(toks, ".USDC");
+        address usdt = vm.parseJsonAddress(toks, ".USDT");
+        address dai = vm.parseJsonAddress(toks, ".DAI");
+        feeds.setPairBand(usdc, usdt, STABLE_PAIR_TICKS);
+        feeds.setPairBand(usdc, dai, STABLE_PAIR_TICKS);
+        feeds.setPairBand(usdt, dai, STABLE_PAIR_TICKS);
+        // from here on every band change waits two days after it is announced: the admin has no instant power
+        feeds.lockBands();
         vm.stopBroadcast();
 
         bytes memory args = abi.encode(poolManager);

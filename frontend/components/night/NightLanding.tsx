@@ -4,7 +4,7 @@
 // pulls the money back), then what it does in the order a visitor asks: what is it, how do I set one up, what does
 // a move look like, why can nobody fire it, what am I trusting, what is proven.
 import { motion, useInView, useScroll, useTransform, type MotionValue } from "framer-motion";
-import { ArrowRight, Check, Eye, KeyRound, Moon, Radio, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { ArrowRight, Check, Eye, KeyRound, Moon, Radio, ShieldCheck, Sparkles, TriangleAlert, Users, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { DEPLOYMENTS } from "@/lib/deployments";
@@ -78,19 +78,164 @@ function Hero() {
           <span className="n-grad">It keeps watch.</span>
         </motion.h1>
         <motion.p className="n-lead" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.1, delay: 0.45, ease: EASE }}>
-          Write a strategy for your Uniswap v4 position in plain words: when to leave the range, where the money waits, when it comes back. Alucard checks it,
-          replays it on real history, and any keeper runs it on-chain, while the money stays inside Uniswap v4.
+          A Uniswap liquidity position has no settings: the money just sits there, even when the price runs out of your range. Alucard lets you tell it what
+          to do. Park it in a stablecoin pool while ETH dumps and bring it back after, re-range, take profit, leave when the fees dry up. Any keeper runs it
+          on-chain, and the money never leaves Uniswap v4.
         </motion.p>
         <motion.div className="mt-9 flex flex-col gap-3 sm:flex-row" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1, delay: 0.7 }}>
           <Link href="/pool/new" className="n-btn n-btn-glow">
             Build a strategy <ArrowRight className="h-4 w-4" />
           </Link>
-          <a href="#move" className="n-btn n-btn-line">
-            Watch one run
+          <a href="#problem" className="n-btn n-btn-line">
+            Why it matters
           </a>
         </motion.div>
       </div>
       <div className="n-scrollcue" aria-hidden="true" />
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- the problem, in the words we use to explain it
+
+function Problem() {
+  return (
+    <section id="problem" className="n-sec">
+      <div className="n-wrap grid items-center gap-14 lg:grid-cols-[1.05fr_1fr]">
+        <Rise>
+          <p className="n-kicker">
+            <TriangleAlert className="h-4 w-4" /> The problem
+          </p>
+          <h2 className="n-h2">Your liquidity can’t be told what to do.</h2>
+          <p className="n-p">
+            On Uniswap you choose a range and the money sits there. When the price leaves the range, two things happen at once: you stop earning fees, and the
+            pool has already swapped your whole position into the token that fell. Nothing changes until you notice and act yourself, at any hour.
+          </p>
+          <p className="n-p">
+            Some apps add a stop-loss or auto-compounding: a few fixed buttons. Alucard gives you the parts to write the plan you actually want.
+          </p>
+        </Rise>
+        <Rise delay={0.12}>
+          <OutOfRange />
+        </Rise>
+      </div>
+      <div className="n-wrap mt-14 grid gap-4 sm:grid-cols-2">
+        <Rise>
+          <div className="n-stat">
+            <b>~4 in 10</b>
+            <span>
+              positions in Uniswap v3’s largest ETH/USDC pool were out of range, earning no fees, when CrocSwap counted them.{" "}
+              <a className="n-link" href="https://crocswap.medium.com/impermanent-loss-and-jit-liquidity-in-the-uniswap-eth-usdc-0-3-pool-8fc58c755d7" target="_blank" rel="noreferrer">
+                CrocSwap
+              </a>
+            </span>
+          </div>
+        </Rise>
+        <Rise delay={0.08}>
+          <div className="n-stat">
+            <b>~30%</b>
+            <span>
+              of the capital in concentrated-liquidity pools sat out of range, on average over 26 weeks of 2026.{" "}
+              <a className="n-link" href="https://dune.com/blog/capital-efficiency-decentralized-exchanges" target="_blank" rel="noreferrer">
+                Dune
+              </a>
+            </span>
+          </div>
+        </Rise>
+      </div>
+    </section>
+  );
+}
+
+/** A range, a price that falls out of it, and what that does to the position: a loop. */
+function OutOfRange() {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return setT(0.8);
+    let raf = 0;
+    const t0 = performance.now();
+    const f = (now: number) => {
+      setT(((now - t0) / 7000) % 1);
+      raf = requestAnimationFrame(f);
+    };
+    raf = requestAnimationFrame(f);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  // price path: wanders inside the range, then falls out and stays there
+  const x = t < 0.45 ? 0.55 + 0.12 * Math.sin(t * 18) : Math.max(0.12, 0.55 + 0.12 * Math.sin(0.45 * 18) - (t - 0.45) * 1.6);
+  const lo = 0.34;
+  const hi = 0.78;
+  const inside = x >= lo && x <= hi;
+  const eth = inside ? 0.5 + (0.56 - x) * 1.1 : 1; // below the range: all ETH
+  const price = Math.round(1500 + x * 1000);
+  return (
+    <div className="n-oor" aria-label="A price falling out of a range: fees stop and the position becomes all ETH">
+      <div className="n-oor-track">
+        <div className="n-oor-band" style={{ left: `${lo * 100}%`, width: `${(hi - lo) * 100}%` }}>
+          <span>your range</span>
+        </div>
+        <div className={`n-oor-dot ${inside ? "" : "out"}`} style={{ left: `${x * 100}%` }}>
+          <i>ETH ${price.toLocaleString("en-US")}</i>
+        </div>
+      </div>
+      <div className="n-oor-row">
+        <span>Fees</span>
+        <b className={inside ? "" : "dead"}>{inside ? "earning" : "$0 an hour"}</b>
+      </div>
+      <div className="n-oor-row">
+        <span>Your position</span>
+        <div className="n-oor-mix">
+          <div style={{ width: `${Math.min(1, Math.max(0, eth)) * 100}%` }} />
+        </div>
+        <b className={inside ? "" : "dead"}>{Math.round(Math.min(1, eth) * 100)}% ETH</b>
+      </div>
+      <div className="n-oor-row">
+        <span>Who acts</span>
+        <b className={inside ? "" : "dead"}>{inside ? "nobody needs to" : "nobody, unless you are awake"}</b>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- what you can tell it
+
+const USES = [
+  { when: "ETH falls out of my range", then: "Park the money in the USDT/USDC pool, and bring it back once ETH is back in my range.", tag: "Move and return" },
+  { when: "it leaves my range", then: "Re-centre a new range around the price, whichever way it went.", tag: "Re-range" },
+  { when: "the fee APR falls below 10%", then: "Take my liquidity out. Rates swing; the trigger is yours.", tag: "Leave when fees dry up" },
+  { when: "ETH rises 10%", then: "Take 25% profit, then again every 5% higher, four times.", tag: "Take profit in steps" },
+  { when: "ETH falls 8% from its best", then: "Withdraw everything and sell to USDC.", tag: "Trailing stop" },
+  { when: "a day has passed", then: "Put the fees earned back into the position.", tag: "Compound" },
+];
+
+function Uses() {
+  return (
+    <section id="uses" className="n-sec">
+      <div className="n-wrap">
+        <Rise className="max-w-3xl">
+          <p className="n-kicker">
+            <Wand2 className="h-4 w-4" /> What would you tell it?
+          </p>
+          <h2 className="n-h2">If this happens, do that. In your words.</h2>
+          <p className="n-p">
+            Each line below is a strategy you can build in a minute, by picking cards or by typing the sentence to the assistant. Combine them: one plan for
+            when the price falls and another for when it rises, two conditions joined with and/or, “only if it lasts 30 minutes”, repeat it N times.
+          </p>
+        </Rise>
+        <div className="n-uses">
+          {USES.map((u, k) => (
+            <Rise key={u.tag} delay={k * 0.06}>
+              <div className="n-use">
+                <span className="n-use-tag">{u.tag}</span>
+                <p>
+                  <em>If</em> {u.when},
+                </p>
+                <p className="n-use-then">{u.then}</p>
+              </div>
+            </Rise>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -275,18 +420,19 @@ function Guard() {
           <p className="n-kicker">
             <Eye className="h-4 w-4" /> Nobody can fire it for you
           </p>
-          <h2 className="n-h2">A push does nothing. A real move runs at once.</h2>
+          <h2 className="n-h2">A push does nothing. Chainlink has to agree.</h2>
           <p className="n-p">
-            A pool&apos;s price counts only while it is within about 2% of Chainlink&apos;s. Push a pool below someone&apos;s stop and the push does not count, however
-            long it is held. When the market really moves, Chainlink moves too, and the step runs. No price history is stored, so swaps pay nothing extra, and
-            it works on any v4 pool of listed tokens, even one without a hook.
+            A step fires only when the pool&apos;s price and Chainlink&apos;s price are both past your level, and the pool is near Chainlink. Pushing a pool, by
+            2% or by 20%, for a minute or for hours, fires nothing. A hold can&apos;t be reset by a push, a trailing stop remembers Chainlink&apos;s best price, and
+            the step&apos;s own swap never sells further than your slippage below Chainlink. When the market really moves, Chainlink moves too, and the step runs.
           </p>
         </Rise>
         <Rise delay={0.15}>
           <div className="n-guard">
             {[
-              ["Pool pushed 7% below the stop", "far from Chainlink: refused", "no"],
-              ["…held for three hours", "still refused", "no"],
+              ["Pool pushed 7% below the stop", "refused", "no"],
+              ["Pushed 1.5%, inside the band", "refused: Chainlink didn’t move", "no"],
+              ["Pushed to sell you cheap", "the swap stops at Chainlink − your slippage", "no"],
               ["Chainlink falls with it", "the step runs", "go"],
             ].map(([a, b, c], i) => (
               <motion.div
@@ -315,8 +461,8 @@ function Trust() {
   const rows = [
     { i: KeyRound, h: "Only you can take the money out", b: "Positions are held by the contract per order; cancel at any time, wherever the money is. After expiry anyone can close it, and it still goes to you." },
     { i: Users, h: "Keepers: anyone, paid what you set", b: "Any address can run a step once its condition is true. It earns your keeper fee (0.1% by default, at most 1%) of what the step moves, nothing else." },
-    { i: Eye, h: "Chainlink decides what a price is", b: "With no fresh Chainlink price, nothing runs. A push inside the ~2% band is still a price, so set levels further than that from the market." },
-    { i: ShieldCheck, h: "One admin power, behind a 2-day wait", b: "The token list (which Chainlink feed per token). Changing it waits two days. No upgrades, no pause, no fee switch." },
+    { i: Eye, h: "Chainlink decides what a price is", b: "A price condition needs Chainlink to agree. With no fresh Chainlink price (or an L2 sequencer that just restarted), nothing runs; cancelling always works." },
+    { i: ShieldCheck, h: "The admin can’t act on the spot", b: "The token list and the price bands are the only settings, and every change waits two days after it is announced. No upgrades, no pause, no fee switch." },
   ];
   return (
     <section id="trust" className="n-sec">
@@ -340,6 +486,7 @@ function Trust() {
         </div>
         <p className="mt-6 text-[14px] text-[var(--muted)]">
           Not audited yet. On testnets nobody arbitrages the pools, so we run a small bot that keeps them on Chainlink, the job arbitrageurs do on mainnet.
+          Every attack we know of, and what stops it, is in the <Link href="/docs#safety" className="n-link">docs</Link>.
         </p>
       </div>
     </section>
@@ -376,8 +523,8 @@ function Proof() {
   const rows: [number, string, string][] = [
     [35126, "", "strategy shapes where the editor and the contract agree"],
     [2000, "", "random orders where the backtest fires at the same swaps as the contract"],
-    [138, "", "contract tests, fuzz included, all passing"],
-    [84, "%", "of contract branches covered"],
+    [2000, "", "of them end within 0.1% of the contract’s money (1,989 within 0.01%)"],
+    [145, "", "contract tests, fuzz included, all passing"],
   ];
   return (
     <section className="n-sec">
@@ -455,6 +602,8 @@ export default function NightLanding() {
       <Horizon />
       <Nav />
       <Hero />
+      <Problem />
+      <Uses />
       <Build />
       <Move />
       <Guard />

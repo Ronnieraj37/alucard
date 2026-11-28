@@ -470,7 +470,7 @@ function engineCases(from: number, n: number) {
     encoding: "utf8",
     maxBuffer: 1 << 28,
   });
-  const res: { swaps: number; events: [number, boolean][] }[] = JSON.parse(out);
+  const res: { swaps: number; events: [number, boolean][]; ratio: number }[] = JSON.parse(out);
   const encs = slice.map((j) => encOf(j.rules));
   return encodeAbiParameters(
     [
@@ -485,6 +485,7 @@ function engineCases(from: number, n: number) {
       { type: "uint256[]" },
       { type: "uint256[]" },
       { type: "uint256[][]" },
+      { type: "uint256[]" },
     ],
     [
       ps.map((p) => p.ts),
@@ -498,6 +499,7 @@ function engineCases(from: number, n: number) {
       slice.map((j) => BigInt(j.path)),
       res.map((r) => BigInt(r.swaps)),
       res.map((r) => r.events.map(([k, up]) => (BigInt(k) << 1n) | (up ? 1n : 0n))),
+      res.map((r) => BigInt(Math.round(r.ratio * 1e18))),
     ] as never,
   );
 }

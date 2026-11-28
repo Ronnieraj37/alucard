@@ -2,10 +2,9 @@
 
 stdin: {"paths": [{"ts": [...], "ticks": [...]}], "oracleStart": t, "range": [tl, tu],
         "jobs": [{"order": {...words...}, "path": i}]}
-stdout: [{"swaps": n, "events": [[row, upper side?], ...]}]
+stdout: [{"swaps": n, "events": [[row, upper side?], ...], "ratio": final value / value of just holding}]
 
-The pool of test/EditorParity.t.sol: created at `oracleStart` at tick 0 (exactly price 1), deep enough that the order
-never moves its price, moved to a point inside each path tick by one swap (none when it is already there), with a
+The pool of test/EditorParity.t.sol: created at `oracleStart` at tick 0 (exactly price 1), with its liquidity (POOL_L), moved to a point inside each path tick by one swap (none when it is already there), with a
 keeper that looks after every swap with no delay.
 """
 import json
@@ -16,6 +15,12 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "api"))
 import _engine as e  # noqa: E402
+
+
+# the liquidity of test/EditorParity.t.sol's pool (RuleSetup's full-range 100e18), so the order's own swaps (re-centring,
+# a move's way back) pay the same price impact in both
+POOL_L = 100e18
+ORDER_L = 1e15  # the order's liquidity there
 
 
 def series(path: dict, oracle_start: float) -> e.Series:
@@ -35,7 +40,7 @@ def series(path: dict, oracle_start: float) -> e.Series:
         per_l = np.where(down, 1.0 / sp1 - 1.0 / sp0, sp1 - sp0)
     fee_per_l = np.where(swapped, np.abs(per_l) * f / (1 - f), 0.0)
     s = e.Series(key="synthetic", dec0=18, dec1=18, fee=f, spacing=60, token0="WETH", token1="USDC",
-                 ts=np.array(path["ts"], dtype=float), sp0=sp0, sp1=sp1, lpre=np.full(n, 1e26), lpost=np.full(n, 1e26),
+                 ts=np.array(path["ts"], dtype=float), sp0=sp0, sp1=sp1, lpre=np.full(n, POOL_L), lpost=np.full(n, POOL_L),
                  fee_raw=np.zeros(n), t0in=down, tick=np.floor(2.0 * np.log(sp1) / e.LN).astype(np.int64),
                  fee_per_l=fee_per_l, swapped=swapped, oracle_start=oracle_start)
     assert (s.tick[1:] == ticks[1:]).all()
@@ -52,9 +57,11 @@ def main() -> None:
             cache[p] = series(req["paths"][p], float(req["oracleStart"]))
         s = cache[p]
         r = e.run_series(s, None, {"order": job["order"], "homeIndex": 1, "refTick": 0, "baseIs0": True, "ticks": req["range"],
-                                   "start": float(s.ts[0]), "days": 10_000, "delaySec": 0, "keeperFeeBps": 10, "slippagePct": 5})
+                                   "start": float(s.ts[0]), "days": 10_000, "liquidity": ORDER_L, "delaySec": 0, "keeperFeeBps": 10, "slippagePct": 5})
         index = {float(t): i for i, t in enumerate(s.ts)}
-        out.append({"swaps": r["swaps"], "events": [[index[ev["t"]], ev["side"] == "upper"] for ev in r["events"]]})
+        # money: what the owner ends with, over what the deposited tokens are worth if just held (both at the last price)
+        out.append({"swaps": r["swaps"], "events": [[index[ev["t"]], ev["side"] == "upper"] for ev in r["events"]],
+                    "ratio": r["rules"]["final"] / r["hold"]["final"]})
     json.dump(out, sys.stdout)
 
 

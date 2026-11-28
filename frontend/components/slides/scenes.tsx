@@ -94,7 +94,7 @@ function Cover() {
           Alucard
         </h1>
         <p className="s-lead in" style={{ ...d(260), maxWidth: 820 }}>
-          Your own strategy, running on your Uniswap v4 position: exit, move to another pool and back, re-range, compound. Set it once; it runs on-chain while you’re away.
+          A Uniswap position has no settings. Alucard gives it your rules: exit, park in another pool and come back, re-range, take profit, leave when fees dry up. It runs on-chain while you’re away.
         </p>
         <div className="cv-tags in" style={d(420)}>
           {["Uniswap v4", "Any pool, Chainlink-checked", "Live on Sepolia and Unichain"].map((t) => (
@@ -250,6 +250,42 @@ function Trap() {
           <p className="s-lead">someone has to watch, or nothing happens</p>
         </div>
       </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ 3b · what you can tell it */
+
+const USES = [
+  { tag: "Move and return", when: "ETH falls out of my range", then: "Park it in USDT/USDC. Bring it back once ETH is back in my range." },
+  { tag: "Re-range", when: "it leaves my range", then: "Re-centre a new range around the price, either way." },
+  { tag: "Leave when fees dry up", when: "the fee APR falls below 10%", then: "Take my liquidity out." },
+  { tag: "Take profit in steps", when: "ETH rises 10%", then: "Withdraw 25%, again every 5% higher, four times." },
+  { tag: "Trailing stop", when: "ETH falls 8% from its best", then: "Withdraw everything and swap to USDC." },
+  { tag: "Ignore wicks", when: "it stays out of range for 30 min", then: "Then exit. A quick spike does nothing." },
+];
+
+function Uses() {
+  const { p } = useTimeline(12000, { loop: true, delay: 1400, rest: 0 });
+  const on = Math.min(USES.length - 1, Math.floor(p * USES.length));
+  return (
+    <>
+      <Head eyebrow="What would you tell your position?" title="If this happens, do that. In your words." />
+      <div className="us-grid">
+        {USES.map((u, k) => (
+          <div key={u.tag} className={`us-card in ${k === on ? "on" : ""}`} style={d(260 + k * 120)}>
+            <p className="us-tag">{u.tag}</p>
+            <p className="us-when">
+              <span>If</span> {u.when},
+            </p>
+            <p className="us-then">{u.then}</p>
+          </div>
+        ))}
+      </div>
+      <p className="s-lead in" style={{ ...d(1200), marginTop: 44 }}>
+        Pick the cards, or type the sentence to the assistant. Mix them: a plan for each direction, two conditions with and / or, repeats. Today’s tools
+        offer a few of these as fixed buttons.
+      </p>
     </>
   );
 }
@@ -415,7 +451,7 @@ function Guard() {
   const status = ran
     ? { t: "The market really fell: Chainlink agrees, the keeper runs the step", cls: "go" }
     : below && out
-      ? { t: "Pushed below the stop, far from Chainlink: it does not count", cls: "no" }
+      ? { t: "Pushed below the stop, Chainlink didn’t move: it does not count", cls: "no" }
       : p >= 0.5 && p < 0.62
         ? { t: "Arbitrage takes the push back", cls: "" }
         : { t: "Watching: the pool is on Chainlink", cls: "" };
@@ -432,7 +468,7 @@ function Guard() {
   })();
   return (
     <>
-      <Head eyebrow="Why nobody can fire your strategy" title="A push does nothing. A real move runs at once." />
+      <Head eyebrow="Why nobody can fire your strategy" title="A push does nothing. Chainlink has to agree." />
       <div className="gd">
         <div className="gd-chart in" style={d(250)}>
           <svg width={GD_W} height={GD_H} viewBox={`0 0 ${GD_W} ${GD_H}`} aria-label="A pool's price pushed below a stop does not fire it; when Chainlink moves, it runs">
@@ -455,9 +491,9 @@ function Guard() {
         </div>
         <div className="gd-facts">
           {[
-            ["±2% of Chainlink", "A pool’s price counts only inside the band, for every condition and before every step."],
-            ["Held for hours, still nothing", "A push stays a push until the market itself moves. No averaging lag in a real crash."],
-            ["No price history", "Swaps pay nothing for strategies, and any v4 pool of listed tokens works, hookless too."],
+            ["Both must be past your level", "The pool’s price and Chainlink’s. A push of 1.5% or 20%, for a minute or for hours: nothing."],
+            ["Never sells below Chainlink", "A step’s swap stops at your slippage from Chainlink. Holds and trailing highs follow Chainlink too."],
+            ["No lag in a real crash", "Chainlink moves with the market and the step runs at once. No price history: swaps pay nothing extra."],
           ].map(([h, t], k) => (
             <div key={h} className="gd-fact in" style={d(400 + k * 140)}>
               <h3>{h}</h3>
@@ -584,7 +620,7 @@ function Built() {
   const facts = [
     ["Your strategy, card by card", "Two conditions, and / or, holds, repeats, run limits"],
     ["Move to any pool and back", "Into any pool sharing a token, or hold one; back by your own rule"],
-    ["Prices Chainlink agrees with", "A push does nothing; a real move runs at once. No price history"],
+    ["Chainlink has to agree", "A push does nothing; a real move runs at once. Swaps anchored to Chainlink"],
     ["Any v4 pool", "Hookless or ours, as long as both tokens have a Chainlink feed"],
     ["A fee you set", "Keepers are paid your fee per step, whatever the gas price"],
     ["Limit orders in the swap", "The hook fills them while trades happen, no bot needed"],
@@ -621,13 +657,13 @@ function Built() {
             <p className="num">
               <Count to={2000} delay={1000} duration={1800} />
             </p>
-            <p className="s-small">orders, backtest = contract</p>
+            <p className="s-small">orders: same runs, money within 0.1%</p>
           </div>
           <div className="in" style={d(1100)}>
             <p className="num">
-              <Count to={138} delay={1100} duration={1800} />
+              <Count to={145} delay={1100} duration={1800} />
             </p>
-            <p className="s-small">contract tests, 84% of branches</p>
+            <p className="s-small">contract tests, attacks included</p>
           </div>
         </div>
         <div className="bt-addrs in" style={d(1200)}>
@@ -733,7 +769,7 @@ function Next() {
       </div>
       <div className="nx-more in" style={d(700)}>
         <span>Also next</span>
-        {["Hidden rules (commit-reveal)", "An AI strategy builder", "Mainnet"].map((x) => (
+        {["Hidden rules (commit-reveal)", "An audit", "Mainnet"].map((x) => (
           <b key={x}>{x}</b>
         ))}
       </div>
@@ -752,7 +788,7 @@ function Close() {
           Set your strategy. Then put it down.
         </h1>
         <div className="cl-links in" style={d(360)}>
-          <p>Live on Ethereum Sepolia</p>
+          <p>Live on Ethereum Sepolia and Unichain Sepolia</p>
           <p>github.com/Ronnieraj37/alucard</p>
         </div>
         <p className="s-lead in" style={d(520)}>
@@ -793,6 +829,13 @@ export const SLIDES: Slide[] = [
     notes: "Concentrated liquidity has a trap. Once the price leaves your range you earn nothing, but the pool has already converted your whole position into the token that fell, so you keep taking the full drop. Nothing gets you out unless you watch the price and act yourself, day and night. That’s the job Alucard does. Alucard does not pick a strategy, and it does not claim one beats holding.",
   },
   {
+    id: "uses",
+    title: "What you can tell it",
+    theme: "night",
+    C: Uses,
+    notes: "So what does a rule look like? In Uniswap today, once you add liquidity there is nothing to configure. With Alucard: if ETH falls out of my range, park the money in the USDT/USDC pool and bring it back when ETH recovers. If it leaves my range, re-range. Fee rates swing a lot, so you can make them a trigger: if the APR drops below 10%, take my liquidity out. Take profit in steps on the way up, a trailing stop on the way down, and ignore quick wicks with a hold. Other tools give you a few of these as fixed buttons; here you combine them however you want.",
+  },
+  {
     id: "build",
     title: "Build a strategy",
     theme: "enamel",
@@ -804,7 +847,7 @@ export const SLIDES: Slide[] = [
     title: "The price guard",
     theme: "paper",
     C: Guard,
-    notes: "Chainlink is not a condition you set. It is the check on every price. A pool’s price counts only while it is within about 2% of Chainlink. Push the pool below someone’s stop and the push does not count, however long you hold it. When the market itself moves, Chainlink moves too, and a keeper runs the step at once. No price history is stored, so swaps pay nothing for strategies, and any v4 pool of listed tokens works, with our hook or without one.",
+    notes: "Chainlink is not a condition you set. It is the check on every price. A step fires only when the pool’s price and Chainlink’s price are both past your level, and the pool is within about 2% of Chainlink. Push the pool below someone’s stop, by 1.5% or by 20%, and nothing happens, however long you hold it. The step’s own swap never sells further than your slippage below Chainlink, and holds and trailing stops follow Chainlink too. When the market itself moves, Chainlink moves too, and a keeper runs the step at once. No price history is stored, so swaps pay nothing for strategies, and any v4 pool of listed tokens works, with our hook or without one.",
   },
   {
     id: "landscape",
@@ -825,7 +868,7 @@ export const SLIDES: Slide[] = [
     title: "Built and live",
     theme: "paper",
     C: Built,
-    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A price counts only while Chainlink agrees; a push does nothing and a real move runs at once. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 35,126 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run identically, 138 contract tests covering 84% of branches. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
+    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A price counts only while Chainlink agrees; a push does nothing and a real move runs at once. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 35,126 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run at the same swaps and end within 0.1% of each other’s money, 145 contract tests including every attack we know of. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
   },
   {
     id: "now",
@@ -839,7 +882,7 @@ export const SLIDES: Slide[] = [
     title: "Next: lending vault",
     theme: "night",
     C: Next,
-    notes: "Where this goes, after the editor that’s live. A lending vault for liquidity providers. Lenders deposit and get a share token that grows with interest. The vault only lends into LP positions: borrowed money never reaches a wallet. Alucard LPs can take up to 2× leverage, but only with de-lever rules attached, and LPs in outside v3 and v4 pools can borrow against their positions under the same rules. Repayment can be in either token at the Chainlink price. After that: hidden rules, an AI strategy builder, and mainnet.",
+    notes: "Where this goes, after the editor that’s live. A lending vault for liquidity providers. Lenders deposit and get a share token that grows with interest. The vault only lends into LP positions: borrowed money never reaches a wallet. Alucard LPs can take up to 2× leverage, but only with de-lever rules attached, and LPs in outside v3 and v4 pools can borrow against their positions under the same rules. Repayment can be in either token at the Chainlink price. After that: hidden rules, an audit, and mainnet.",
   },
   {
     id: "close",
