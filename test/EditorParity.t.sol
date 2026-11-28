@@ -62,7 +62,6 @@ contract EditorParityTest is RuleSetup {
         PoolKey memory four = PoolKey(currency1, Currency.wrap(address(t2)), 100, 1, IHooks(hook));
         poolManager.initialize(four, Constants.SQRT_PRICE_1_1);
         require(rules.registerPool(four) == 4, "pool #4");
-        rules.registerCondition(address(oracle0)); // "when" card #1 (any contract: the acceptance test only names it)
         // the Chainlink band stays off here (conditions also read pools #2-#4, whose feeds do not follow the replay);
         // test/PriceGuard.t.sol tests the band
     }
@@ -120,6 +119,7 @@ contract EditorParityTest is RuleSetup {
         p.away = c.away[i];
         p.awayLower = c.awayLower[i];
         p.awayUpper = c.awayUpper[i];
+        p.condition = _conditionFor([p.lower, p.upper, p.awayLower, p.awayUpper]);
     }
 
     function test_contractAcceptsExactlyWhatTheEditorBuilds() public {
@@ -306,6 +306,7 @@ contract EditorParityTest is RuleSetup {
         p.away = b.away[i];
         p.awayLower = b.awayLower[i];
         p.awayUpper = b.awayUpper[i];
+        p.condition = _conditionFor([p.lower, p.upper, p.awayLower, p.awayUpper]);
         uint256[2] memory before = [_bal(currency0, alice), _bal(currency1, alice)];
         vm.prank(alice);
         uint256 id = orders.createOrder(p);
@@ -363,6 +364,17 @@ contract EditorParityTest is RuleSetup {
         uint256 px = FullMath.mulDiv(FullMath.mulDiv(sp, sp, 1 << 96), 1e18, 1 << 96); // token1 per token0, x1e18
         uint256 hold = FullMath.mulDiv(paid[0], px, 1e18) + paid[1];
         return FullMath.mulDiv(FullMath.mulDiv(back0, px, 1e18) + back1, 1e18, hold);
+    }
+
+    /// @dev An "own condition" contract when a side asks for one (any contract will do: the acceptance test only names it).
+    function _conditionFor(uint256[4] memory words) internal view returns (address) {
+        for (uint256 i; i < 4; ++i) {
+            OrderState.Side memory d = OrderState.decodeSide(words[i]);
+            if (d.checker == OrderState.CHECK_EXTERNAL || (d.combine != 0 && d.checker2 == OrderState.CHECK_EXTERNAL)) {
+                return address(oracle0);
+            }
+        }
+        return address(0);
     }
 
     function _equal(uint256[] memory a, uint256[] memory b) internal pure returns (bool) {

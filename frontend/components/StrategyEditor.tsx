@@ -43,10 +43,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type Abi, isAddress } from "viem";
-import { useReadContract } from "wagmi";
-import { explorerAddress } from "@/lib/chain";
-import { useTx } from "@/lib/tx";
+import { isAddress } from "viem";
+import { useBytecode, useReadContract, useStorageAt } from "wagmi";
+import { CHAIN_ID, CHAINS, explorerAddress } from "@/lib/chain";
 import Assistant from "@/components/Assistant";
 import Backtest, { type BacktestRange } from "@/components/Backtest";
 import { Field, PoolIcons, Suffix } from "@/components/ui";
@@ -189,7 +188,7 @@ function triggerOptions(pool: Pool, lane: LaneId, price: number, range: [number,
     {
       id: "card",
       label: "My own condition (a contract)",
-      hint: "A “when” card: any contract that answers true or false. Card #1 is a USDC depeg alarm.",
+      hint: "Paste any contract that answers true or false: a depeg, volatility, another protocol's state.",
       icon: Puzzle,
       apply: set(t("card")),
     },
@@ -910,6 +909,8 @@ function AddMenu(c: ColumnProps & { second: boolean; onClose: () => void }) {
     }
     c.setRules((r) => o.apply(r));
     c.setAdding(null);
+    // a condition that cannot work without input (your own contract's address) opens its settings at once
+    if (o.id === "card" && o.open) c.setOpen(cardKey(o.open));
   };
 
   return (
@@ -1142,54 +1143,80 @@ function BackFields({
   );
 }
 
-/** A "when" card: pick it by number, or paste a contract address (registered here if it is new). */
-function CardFields({ t, onChange }: { t: Trigger; onChange: (t: Trigger) => void }) {
-  const [text, setText] = useState(t.cardId ? String(t.cardId) : "");
-  const tx = useTx();
-  const addr = isAddress(text.trim()) ? (text.trim() as `0x${string}`) : undefined;
-  const { data: idOf, refetch } = useReadContract({ address: CORE.rules, abi: rulesAbi, functionName: "conditionIdOf", args: addr ? [addr] : undefined, query: { enabled: !!addr } });
-  const { data: count } = useReadContract({ address: CORE.rules, abi: rulesAbi, functionName: "conditionCount" });
-  const { data: cardAddr } = useReadContract({ address: CORE.rules, abi: rulesAbi, functionName: "conditionAt", args: t.cardId ? [t.cardId] : undefined, query: { enabled: !!t.cardId } });
-  useEffect(() => {
-    if (addr && idOf) onChange({ ...t, cardId: Number(idOf) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idOf, addr]);
-  const register = () =>
-    tx.run(async () => {
-      await tx.send("Register the card", { address: CORE.rules, abi: rulesAbi as Abi, functionName: "registerCondition", args: [addr!] });
-      await refetch();
-    }, "Registered");
+const CONDITION_ABI = [
+  {
+    type: "function",
+    name: "isMet",
+    stateMutability: "view",
+    inputs: [
+      { name: "vault", type: "address" },
+      { name: "orderId", type: "uint256" },
+      { name: "upper", type: "bool" },
+    ],
+    outputs: [{ type: "bool" }],
+  },
+] as const;
+/** EIP-1967: where a standard proxy keeps its implementation's address. */
+const IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+
+/** Your own condition: paste a contract's address. Every step of the check is shown as it happens. */
+function CardFields({ pool, lane, t, onChange }: { pool: Pool; lane: LaneId; t: Trigger; onChange: (t: Trigger) => void }) {
+  const raw = (t.contract ?? "").trim();
+  const addr = isAddress(raw) ? (raw as `0x${string}`) : undefined;
+  const code = useBytecode({ address: addr, query: { enabled: !!addr } });
+  const hasCode = !!code.data && code.data !== "0x";
+  const answer = useReadContract({
+    address: addr,
+    abi: CONDITION_ABI,
+    functionName: "isMet",
+    args: [CORE.conditionalOrders, 0n, contractSide(pool, lane) === "upper"],
+    query: { enabled: hasCode, retry: false },
+  });
+  const impl = useStorageAt({ address: addr, slot: IMPL_SLOT, query: { enabled: hasCode } });
+  const proxy = !!impl.data && !/^0x0*$/.test(impl.data);
+
+  const status: { tone: "muted" | "bad" | "ok"; text: string } | null = !raw
+    ? { tone: "muted", text: "Paste the address of a contract with isMet(address vault, uint256 orderId, bool upper) returns (bool)." }
+    : !addr
+      ? { tone: "bad", text: "That is not an address: 0x followed by 40 hex characters." }
+      : code.isLoading
+        ? { tone: "muted", text: "Looking for the contract…" }
+        : !hasCode
+          ? { tone: "bad", text: `No contract at this address on ${CHAINS[CHAIN_ID].label}. Check the address and the network.` }
+          : answer.isLoading
+            ? { tone: "muted", text: "Asking it isMet…" }
+            : answer.isError
+              ? { tone: "bad", text: "This contract does not answer isMet(address, uint256, bool) → bool, so this side would never run." }
+              : { tone: "ok", text: `It answers. Right now it says ${answer.data ? "yes: the side would run" : "no"}.` };
+  const color = { muted: "text-[var(--muted)]", bad: "text-[var(--rose)]", ok: "text-[var(--sage)]" }[status!.tone];
+
   return (
     <>
-      <Field label="Card number, or a contract address" hint={count ? `${count} card${Number(count) === 1 ? "" : "s"} registered on this network` : undefined}>
-        <input
-          className="input"
-          value={text}
-          placeholder="1, or 0x…"
-          onChange={(e) => {
-            const v = e.target.value;
-            setText(v);
-            if (/^\d+$/.test(v.trim())) onChange({ ...t, cardId: Number(v.trim()) });
-            else if (!isAddress(v.trim())) onChange({ ...t, cardId: undefined });
-          }}
-        />
+      <Field label="Your condition contract">
+        <input className="input font-mono text-[13px]" value={t.contract ?? ""} placeholder="0x…" spellCheck={false} onChange={(e) => onChange({ ...t, contract: e.target.value.trim() })} />
       </Field>
-      {addr && idOf === 0 && (
-        <button className="btn btn-light self-start" disabled={tx.state.busy} onClick={register}>
-          Register this contract as a card
-        </button>
+      <p className={`flex items-start gap-1.5 text-[12.5px] leading-relaxed ${color}`} role="status" aria-live="polite">
+        {status!.tone === "ok" ? <Check className="mt-[2px] h-3.5 w-3.5 shrink-0" /> : status!.tone === "bad" ? <AlertTriangle className="mt-[2px] h-3.5 w-3.5 shrink-0" /> : null}
+        <span>{status!.text}</span>
+      </p>
+      {addr && hasCode && (
+        <a className="self-start text-[12px] text-[var(--muted)] underline underline-offset-4" href={explorerAddress(addr)} target="_blank" rel="noreferrer">
+          Read its code on the explorer
+        </a>
       )}
-      {t.cardId && cardAddr && cardAddr !== "0x0000000000000000000000000000000000000000" && (
-        <p className="text-[12px] text-[var(--muted)]">
-          Card #{t.cardId}:{" "}
-          <a className="underline underline-offset-4" href={explorerAddress(cardAddr)} target="_blank" rel="noreferrer">
-            {cardAddr.slice(0, 6)}…{cardAddr.slice(-4)}
-          </a>
+      {proxy && (
+        <p className="rounded-[8px] bg-[var(--amber-lt)] px-3 py-2 text-[12px] text-[var(--amber)]">
+          This is an upgradeable proxy: whoever controls it can change what it answers later.
         </p>
       )}
-      <p className="rounded-[8px] bg-[var(--amber-lt)] px-3 py-2 text-[12px] leading-relaxed text-[var(--amber)]">
-        The contract decides when this side runs; read its code first. It cannot touch your money, and every guard still applies, but it can fire at a
-        bad moment or never. A contract behind a proxy can change later. The backtest cannot replay it.
+      {!raw && CORE.usdcDepegCard && (
+        <button className="self-start text-[12.5px] text-[var(--ink2)] underline underline-offset-4" onClick={() => onChange({ ...t, contract: CORE.usdcDepegCard })}>
+          Try the example: yes while USDC is below $0.99
+        </button>
+      )}
+      <p className="text-[12px] leading-relaxed text-[var(--muted)]">
+        It only decides when this side runs; it cannot touch your money, and every guard still applies. One contract per position (it is told which side
+        asks). The backtest cannot replay it.
       </p>
     </>
   );
@@ -1239,7 +1266,7 @@ function TriggerFields({ pool, price, lane, t, onChange }: { pool: Pool; price: 
           <Chips values={[-10, -5, 5, 10]} current={undefined} label={(d) => `${d > 0 ? "+" : ""}${d}%`} onPick={(d) => onChange({ ...t, price: from * (1 + d / 100) })} />
         </Field>
       )}
-      {t.kind === "card" && <CardFields t={t} onChange={onChange} />}
+      {t.kind === "card" && <CardFields pool={pool} lane={lane} t={t} onChange={onChange} />}
       {t.kind === "trail" && (
         <Field label={lane === "down" ? `How far ${pool.base.symbol} falls from its high` : `How far ${pool.base.symbol} rises from its low`} hint="The best price is remembered on-chain; keepers update it.">
           <Suffix value={t.trailPct ?? 5} suffix="%" onChange={(x) => onChange({ ...t, trailPct: num(x) })} />

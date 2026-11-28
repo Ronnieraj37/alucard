@@ -82,8 +82,8 @@ async function main() {
   );
 
   await create(
-    "leave if USDC loses its peg (when card #1)",
-    { down: { trigger: { kind: "card", cardId: 1 }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false }, up: emptyLane() },
+    "leave if USDC loses its peg (own condition contract)",
+    { down: { trigger: { kind: "card", contract: CORE.usdcDepegCard }, actions: [{ kind: "withdraw", pct: 100 }], repeat: false }, up: emptyLane() },
     3,
   );
 }

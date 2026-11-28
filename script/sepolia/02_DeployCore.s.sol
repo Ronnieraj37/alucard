@@ -68,9 +68,8 @@ contract DeployCore is Script {
         RuleHook hook = new RuleHook{salt: salt}(poolManager);
         Rules rules = new Rules(poolManager, address(hook), feeds);
         ConditionalOrders orders = new ConditionalOrders(poolManager, rules);
-        // "when" card #1, an example anyone can use or copy: USDC's Chainlink price below $0.99
+        // an example condition contract anyone can paste into an order, or copy: USDC's Chainlink price below $0.99
         DepegCondition usdcDepeg = new DepegCondition(f.usdc, 0.99e8, f.dailyAge);
-        rules.registerCondition(address(usdcDepeg));
         vm.stopBroadcast();
         require(address(hook) == hookAddress, "hook address mismatch");
 

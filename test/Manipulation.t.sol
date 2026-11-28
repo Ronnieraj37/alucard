@@ -261,7 +261,7 @@ contract ManipulationTest is RuleSetup {
         _run(id, false);
         assertEq(_liquidity(id), 10e18);
         ConditionalOrders.UpdateParams memory u =
-            ConditionalOrders.UpdateParams({expiry: p.expiry, keeperFeeBps: p.keeperFeeBps, maxSlippage: 10, lower: p.lower, upper: p.upper});
+            ConditionalOrders.UpdateParams({expiry: p.expiry, keeperFeeBps: p.keeperFeeBps, maxSlippage: 10, lower: p.lower, upper: p.upper, condition: address(0)});
         vm.prank(alice);
         orders.updateOrder(id, u);
         _wait(2 minutes);

@@ -5,7 +5,7 @@ import { usePublicClient } from "wagmi";
 import { positionManagerAbi } from "./abis-extra";
 import { conditionalOrdersAbi, rulesAbi } from "./generated/abis";
 import { CORE, type Pool, POOLS, amountsFor, poolByIndex, priceAtTick, sqrtFromX96, tokenByAddress } from "./pools";
-import { type Advanced, type ChainPlan, type LaneId, type Lane, type Rules, decodeStrategy, legPools, markBackIn, slotsOf } from "./rules";
+import { type Advanced, type ChainPlan, type LaneId, type Lane, type Rules, decodeStrategy, legPools, markBackIn, slotsOf, withCondition } from "./rules";
 import { CHECK, LEG, decodeSide } from "./side";
 import { getLogsSinceDeploy } from "./logs";
 import { explain } from "./tx";
@@ -82,9 +82,10 @@ async function homePoolOf(id: bigint, livePool: number, plan: ChainPlan): Promis
 }
 
 export async function loadRulePosition(client: Client, id: bigint): Promise<RulePosition | null> {
-  const [order, rawPlan] = await Promise.all([
+  const [order, rawPlan, condition] = await Promise.all([
     client.readContract({ ...c, functionName: "getOrder", args: [id] }),
     client.readContract({ ...c, functionName: "getPlan", args: [id] }),
+    client.readContract({ ...c, functionName: "conditionOf", args: [id] }),
   ]);
   if (order.owner === ZERO) return null;
   const plan = rawPlan as unknown as ChainPlan;
@@ -101,7 +102,7 @@ export async function loadRulePosition(client: Client, id: bigint): Promise<Rule
   const homeLower = liveIsHome ? lower : decodeSide(plan.thereLower);
   const homeUpper = liveIsHome ? upper : decodeSide(plan.thereUpper);
   // a way back at the range's edge reads as "back in my range"
-  const rules = markBackIn(pool, decoded.rules, [homeLower.edge, homeUpper.edge]);
+  const rules = withCondition(markBackIn(pool, decoded.rules, [homeLower.edge, homeUpper.edge]), condition);
 
   const [amounts, homeState, liveState, readyLower, readyUpper] = await Promise.all([
     client.readContract({ ...r, functionName: "orderAmounts", args: [CORE.conditionalOrders, id] }),

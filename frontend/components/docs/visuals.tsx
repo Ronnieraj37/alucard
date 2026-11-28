@@ -109,7 +109,7 @@ type F = { name: string; from: number; bits: number; color: string; desc: string
 
 const SIDE: F[] = [
   { name: "edge", from: 0, bits: 24, color: "#0a9a8b", desc: "int24. The position's boundary: tickLower in the lower side's slot, tickUpper in the upper side's. Moves when the order re-ranges." },
-  { name: "checker", from: 24, bits: 6, color: "#0b1f2a", desc: "Condition A: 0 off, 1 EDGE (price leaves the range), 2 TICK (a price level), 3 TIME (a timer), 4 TRAIL (trailing stop), 5 LINK (the pair's Chainlink price), 6 FEES (fees earned), 7 APR (fee rate below), 8 EXTERNAL (a “when” card). Pool price conditions count only while the pool is near Chainlink." },
+  { name: "checker", from: 24, bits: 6, color: "#0b1f2a", desc: "Condition A: 0 off, 1 EDGE (price leaves the range), 2 TICK (a price level), 3 TIME (a timer), 4 TRAIL (trailing stop), 5 LINK (the pair's Chainlink price), 6 FEES (fees earned), 7 APR (fee rate below), 8 EXTERNAL (the position's own condition contract). Pool price conditions count only while the pool is near Chainlink." },
   { name: "value", from: 30, bits: 24, color: "#6d5bd0", desc: "int24, condition A's number. EDGE: ticks past the edge. TICK: the trigger tick. TIME: minutes. TRAIL: ticks back from the best price seen. FEES: bps of the position. APR: bps a year." },
   { name: "checkPool", from: 54, bits: 24, color: "#b5651d", desc: "uint24 pool condition A reads (TICK, TRAIL). 0 = the order's own pool." },
   { name: "checker2", from: 78, bits: 6, color: "#334155", desc: "Condition B, same kinds as A. 0 = no condition B." },
@@ -181,7 +181,7 @@ export function BitMap({ which }: { which: "side" | "slot0" }) {
 // ---------------------------------------------------------------- decoder
 
 const BASE_TIME = 1767225600; // 2026-01-01, OrderState.BASE_TIME
-const CHECKERS = ["off", "EDGE · leaves range", "TICK · price level", "TIME · timer", "TRAIL · trailing stop", "LINK · Chainlink price level", "FEES · fees earned (bps)", "APR · fee rate below (bps a year)", "EXTERNAL · a “when” card (its number)"];
+const CHECKERS = ["off", "EDGE · leaves range", "TICK · price level", "TIME · timer", "TRAIL · trailing stop", "LINK · Chainlink price level", "FEES · fees earned (bps)", "APR · fee rate below (bps a year)", "EXTERNAL · my own condition contract"];
 
 function bits(w: bigint, from: number, n: number) {
   return (w >> BigInt(from)) & ((1n << BigInt(n)) - 1n);

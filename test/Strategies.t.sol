@@ -158,7 +158,8 @@ contract StrategiesTest is RuleSetup {
             keeperFeeBps: 100,
             maxSlippage: 50,
             lower: 0,
-            upper: _w(_exit(OrderState.CHECK_TIME, 5))
+            upper: _w(_exit(OrderState.CHECK_TIME, 5)),
+            condition: address(0)
         });
         // a waiting leg can only move: an exit rule is refused
         vm.prank(alice);

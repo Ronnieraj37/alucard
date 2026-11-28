@@ -10,6 +10,7 @@ export const CORE = deployment.core as {
   rules: `0x${string}`;
   priceFeeds: `0x${string}`;
   faucet: `0x${string}`;
+  usdcDepegCard?: `0x${string}`; // an example condition contract (src/examples/DepegCondition.sol)
   deployBlock: number;
 };
 

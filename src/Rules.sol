@@ -43,7 +43,6 @@ contract Rules {
     error TokenNotAllowed();
     error NoPrice();
     error PriceMoved();
-    error NotAContract();
     error LowGas();
 
     uint256 internal constant BPS = 10_000;
@@ -53,7 +52,7 @@ contract Rules {
     uint16 public constant MAX_HOLD_MINUTES = 1440;
     /// @notice The APR condition needs at least this much time since the fees were last collected.
     uint256 public constant MIN_APR_TIME = 1 hours;
-    /// @notice Gas a "when" card (IAlucardCondition) may use per answer.
+    /// @notice Gas an order's own condition contract (IAlucardCondition) may use per answer.
     uint256 public constant CONDITION_GAS = 200_000;
 
     IPoolManager public immutable poolManager;
@@ -66,13 +65,6 @@ contract Rules {
     mapping(PoolId poolId => uint24 index) public poolIndexOf;
 
     event PoolRegistered(uint24 indexed index, PoolId indexed poolId);
-
-    /// @notice "When" cards: condition contracts anyone registered, by card number (from 1). Append-only.
-    uint24 public conditionCount;
-    mapping(uint24 id => address) public conditionAt;
-    mapping(address card => uint24 id) public conditionIdOf;
-
-    event ConditionRegistered(uint24 indexed id, address indexed card);
 
     /// @dev What a condition needs to know about the order.
     struct Ctx {
@@ -111,17 +103,6 @@ contract Rules {
         _pools[index] = key;
         poolIndexOf[id] = index;
         emit PoolRegistered(index, id);
-    }
-
-    /// @notice Give a condition contract (IAlucardCondition) a card number, or return the one it has. Anyone can.
-    function registerCondition(address card) external returns (uint24 id) {
-        id = conditionIdOf[card];
-        if (id != 0) return id;
-        if (card.code.length == 0) revert NotAContract();
-        id = ++conditionCount;
-        conditionAt[id] = card;
-        conditionIdOf[card] = id;
-        emit ConditionRegistered(id, card);
     }
 
     function poolKeyAt(uint24 index) external view returns (PoolKey memory) {
@@ -270,7 +251,7 @@ contract Rules {
                 elapsed >= MIN_APR_TIME
                     && FullMath.mulDiv(fees, BPS * 365 days, elapsed) < base * uint256(uint24(value));
         }
-        if (checker == OrderState.CHECK_EXTERNAL) return _askCard(c, uint24(value));
+        if (checker == OrderState.CHECK_EXTERNAL) return _askCondition(c);
         uint24 p = pool == 0 ? c.poolIndex : pool;
         // the pair's Chainlink price against a level: no pool price involved
         if (checker == OrderState.CHECK_LINK) {
@@ -630,9 +611,9 @@ contract Rules {
         view
     {
         if (checker == OrderState.CHECK_OFF || checker > OrderState.CHECK_EXTERNAL) revert InvalidSide();
-        // a "when" card: a registered card number, nothing else
+        // the order's own condition contract: it carries no number (the vault checks the contract)
         if (checker == OrderState.CHECK_EXTERNAL) {
-            if (value <= 0 || uint24(value) > conditionCount || pool != 0) revert InvalidSide();
+            if (value != 0 || pool != 0) revert InvalidSide();
             return;
         }
         if (_isLevel(checker) && (value <= TickMath.MIN_TICK || value >= TickMath.MAX_TICK)) revert InvalidSide();
@@ -652,12 +633,14 @@ contract Rules {
         }
     }
 
-    /// @dev Ask a "when" card, read-only and with CONDITION_GAS at most. Only a clean `true` (exactly one word, 1) counts;
-    /// a revert, running out of gas or any other answer is "not now". At most 32 bytes of the answer are copied. The
-    /// caller must leave enough gas for the card's whole allowance, or a keeper could starve a card into "false".
-    function _askCard(Ctx memory c, uint24 id) internal view returns (bool) {
+    /// @dev Ask the order's own condition contract (set by its owner in the vault), read-only and with CONDITION_GAS at
+    /// most. Only a clean `true` (exactly one word, 1) counts; a revert, running out of gas or any other answer is "not
+    /// now". At most 32 bytes of the answer are copied. The caller must leave enough gas for the whole allowance, or a
+    /// keeper could starve the contract into "false".
+    function _askCondition(Ctx memory c) internal view returns (bool) {
         if (gasleft() < CONDITION_GAS + CONDITION_GAS / 63 + 10_000) revert LowGas();
-        address card = conditionAt[id];
+        address card = ConditionalOrders(payable(c.vault)).conditionOf(c.orderId);
+        if (card == address(0)) return false;
         bytes memory data = abi.encodeCall(IAlucardCondition.isMet, (c.vault, c.orderId, c.isUpper));
         bool ok;
         uint256 size;

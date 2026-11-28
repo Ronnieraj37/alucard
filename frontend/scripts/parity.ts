@@ -93,7 +93,7 @@ function triggersFor(lane: "down" | "up"): Trigger[] {
     { kind: "otherPool", poolIndex: 3, price: down ? 0.96 : 1.04 }, // a hookless pool: any pool can be watched
     { kind: "chainlink", price: down ? 0.965 : 1.035 }, // the pair's Chainlink price
     { kind: "chainlink", poolIndex: 2, price: down ? 0.955 : 1.045 }, // another pool's pair on Chainlink
-    { kind: "card", cardId: 1 }, // a "when" card (test/EditorParity.t.sol registers card #1)
+    { kind: "card", contract: "0x0000000000000000000000000000000000000001" }, // the position's own condition contract
     { kind: "timer", hours: 1 },
     { kind: "trail", trailPct: 3 },
     { kind: "fees", feesPct: 0.5 },
@@ -205,7 +205,7 @@ function condInDomain(checker: number, value: number, pool: number): boolean {
   if (checker === 3) return value >= 1 && pool === 0;
   if (checker === 4) return value >= 1 && value <= 92_108;
   if (checker === 5) return Math.abs(value) < 887_272; // a Chainlink price level, like a pool's
-  if (checker === 8) return value === 1 && pool === 0; // the one registered "when" card
+  if (checker === 8) return value === 0 && pool === 0; // the position's own condition contract (its address is the order's)
   if (checker === 6) return value >= 1 && value <= 10_000 && pool === 0;
   if (checker === 7) return value >= 1 && pool === 0;
   return false;

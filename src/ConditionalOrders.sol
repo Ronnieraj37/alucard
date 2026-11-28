@@ -56,6 +56,7 @@ contract ConditionalOrders is IUnlockCallback {
     error BadMsgValue();
     error RefundFailed();
     error NothingOwed();
+    error BadCondition();
     error SlippageLimit();
 
     uint256 internal constant BPS = 10_000;
@@ -109,6 +110,8 @@ contract ConditionalOrders is IUnlockCallback {
         OrderState.Leg away;
         uint256 awayLower;
         uint256 awayUpper;
+        // the owner's own condition contract (IAlucardCondition), for sides of condition type 8; 0 = none
+        address condition;
     }
 
     /// @dev New rule for the live leg of an order. Its position and the other leg stay as they are.
@@ -118,6 +121,7 @@ contract ConditionalOrders is IUnlockCallback {
         uint8 maxSlippage;
         uint256 lower; // packed sides (Rules.encode)
         uint256 upper;
+        address condition; // the order's own condition contract (0 = none); applies to both legs
     }
 
     enum Op {
@@ -153,6 +157,9 @@ contract ConditionalOrders is IUnlockCallback {
     /// @dev When each side's condition was first seen true by `poke` (for a side with a hold): lower side in the low
     /// 32 bits, upper side in the high 32. 0 = not seen true yet.
     mapping(uint256 orderId => uint64) internal _armed;
+    /// @notice The contract an order's "own condition" sides ask (IAlucardCondition), set by its owner; 0 = none (no
+    /// storage used). Cleared on close.
+    mapping(uint256 orderId => address) public conditionOf;
     /// @notice Payouts that could not be sent, waiting for the owner to withdraw them.
     mapping(address owner => mapping(Currency currency => uint256 amount)) public owed;
 
@@ -182,6 +189,7 @@ contract ConditionalOrders is IUnlockCallback {
     event OrderClosed(uint256 indexed orderId);
     event OrderUpdated(uint256 indexed orderId, uint256 lowerState, uint256 upperState);
     event OrderPoked(uint256 indexed orderId, bool upper, uint256 state);
+    event ConditionSet(uint256 indexed orderId, address condition);
     event PayoutHeld(address indexed owner, Currency indexed currency, uint256 amount);
     event Withdrawn(address indexed owner, Currency indexed currency, address to, uint256 amount);
 
@@ -222,6 +230,7 @@ contract ConditionalOrders is IUnlockCallback {
         rules.checkSide(lo, false, poolIndex, OrderState.LEG_RANGE, p.away.kind != 0);
         rules.checkSide(up, true, poolIndex, OrderState.LEG_RANGE, p.away.kind != 0);
         if (_bothOff(st)) revert InvalidOrder();
+        if (p.condition != address(0)) _setCondition(orderId, p.condition);
 
         _start(poolIndex, st, p.tickLower, p.tickUpper);
         (lo, up) = _encode(st);
@@ -268,6 +277,7 @@ contract ConditionalOrders is IUnlockCallback {
         uint8 kind = twoLegs ? plan.here.kind : OrderState.LEG_RANGE;
         rules.checkSide(lo, false, o.poolIndex, kind, twoLegs);
         rules.checkSide(up, true, o.poolIndex, kind, twoLegs);
+        if (p.condition != conditionOf[orderId]) _setCondition(orderId, p.condition);
         if (twoLegs) {
             rules.checkLegs(o.poolIndex, plan.there, [lo, up, plan.thereLower, plan.thereUpper]);
             if (!_moves(lo) && !_moves(up)) revert InvalidOrder(); // the leg must keep a way to the other one
@@ -735,6 +745,7 @@ contract ConditionalOrders is IUnlockCallback {
         }
         delete _orders[orderId];
         delete _plans[orderId];
+        delete conditionOf[orderId];
         emit OrderClosed(orderId);
     }
 
@@ -815,6 +826,14 @@ contract ConditionalOrders is IUnlockCallback {
         plan.there = p.away;
         plan.thereLower = awayLo;
         plan.thereUpper = awayUp;
+    }
+
+    /// @dev Store (or clear, with 0) the order's own condition contract. Only orders that use one pay for the slot; the
+    /// app checks that a side asks for it (a side that asks without one simply never fires).
+    function _setCondition(uint256 orderId, address condition) internal {
+        if (condition != address(0) && condition.code.length == 0) revert BadCondition();
+        conditionOf[orderId] = condition;
+        emit ConditionSet(orderId, condition);
     }
 
     /// @dev Start a leg's sides: its range, the time they start from, and trailing prices.

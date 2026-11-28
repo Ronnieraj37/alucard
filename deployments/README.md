@@ -9,18 +9,18 @@ The app switches between them from the network menu in the header, and follows t
 
 | Contract | Address |
 |---|---|
-| ConditionalOrders (positions with a strategy) | [`0x225CE2a16dd09335E5116701AF5d1011488D179e`](https://sepolia.etherscan.io/address/0x225CE2a16dd09335E5116701AF5d1011488D179e) |
-| Rules (pool table, conditions, Chainlink check) | [`0xd57e8Db9E52c8C7a2d088027aab905cFF1f83e98`](https://sepolia.etherscan.io/address/0xd57e8Db9E52c8C7a2d088027aab905cFF1f83e98) |
-| RuleHook (hook: limit orders) | [`0x72a17aFf8abee41Cc3801858bD9B77c9c25a50C0`](https://sepolia.etherscan.io/address/0x72a17aFf8abee41Cc3801858bD9B77c9c25a50C0) |
-| PriceFeeds (token list, Chainlink USD feeds, 200-tick band, 50 for stablecoin pairs) | [`0x83cB2d2f61f1d5668973AD658779D9C83e083365`](https://sepolia.etherscan.io/address/0x83cB2d2f61f1d5668973AD658779D9C83e083365) |
-| "When" card #1: USDC below $0.99 (`DepegCondition`, an example) | [`0xBF6473be7a9Cde1817Ad7Fc615Fc9AC704f69C0d`](https://sepolia.etherscan.io/address/0xBF6473be7a9Cde1817Ad7Fc615Fc9AC704f69C0d) |
+| ConditionalOrders (positions with a strategy) | [`0xC239325252865b1BEEECBC08052D47bC3a3Bad83`](https://sepolia.etherscan.io/address/0xC239325252865b1BEEECBC08052D47bC3a3Bad83) |
+| Rules (pool table, conditions, Chainlink check) | [`0xC27fF2783C186aE380928b199D741222296dBA84`](https://sepolia.etherscan.io/address/0xC27fF2783C186aE380928b199D741222296dBA84) |
+| RuleHook (hook: limit orders) | [`0xA7dF334eFF77A458697e9fF72B8507d141bF90C0`](https://sepolia.etherscan.io/address/0xA7dF334eFF77A458697e9fF72B8507d141bF90C0) |
+| PriceFeeds (token list, Chainlink USD feeds, 200-tick band, 50 for stablecoin pairs) | [`0x20dE4fb4f59DDD3c52560dEb74eA73f86e76DF6d`](https://sepolia.etherscan.io/address/0x20dE4fb4f59DDD3c52560dEb74eA73f86e76DF6d) |
+| Example condition contract: yes while USDC is below $0.99 (`DepegCondition`) | [`0x304FD435A84366F1EFf1FC213F61C82E4bA8Dd56`](https://sepolia.etherscan.io/address/0x304FD435A84366F1EFf1FC213F61C82E4bA8Dd56) |
 | USDT mock feed ($1: no Chainlink USDT feed here) | [`0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4`](https://sepolia.etherscan.io/address/0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4) |
 | Uniswap v4 PoolManager | [`0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`](https://sepolia.etherscan.io/address/0xE03A1074c86CFeDd5C142C4F04F1a1536e203543) |
 | Uniswap v4 PositionManager | [`0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4`](https://sepolia.etherscan.io/address/0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4) |
 | Swap router (hookmate) | [`0xf13D190e9117920c703d79B5F33732e10049b115`](https://sepolia.etherscan.io/address/0xf13D190e9117920c703d79B5F33732e10049b115) |
 | Test faucet (`drip()`: every test token in one call) | [`0xE991cFD1A6EF2f42CdD2A1633a5605D5ea5d18fF`](https://sepolia.etherscan.io/address/0xE991cFD1A6EF2f42CdD2A1633a5605D5ea5d18fF) |
 
-Deployed from block 12231105. Test tokens (open mint, no value):
+Deployed from block 12231882. Test tokens (open mint, no value):
 
 | Token | Decimals | Address |
 |---|---|---|
@@ -46,18 +46,18 @@ Deployed from block 12231105. Test tokens (open mint, no value):
 
 | Contract | Address |
 |---|---|
-| ConditionalOrders (positions with a strategy) | [`0xAC8aD0C04B8eDc28be2f027D7e9aCb65f9c76d21`](https://sepolia.uniscan.xyz/address/0xAC8aD0C04B8eDc28be2f027D7e9aCb65f9c76d21) |
-| Rules (pool table, conditions, Chainlink check) | [`0xd1f76e4c009A2129e34Ab44093AB2f0C82AA0Dc8`](https://sepolia.uniscan.xyz/address/0xd1f76e4c009A2129e34Ab44093AB2f0C82AA0Dc8) |
-| RuleHook (hook: limit orders) | [`0x5Fcc28aaFa5864DaD180878788b4E34605ACD0C0`](https://sepolia.uniscan.xyz/address/0x5Fcc28aaFa5864DaD180878788b4E34605ACD0C0) |
-| PriceFeeds (token list, Chainlink USD feeds, 200-tick band, 50 for stablecoin pairs) | [`0x5177362B391742FfAb54dbBf142fCdb0f7318E15`](https://sepolia.uniscan.xyz/address/0x5177362B391742FfAb54dbBf142fCdb0f7318E15) |
-| "When" card #1: USDC below $0.99 (`DepegCondition`, an example) | [`0x016eBd821858b8102Fb7B5bA6c5f665Bae5d6ec2`](https://sepolia.uniscan.xyz/address/0x016eBd821858b8102Fb7B5bA6c5f665Bae5d6ec2) |
+| ConditionalOrders (positions with a strategy) | [`0x950a1a1BCb4807783255A7f47E1F99ae4928208b`](https://sepolia.uniscan.xyz/address/0x950a1a1BCb4807783255A7f47E1F99ae4928208b) |
+| Rules (pool table, conditions, Chainlink check) | [`0xE8ec6326D90148D09820b75Ea83d27C345c06ae5`](https://sepolia.uniscan.xyz/address/0xE8ec6326D90148D09820b75Ea83d27C345c06ae5) |
+| RuleHook (hook: limit orders) | [`0x965e49E4CD721367eB7BD7c63BF460C2eCcc10c0`](https://sepolia.uniscan.xyz/address/0x965e49E4CD721367eB7BD7c63BF460C2eCcc10c0) |
+| PriceFeeds (token list, Chainlink USD feeds, 200-tick band, 50 for stablecoin pairs) | [`0x3FffF954c2A03c2bDF58a726900c3fD8B534dB0E`](https://sepolia.uniscan.xyz/address/0x3FffF954c2A03c2bDF58a726900c3fD8B534dB0E) |
+| Example condition contract: yes while USDC is below $0.99 (`DepegCondition`) | [`0x7C33FEc5Fd0f7E33d143e6B8a8e744A5529c661A`](https://sepolia.uniscan.xyz/address/0x7C33FEc5Fd0f7E33d143e6B8a8e744A5529c661A) |
 | DAI mock feed ($1: no Chainlink DAI feed here) | [`0x95f9ACE4b9480B3712DF0A56013568693dDFe36E`](https://sepolia.uniscan.xyz/address/0x95f9ACE4b9480B3712DF0A56013568693dDFe36E) |
 | Uniswap v4 PoolManager | [`0x00B036B58a818B1BC34d502D3fE730Db729e62AC`](https://sepolia.uniscan.xyz/address/0x00B036B58a818B1BC34d502D3fE730Db729e62AC) |
 | Uniswap v4 PositionManager | [`0xf969Aee60879C54bAAed9F3eD26147Db216Fd664`](https://sepolia.uniscan.xyz/address/0xf969Aee60879C54bAAed9F3eD26147Db216Fd664) |
 | Swap router (hookmate) | [`0x9cD2b0a732dd5e023a5539921e0FD1c30E198Dba`](https://sepolia.uniscan.xyz/address/0x9cD2b0a732dd5e023a5539921e0FD1c30E198Dba) |
 | Test faucet (`drip()`: every test token in one call) | [`0x5BDF7BbA1EEb414A47761772c92F2c0F66F70746`](https://sepolia.uniscan.xyz/address/0x5BDF7BbA1EEb414A47761772c92F2c0F66F70746) |
 
-Deployed from block 69030334. Test tokens (open mint, no value):
+Deployed from block 69040236. Test tokens (open mint, no value):
 
 | Token | Decimals | Address |
 |---|---|---|
@@ -107,7 +107,7 @@ After a new deployment: `cd frontend && npm run sync`.
 `frontend/scripts/demo-orders.ts` on both chains, from the deployer's wallet (the app's "See live example positions"):
 #1 moves into USDT/USDC below the range and comes back once WETH is back in it, #2 holds USDC above the range and comes
 back centred on a 1% turn, #3 a stop loss confirmed for 15 minutes, #4 sends the fees out every 2 minutes, 3 times, #5 leaves if USDC loses its
-peg ("when" card #1, `src/examples/DepegCondition.sol`). Their
+peg (its own condition contract, `src/examples/DepegCondition.sol`). Their
 ranges are tight, so real ETH moves trigger them while the keeper runs (`npx tsx scripts/arb.ts --keep`, or the GitHub
 Actions keeper).
 

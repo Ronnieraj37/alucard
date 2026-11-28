@@ -25,7 +25,7 @@ export type Trigger = {
   trailPct?: number; // trail: how far the price turns back from its best
   feesPct?: number; // fees: fees earned, in % of the position
   aprPct?: number; // apr: the fee rate per year, in %
-  cardId?: number; // card: a "when" card's number in Rules (a contract that answers true or false)
+  contract?: string; // card: the position's own condition contract (IAlucardCondition: answers true or false)
   /** a way back "the price is back in my range": a price level at the range's edge (bufferPct inside it) */
   backIn?: boolean;
 };
@@ -247,7 +247,7 @@ function encodeTrigger(c: Ctx, laneId: LaneId, t: Trigger): Cond {
     return { checker: CHECK.LINK, value: Math.round(tickAtPrice(w, t.price ?? 0)), checkPool: pool(w) };
   }
   if (t.kind === "trail") return { checker: CHECK.TRAIL, value: ticksForMove(t.trailPct ?? 5, laneId === "up"), checkPool: pool(watchedBy(c.own, t, c.watch)) };
-  if (t.kind === "card") return { checker: CHECK.EXTERNAL, value: Math.round(t.cardId ?? 0), checkPool: 0 };
+  if (t.kind === "card") return { checker: CHECK.EXTERNAL, value: 0, checkPool: 0 }; // the address goes with the order
   if (t.kind === "fees") return { checker: CHECK.FEES, value: Math.round((t.feesPct ?? 1) * 100), checkPool: 0 };
   if (t.kind === "apr") return { checker: CHECK.APR, value: Math.round((t.aprPct ?? 5) * 100), checkPool: 0 };
   return { checker: CHECK.TIME, value: Math.max(1, Math.round((t.hours ?? 24) * 60)), checkPool: 0 };
@@ -429,7 +429,7 @@ function decodeTrigger(c: Ctx, laneId: LaneId, checker: number, value: number, c
     if (w && w.index !== c.watch.index) t.poolIndex = w.index; // follows a pool other than the one this leg watches
     return t;
   }
-  if (checker === CHECK.EXTERNAL) return { kind: "card", cardId: value };
+  if (checker === CHECK.EXTERNAL) return { kind: "card" }; // its address is the order's conditionOf (withCondition)
   if (checker === CHECK.FEES) return { kind: "fees", feesPct: value / 100 };
   if (checker === CHECK.APR) return { kind: "apr", aprPct: value / 100 };
   return { kind: "timer", hours: round2(value / 60) };
@@ -564,7 +564,6 @@ function triggerErrors(c: Ctx, laneId: LaneId, t: Trigger, which: string): strin
     const ok = t.trailPct! > 0 && (laneId === "up" || t.trailPct! < 100) && ticksForMove(t.trailPct!, laneId === "up") <= MAX_TRAIL_TICKS;
     if (!ok) e.push(`The trailing distance${which} must be above 0% (and a fall of less than 100%).`);
   }
-  if (t.kind === "card" && !(Number.isInteger(t.cardId) && t.cardId! >= 1 && t.cardId! < 8_388_608)) e.push(`Choose a registered “when” card${which}.`);
   if (t.kind === "fees" && !(Math.round((t.feesPct ?? 0) * 100) >= 1 && t.feesPct! <= 100)) e.push(`The fees earned${which} must be 0.01% to 100% of the position.`);
   if (t.kind === "apr" && !(Math.round((t.aprPct ?? 0) * 100) >= 1 && t.aprPct! * 100 < 8_388_608)) e.push(`Set the fee rate${which} (above 0% a year).`);
   if (c.idle && (t.kind === "leave" || t.kind === "fees" || t.kind === "apr")) e.push(`While waiting there is no position: this condition${which} cannot be used.`);
@@ -625,7 +624,7 @@ export type Validation = { down: string[]; up: string[]; general: string[]; back
 /** Every reason the contract would refuse this strategy, in plain words. `range` is the position's range (ticks). */
 export function validate(p: Pool, r: Rules, range?: [number, number], opts: { planLocked?: boolean } = {}): Validation {
   r = materialize(p, r, range);
-  const out: Validation = { down: [], up: [], general: [], backDown: [], backUp: [], plan: [], advice: [] };
+  const out: Validation = { down: [], up: [], general: [], backDown: [], backUp: [], plan: [], advice: conditionAdvice(r) };
   const hc = homeCtx(p, r.plan);
   out.down = laneErrors(hc, "down", r.down);
   out.up = laneErrors(hc, "up", r.up);
@@ -690,6 +689,39 @@ export function validate(p: Pool, r: Rules, range?: [number, number], opts: { pl
   return out;
 }
 
+// ---------------------------------------------------------------- the position's own condition contract
+
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const cardTriggers = (r: Rules): Trigger[] =>
+  [r.down, r.up, ...(r.plan ? [r.plan.back.down, r.plan.back.up] : [])].flatMap((l) => [l.trigger, l.trigger2]).filter((t): t is Trigger => t?.kind === "card");
+
+/** The contract the order's "own condition" sides ask (one per position), or undefined. */
+export const conditionOf = (r: Rules): `0x${string}` | undefined => {
+  const c = cardTriggers(r).find((t) => t.contract && ADDRESS.test(t.contract))?.contract;
+  return c as `0x${string}` | undefined;
+};
+
+/** Give every "own condition" side the order's contract (as read back from the chain). */
+export function withCondition(r: Rules, address?: string): Rules {
+  if (!address || /^0x0{40}$/.test(address)) return r;
+  const fix = (l: Lane): Lane => ({
+    ...l,
+    trigger: l.trigger?.kind === "card" ? { ...l.trigger, contract: address } : l.trigger,
+    trigger2: l.trigger2?.kind === "card" ? { ...l.trigger2, contract: address } : l.trigger2,
+  });
+  return { ...r, down: fix(r.down), up: fix(r.up), plan: r.plan ? { ...r.plan, back: { down: fix(r.plan.back.down), up: fix(r.plan.back.up) } } : r.plan };
+}
+
+/** What the contract accepts but would not work as meant: an own-condition side with no contract, or two contracts. */
+function conditionAdvice(r: Rules): string[] {
+  const cards = cardTriggers(r);
+  if (!cards.length) return [];
+  if (cards.some((t) => !t.contract || !ADDRESS.test(t.contract))) return ["Paste the address of your condition contract."];
+  if (new Set(cards.map((t) => t.contract!.toLowerCase())).size > 1)
+    return ["A position has one condition contract: use the same address on every side (it is told which side asks)."];
+  return [];
+}
+
 export const isValid = (v: Validation) => Object.values(v).every((x) => x.length === 0);
 /** Only what the contract itself would refuse (the parity test's notion of "the editor can build it"). */
 export const contractValid = (v: Validation) => Object.entries(v).every(([k, x]) => k === "advice" || x.length === 0);
@@ -740,7 +772,7 @@ export function describeTrigger(p: Pool, id: LaneId, t: Trigger): string {
     case "timer":
       return `every ${every(t.hours ?? 24)}`;
     case "card":
-      return `card #${t.cardId ?? "?"} says yes`;
+      return t.contract ? `my contract ${t.contract.slice(0, 6)}…${t.contract.slice(-4)} says yes` : "my contract says yes";
   }
 }
 
@@ -999,11 +1031,21 @@ export function createParams(
     away: enc.away,
     awayLower: enc.awayLower,
     awayUpper: enc.awayUpper,
+    condition: conditionOf(r) ?? ZERO_ADDRESS,
   };
 }
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 
 /** The argument of ConditionalOrders.updateOrder: new rules for the live leg. */
 export function updateParams(home: Pool, r: Rules, liveIsHome: boolean, adv: Advanced, range?: [number, number]) {
   const enc = encodeLive(home, r, liveIsHome, range);
-  return { expiry: expiryOf(adv), keeperFeeBps: Math.min(100, Math.max(0, Math.round(adv.keeperFeeBps))), maxSlippage: slippageOf(adv), lower: enc.lower, upper: enc.upper };
+  return {
+    expiry: expiryOf(adv),
+    keeperFeeBps: Math.min(100, Math.max(0, Math.round(adv.keeperFeeBps))),
+    maxSlippage: slippageOf(adv),
+    lower: enc.lower,
+    upper: enc.upper,
+    condition: conditionOf(r) ?? ZERO_ADDRESS,
+  };
 }

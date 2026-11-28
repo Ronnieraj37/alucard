@@ -50,23 +50,28 @@ contract WritingCard {
     }
 }
 
-/// @notice "When" cards: a contract anyone writes, answering true or false.
+/// @notice An order's own condition: a contract its owner pastes in, answering true or false.
 contract ConditionsTest is RuleSetup {
     SwitchCard card;
-    uint24 id;
 
     function setUp() public override {
         super.setUp();
         card = new SwitchCard();
-        id = rules.registerCondition(address(card));
     }
 
-    function _cardSide(uint24 cardId) internal pure returns (OrderState.Side memory) {
-        return _exit(OrderState.CHECK_EXTERNAL, int24(cardId));
+    function _own() internal pure returns (OrderState.Side memory) {
+        return _exit(OrderState.CHECK_EXTERNAL, 0);
     }
 
-    function test_aCardDecidesWhen() public {
-        uint256 orderId = _create(_cardSide(id), _off());
+    function _withCondition(OrderState.Side memory lower, address condition) internal returns (uint256) {
+        ConditionalOrders.CreateParams memory p = _params(lower, _off());
+        p.condition = condition;
+        return _submit(alice, p);
+    }
+
+    function test_theContractDecidesWhen() public {
+        uint256 orderId = _withCondition(_own(), address(card));
+        assertEq(orders.conditionOf(orderId), address(card));
         _wait(2 minutes);
         assertFalse(rules.canExecute(orders, orderId, false));
         vm.expectRevert(ConditionalOrders.ConditionNotMet.selector);
@@ -75,14 +80,15 @@ contract ConditionsTest is RuleSetup {
         assertTrue(rules.canExecute(orders, orderId, false));
         _run(orderId, false);
         assertEq(orders.getOrder(orderId).owner, address(0));
+        assertEq(orders.conditionOf(orderId), address(0)); // cleared when the order closes
     }
 
-    function test_aCardCombinesWithAnd() public {
-        OrderState.Side memory low = _cardSide(id);
+    function test_itCombinesWithAnd() public {
+        OrderState.Side memory low = _own();
         low.combine = OrderState.COMBINE_AND;
         low.checker2 = OrderState.CHECK_TIME;
         low.value2 = 60; // and an hour has passed
-        uint256 orderId = _create(low, _off());
+        uint256 orderId = _withCondition(low, address(card));
         card.set(true);
         _wait(2 minutes);
         assertFalse(rules.canExecute(orders, orderId, false));
@@ -90,29 +96,49 @@ contract ConditionsTest is RuleSetup {
         assertTrue(rules.canExecute(orders, orderId, false));
     }
 
-    function test_misbehavingCardsNeverFire() public {
+    function test_misbehavingContractsNeverFire() public {
         address[4] memory bad = [address(new RevertingCard()), address(new GasHogCard()), address(new JunkCard()), address(new WritingCard())];
         for (uint256 i; i < bad.length; ++i) {
-            uint256 orderId = _create(_cardSide(rules.registerCondition(bad[i])), _off());
+            uint256 orderId = _withCondition(_own(), bad[i]);
             _wait(2 minutes);
             assertFalse(rules.canExecute(orders, orderId, false));
         }
     }
 
-    function test_registering() public {
-        assertEq(rules.registerCondition(address(card)), id); // once per contract
-        assertEq(rules.conditionAt(id), address(card));
-        vm.expectRevert(Rules.NotAContract.selector);
-        rules.registerCondition(makeAddr("nobody"));
-        // an order can only name a registered card
+    function test_theAddressMustBeAContract() public {
+        ConditionalOrders.CreateParams memory p = _params(_own(), _off());
+        p.condition = makeAddr("nobody");
         vm.prank(alice);
-        vm.expectRevert(Rules.InvalidSide.selector);
-        orders.createOrder(_params(_cardSide(id + 1), _off()));
+        vm.expectRevert(ConditionalOrders.BadCondition.selector);
+        orders.createOrder(p);
     }
 
-    function test_theExampleDepegCard() public {
+    /// No address, no storage: a side that asks for its own condition without one simply never fires.
+    function test_noAddressNeverFires() public {
+        uint256 orderId = _create(_own(), _off());
+        assertEq(orders.conditionOf(orderId), address(0));
+        _wait(2 minutes);
+        assertFalse(rules.canExecute(orders, orderId, false));
+    }
+
+    function test_theOwnerCanChangeIt() public {
+        uint256 orderId = _withCondition(_own(), address(card));
+        SwitchCard other = new SwitchCard();
+        other.set(true);
+        ConditionalOrders.Order memory o = orders.getOrder(orderId);
+        ConditionalOrders.UpdateParams memory u = ConditionalOrders.UpdateParams({
+            expiry: o.expiry, keeperFeeBps: o.keeperFeeBps, maxSlippage: o.maxSlippage, lower: _w(_own()), upper: 0, condition: address(other)
+        });
+        vm.prank(alice);
+        orders.updateOrder(orderId, u);
+        assertEq(orders.conditionOf(orderId), address(other));
+        _wait(2 minutes);
+        assertTrue(rules.canExecute(orders, orderId, false));
+    }
+
+    function test_theExampleDepegContract() public {
         DepegCondition depeg = new DepegCondition(address(feed1), 0.99e8, 1 days); // token1's feed reads $1
-        uint256 orderId = _create(_cardSide(rules.registerCondition(address(depeg))), _off());
+        uint256 orderId = _withCondition(_own(), address(depeg));
         _wait(2 minutes);
         assertFalse(rules.canExecute(orders, orderId, false));
         feed1.setAnswer(0.985e8); // token1 loses its peg

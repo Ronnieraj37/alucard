@@ -7,10 +7,10 @@ interface IFeed {
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80);
 }
 
-/// @title An example "when" card: a stablecoin loses its peg
+/// @title An example condition contract: a stablecoin loses its peg
 /// @notice True while a Chainlink USD feed reads below `threshold` (in the feed's decimals) with a fresh answer, e.g.
-/// "USDC below $0.99: leave the pool". It ignores which order asks, so one card serves everyone. Copy it to write your
-/// own: any view logic that returns a bool.
+/// "USDC below $0.99: leave the pool". It ignores which order asks, so one deployment serves everyone. Copy it to
+/// write your own: any view logic that returns a bool.
 contract DepegCondition is IAlucardCondition {
     IFeed public immutable feed;
     int256 public immutable threshold;

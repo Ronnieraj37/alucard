@@ -64,8 +64,8 @@ in tight ranges, so real ETH moves trigger them while the bot runs.
 ```bash
 set -a; source .env; set +a
 PM=0xE03A1074c86CFeDd5C142C4F04F1a1536e203543
-FEEDS=0x83cB2d2f61f1d5668973AD658779D9C83e083365; HOOK=0x72a17aFf8abee41Cc3801858bD9B77c9c25a50C0
-RULES=0xd57e8Db9E52c8C7a2d088027aab905cFF1f83e98; ORDERS=0x225CE2a16dd09335E5116701AF5d1011488D179e
+FEEDS=0x20dE4fb4f59DDD3c52560dEb74eA73f86e76DF6d; HOOK=0xA7dF334eFF77A458697e9fF72B8507d141bF90C0
+RULES=0xC27fF2783C186aE380928b199D741222296dBA84; ORDERS=0xC239325252865b1BEEECBC08052D47bC3a3Bad83
 forge verify-contract --chain sepolia --watch $FEEDS src/PriceFeeds.sol:PriceFeeds \
   --constructor-args $(cast abi-encode "constructor(address)" $(cast wallet address --private-key $PRIVATE_KEY))
 forge verify-contract --chain sepolia --watch $HOOK src/RuleHook.sol:RuleHook \
@@ -164,7 +164,8 @@ removing a listed one is announced with `queueFeed(token, aggregator, maxAge)` (
 `02_DeployCore`, which then calls `lockBands`: from then on every change is announced with `queueBand` / `queueSequencer`
 and applied two days later. `transferOwnership` then `acceptOwnership` hands the list over.
 
-Earlier deployments (their orders can be cancelled there): before "when" cards, ConditionalOrders `0x9909261057eE2165aA9a2317b960Aa51812D04B3` on
+Earlier deployments (their orders can be cancelled there): with the card table, ConditionalOrders `0x225CE2a16dd09335E5116701AF5d1011488D179e` on
+Sepolia and `0xAC8aD0C04B8eDc28be2f027D7e9aCb65f9c76d21` on Unichain Sepolia; before own condition contracts, ConditionalOrders `0x9909261057eE2165aA9a2317b960Aa51812D04B3` on
 Sepolia and `0x718221B1f8433927b3aAF2BcC3c6Eb092a1a1FD2` on Unichain Sepolia; before the 2026-11-28 guard update, ConditionalOrders
 `0xa653D69C934B431431C11e55a59bbf69e524Db3c` on Sepolia and `0xb190f93B9511B40c12F068b9bdd2d392aBAC3FBD` on Unichain
 Sepolia; on Sepolia also `0x6CD66E4c91635E2C7705fa2CE61Ac6df24cb12d3` (before the 2026-11-27 review fixes), `0xfCde70E4Ec35C79CD025306ff26AE1dEfFe72408` (average-price version), `0x05c6f35e2F12eFc54F26b26CE16A6226Ac74B6bC`; v1

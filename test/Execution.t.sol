@@ -48,7 +48,8 @@ contract ExecutionTest is RuleSetup {
             keeperFeeBps: 50,
             maxSlippage: 20,
             lower: _w(_exit(OrderState.CHECK_TICK, -900)),
-            upper: _w(_exit(OrderState.CHECK_EDGE, 0))
+            upper: _w(_exit(OrderState.CHECK_EDGE, 0)),
+            condition: address(0)
         });
         vm.prank(alice);
         orders.updateOrder(id, u);

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-/// @title A "when" card: a condition anyone can write
-/// @notice Register the contract with `Rules.registerCondition` to get its card number, then use it in a strategy as
-/// condition type 8 (CHECK_EXTERNAL). Rules calls `isMet` read-only (staticcall) with at most 200,000 gas. Only a clean
+/// @title Your own condition: a contract anyone can write
+/// @notice An order's owner gives its address with the order (ConditionalOrders `condition`), and the order's sides use
+/// it as condition type 8 (CHECK_EXTERNAL). Rules calls `isMet` read-only (staticcall) with at most 200,000 gas. Only a clean
 /// `true` counts: a revert, running out of gas, or any other answer means "not now", so the step does not run.
 /// The card only decides WHEN. What the step does, and every guard on it, stays with the vault.
 interface IAlucardCondition {

@@ -206,7 +206,7 @@ const USES = [
   { when: "ETH rises 10%", then: "Take 25% profit, then again every 5% higher, four times.", tag: "Take profit in steps" },
   { when: "ETH falls 8% from its best", then: "Withdraw everything and sell to USDC.", tag: "Trailing stop" },
   { when: "a day has passed", then: "Put the fees earned back into the position.", tag: "Compound" },
-  { when: "my own contract says so", then: "Any logic you write, a depeg or volatility, as a “when” card. It decides when; the vault does the rest.", tag: "Your own condition" },
+  { when: "my own contract says so", then: "Paste any contract that answers yes or no: a depeg, volatility, any logic. It decides when; the vault does the rest.", tag: "Your own condition" },
 ];
 
 function Uses() {
@@ -525,7 +525,7 @@ function Proof() {
     [43554, "", "strategy shapes where the editor and the contract agree"],
     [2000, "", "random orders where the backtest fires at the same swaps as the contract"],
     [2000, "", "of them end within 0.1% of the contract’s money (on the strategies that test covers)"],
-    [159, "", "contract tests, fuzz included, all passing"],
+    [161, "", "contract tests, fuzz included, all passing"],
   ];
   return (
     <section className="n-sec">

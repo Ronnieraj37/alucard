@@ -1227,7 +1227,7 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
             "if that happens often, your position is large next to the pool, so raise the slippage.",
             "Your own swaps do not move later prices in the replay, and they use the pool's liquidity at that moment.",
         ] + ([
-            "A side that uses your own “when” card (a contract) is not replayed: the replay cannot run its code on history, so "
+            "A side that uses your own condition contract is not replayed: the replay cannot run its code on history, so "
             "that condition is never true here.",
         ] if any(x.checker == CHECK_EXTERNAL or x.checker2 == CHECK_EXTERNAL for x in list(created.values())) else []) + [
             "Fees assume your position is small next to the pool.",
