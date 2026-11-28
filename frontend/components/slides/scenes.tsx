@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { type CSSProperties, type ReactNode } from "react";
 import Movement from "@/components/watch/Movement";
 import { DEPLOYMENT as deployment, explorerAddress } from "@/lib/chain";
 import { SIM, tokensAt } from "./sim";
@@ -25,52 +25,6 @@ function Head({ eyebrow, title, width = 1600 }: { eyebrow: string; title: ReactN
   );
 }
 
-function Run({
-  p,
-  playing,
-  play,
-  stop,
-  seek,
-}: {
-  p: number;
-  playing: boolean;
-  play: (from?: number) => void;
-  stop: () => void;
-  seek: (v: number) => void;
-}) {
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement;
-      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA") return;
-      if (e.key !== "p" && e.key !== "P") return;
-      e.preventDefault();
-      if (playing) stop();
-      else play();
-    };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, [playing, play, stop]);
-
-  const ended = !playing && p >= 0.999;
-  const label = playing ? "Pause" : ended ? "Replay" : "Play";
-  const onScrub = (e: ReactMouseEvent<HTMLButtonElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    seek(clamp((e.clientX - r.left) / r.width));
-  };
-
-  return (
-    <div className="run">
-      <button type="button" className="run-btn" onClick={() => (playing ? stop() : play())} aria-pressed={playing}>
-        {label}
-        <span>P</span>
-      </button>
-      <button type="button" className="run-track" onClick={onScrub} aria-label="Move through this slide">
-        <i style={{ width: `${p * 100}%` }} />
-      </button>
-    </div>
-  );
-}
 
 function Count({ to, dp = 0, prefix = "", suffix = "", delay = 0, duration = 1400 }: { to: number; dp?: number; prefix?: string; suffix?: string; delay?: number; duration?: number }) {
   const v = useCount(to, delay, duration);
@@ -94,7 +48,7 @@ function Cover() {
           Alucard
         </h1>
         <p className="s-lead in" style={{ ...d(260), maxWidth: 820 }}>
-          A Uniswap position has no settings. Alucard gives it your rules: exit, park in another pool and come back, re-range, take profit, leave when fees dry up. It runs on-chain while you’re away.
+          Your Uniswap position, with your rules. It runs on-chain while you’re away.
         </p>
         <div className="cv-tags in" style={d(420)}>
           {["Uniswap v4", "Any pool, Chainlink-checked", "Live on Sepolia and Unichain"].map((t) => (
@@ -108,6 +62,131 @@ function Cover() {
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ main deck: short slides */
+
+function Problem() {
+  const items = [
+    ["$0", "in fees, out of range"],
+    ["100%", "in the token that fell"],
+    ["24/7", "someone has to watch"],
+  ];
+  return (
+    <>
+      <Head eyebrow="The problem" title="A Uniswap position has no settings." />
+      <div className="pb">
+        <p className="num pb-big in" style={d(250)}>
+          <Count to={29.4} dp={1} suffix="%" delay={250} />
+        </p>
+        <p className="s-lead pb-cap in" style={d(400)}>
+          of concentrated liquidity sits out of range, earning nothing
+        </p>
+      </div>
+      <div className="tri">
+        {items.map(([n, t], k) => (
+          <div key={n} className="in" style={d(700 + k * 140)}>
+            <p className="num tri-n">{n}</p>
+            <p className="s-lead">{t}</p>
+          </div>
+        ))}
+      </div>
+      <p className="s-small in" style={{ ...d(1200), marginTop: "auto" }}>
+        Dune, Jan–Jun 2026, via The Block
+      </p>
+    </>
+  );
+}
+
+const IDEA = [
+  { tag: "Move and return", when: "ETH falls out of my range", then: "Park it in USDT/USDC. Bring it back when ETH recovers." },
+  { tag: "Leave when fees dry up", when: "fees earn less than 10% a year", then: "Take my liquidity out." },
+  { tag: "Your own condition", when: "my contract says yes", then: "Anything you can write: a depeg, volatility." },
+];
+
+function Idea() {
+  return (
+    <>
+      <Head eyebrow="Alucard" title="If this happens, do that." />
+      <div className="us-grid three">
+        {IDEA.map((u, k) => (
+          <div key={u.tag} className="us-card in" style={d(260 + k * 140)}>
+            <p className="us-tag">{u.tag}</p>
+            <p className="us-when">
+              <span>If</span> {u.when},
+            </p>
+            <p className="us-then">{u.then}</p>
+          </div>
+        ))}
+      </div>
+      <p className="s-lead in" style={{ ...d(900), marginTop: 56 }}>
+        Re-range, take profit, trailing stops, compound: any mix, on both sides.
+      </p>
+    </>
+  );
+}
+
+function Safe() {
+  const rows = [
+    ["A push past 2% does nothing.", "Prices count only near Chainlink."],
+    ["No step sells into a push.", "Every swap fills within your slippage, or waits."],
+    ["Nobody can act on the spot.", "Admin changes wait two days. Cancel always works."],
+  ];
+  return (
+    <>
+      <Head eyebrow="Safe by design" title="Attacked on paper. Every attack is a test it passes." />
+      <div className="sf">
+        {rows.map(([h, t], k) => (
+          <div key={h} className="sf-row in" style={d(300 + k * 180)}>
+            <h3>{h}</h3>
+            <p>{t}</p>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function Proof() {
+  const nums: [number, string, string][] = [
+    [48181, "", "strategy shapes: the builder and the contract agree on every one"],
+    [0.1, "%", "the replay on real swaps matches the contract’s money, within"],
+    [161, "", "contract tests, attacks included"],
+  ];
+  return (
+    <>
+      <Head eyebrow="Built" title="Live on Sepolia and Unichain." />
+      <div className="tri pr">
+        {nums.map(([n, sfx, t], k) => (
+          <div key={t} className="in" style={d(300 + k * 160)}>
+            <p className={`num tri-n ${k === 0 ? "ruby" : ""}`}>
+              <Count to={n} dp={n < 1 ? 1 : 0} suffix={sfx} delay={300 + k * 160} />
+            </p>
+            <p className="s-lead">{t}</p>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function Next() {
+  const items = ["An audit, then mainnet", "Bring the positions you already hold", "A gallery of strategies, ranked by their replays"];
+  return (
+    <>
+      <Head eyebrow="What’s next" title="From testnet to every LP." />
+      <div className="nx2">
+        {items.map((t, k) => (
+          <p key={t} className="nx2-row in" style={d(300 + k * 160)}>
+            <span className="num">{k + 1}</span>
+            {t}
+          </p>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ backup: the detail, for questions */
 
 /* ------------------------------------------------------------------ 2 · idle liquidity */
 
@@ -293,8 +372,6 @@ function Uses() {
 /* ------------------------------------------------------------------ 4 · build a strategy */
 
 type StLine = { side: "down" | "up"; k: string; title: string; sub: string; at: number };
-type StChoice = { label: string; hint: string; off?: boolean };
-type StOffer = { at: number; until: number; title: string; pick: number; options: StChoice[] };
 
 const ST_LINES: StLine[] = [
   { side: "down", k: "When", title: "Leaves my range", sub: "WETH leaves the range below", at: 0.18 },
@@ -305,52 +382,6 @@ const ST_LINES: StLine[] = [
   { side: "up", k: "Again", title: "At most four times", sub: "The price steps 5% further each time", at: 0.86 },
 ];
 
-const ST_OFFERS: StOffer[] = [
-  {
-    at: 0.04,
-    until: 0.18,
-    title: "If it falls — when",
-    pick: 0,
-    options: [
-      { label: "Leaves the range below", hint: "As soon as the price is out" },
-      { label: "Drops below a price", hint: "A USDC price you choose" },
-      { label: "Falls from its high", hint: "A trailing stop" },
-    ],
-  },
-  {
-    at: 0.24,
-    until: 0.4,
-    title: "Then",
-    pick: 0,
-    options: [
-      { label: "Move to another pool", hint: "Any pool sharing a token, and it comes back" },
-      { label: "Withdraw everything", hint: "To your wallet" },
-      { label: "Swap to USDC", hint: "Never worse than the slippage limit" },
-    ],
-  },
-  {
-    at: 0.56,
-    until: 0.68,
-    title: "If it rises — when",
-    pick: 0,
-    options: [
-      { label: "Rises above a price", hint: "A USDC price you choose" },
-      { label: "Leaves the range above", hint: "As soon as the price is out" },
-      { label: "Rises from its low", hint: "Waits for the turn" },
-    ],
-  },
-  {
-    at: 0.9,
-    until: 1.01,
-    title: "Then also — one does not fit",
-    pick: -1,
-    options: [
-      { label: "Swap it to USDC", hint: "Never worse than the slippage limit" },
-      { label: "Send the fees out", hint: "To your wallet, instead of keeping them in" },
-      { label: "Follow the price", hint: "Not here. A repeating price cannot step if the range follows it.", off: true },
-    ],
-  },
-];
 
 function Side({ name, lines }: { name: string; lines: StLine[] }) {
   return (
@@ -370,48 +401,21 @@ function Side({ name, lines }: { name: string; lines: StLine[] }) {
   );
 }
 
-function Build() {
-  const clock = useTimeline(32000, { loop: false, delay: 400, rest: 1 });
-  const { p } = clock;
-  const down = ST_LINES.filter((l) => l.side === "down" && p >= l.at);
-  const up = ST_LINES.filter((l) => l.side === "up" && p >= l.at);
-  const offer = ST_OFFERS.find((o) => p >= o.at && p < o.until);
-  const picked = offer && offer.pick >= 0 && p >= offer.until - 0.03 ? offer.pick : -1;
-  const falls = p >= 0.5;
-  const rises = p >= 0.86;
+function Build({ step }: { step: number }) {
+  const down = step >= 1 ? ST_LINES.filter((l) => l.side === "down") : [];
+  const up = step >= 2 ? ST_LINES.filter((l) => l.side === "up") : [];
   return (
     <>
-      <Head eyebrow="Build a strategy" title="Two sides. Only what fits." />
+      <Head eyebrow="Build it" title="Two sides. Pick what should happen." />
       <div className="st">
         <Side name="If WETH falls" lines={down} />
         <Side name="If WETH rises" lines={up} />
-        <div className="st-offer" key={offer ? offer.title : "words"}>
-          {offer ? (
-            <>
-              <p className="st-offer-h">{offer.title}</p>
-              <div className="st-opts">
-                {offer.options.map((o, k) => (
-                  <div key={o.label} className={`st-opt ${o.off ? "off" : ""} ${picked === k ? "pick" : ""}`}>
-                    <span className={`st-mark ${picked === k ? "on" : ""}`} />
-                    <span>
-                      <h3>{o.label}</h3>
-                      <p>{o.hint}</p>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <p className="st-words">
-              <b>If it falls. </b>
-              {falls ? "When WETH leaves the range, the money moves into USDT / USDC and comes back into the same range." : "Nothing yet."}
-              <b> If it rises. </b>
-              {rises ? "Above 1,790 USDC, withdraw 25%, up to four times." : "Nothing yet."}
-            </p>
-          )}
-        </div>
+        <p className="st-words in" key={step}>
+          {step === 0 && "Cards, or one sentence to the assistant. The builder only offers what fits."}
+          {step === 1 && "Falls out of range: move into USDT/USDC, come back when WETH is back."}
+          {step >= 2 && "Rises: take 25% profit, up to four times. That is the whole strategy."}
+        </p>
       </div>
-      <Run {...clock} />
     </>
   );
 }
@@ -458,17 +462,15 @@ const PS_STEPS = [
   { at: 0.72, badge: "● In range", tone: "ok", line: "In range, earning fees. Watching: WETH leaves my range below.", price: 1701, down: "Watching (ready for next time)", back: "Ran 1 min ago: back into the same range" },
 ];
 
-function Position() {
-  const { p } = useTimeline(14000, { loop: true, delay: 600, rest: 0.4 });
-  const k = PS_STEPS.reduce((acc, x, i) => (p >= x.at ? i : acc), 0);
-  const st = PS_STEPS[k];
+function Position({ step }: { step: number }) {
+  const st = PS_STEPS[Math.min(step, PS_STEPS.length - 1)];
   const lo = 1686;
   const hi = 1727;
   const x = (v: number) => ((v - 1620) / (1760 - 1620)) * 100;
   return (
     <>
-      <Head eyebrow="Your position, at a glance" title="Always know what it does, and what comes next." />
-      <div className="ps">
+      <Head eyebrow="Your position" title="Always know what it does, and what comes next." />
+      <div className="ps solo">
         <div className="ps-card in" style={d(200)}>
           <div className="ps-top">
             <span className="ps-pair">WETH / USDC · 0.3%</span>
@@ -484,29 +486,13 @@ function Position() {
           <div className="ps-rows">
             <div>
               <span>If WETH falls · move into USDT/USDC</span>
-              <b className={k === 1 ? "go" : ""}>{st.down}</b>
+              <b className={step === 1 ? "go" : ""}>{st.down}</b>
             </div>
             <div>
               <span>Way back · when WETH is back in my range</span>
               <b>{st.back}</b>
             </div>
-            <div>
-              <span>If a step must wait</span>
-              <b className="dim">It says why: “its swap cannot sell within your slippage”</b>
-            </div>
           </div>
-        </div>
-        <div className="ps-facts">
-          {[
-            ["One line says it all", "In range and earning, out of range, moved and where, holding: the status reads like a sentence."],
-            ["Every side, in plain words", "What it watches, whether it is ready, when it last ran, and why it waits, if it does."],
-            ["Before you commit", "Replay the same strategy on real mainnet swaps, against holding and against no strategy."],
-          ].map(([h, t], i) => (
-            <div key={h} className="fact in" style={d(420 + i * 140)}>
-              <h3>{h}</h3>
-              <p>{t}</p>
-            </div>
-          ))}
         </div>
       </div>
     </>
@@ -659,32 +645,16 @@ function How() {
 /* ------------------------------------------------------------------ 7b · your own condition */
 
 function Cards() {
-  const facts = [
-    ["It only decides when", "What the step does, and every guard on it, stays with the vault. A card cannot move money."],
-    ["Read-only, gas-capped", "Called with staticcall and 200,000 gas. Only a clean true counts; anything else is “not now”."],
-    ["Just paste an address", "No registry: the order keeps one address, only if it uses one. Example: a USDC depeg alarm."],
-  ];
   return (
     <>
-      <Head eyebrow="Bring your own WHEN" title="Any contract that says true or false can decide." />
-      <div className="cd">
-        <pre className="cd-code in" style={d(250)}>{`interface IAlucardCondition {
-  /// true = the step may run now
-  function isMet(
-    address vault,
-    uint256 orderId,
-    bool upper
-  ) external view returns (bool);
+      <Head eyebrow="Your own condition" title="Anything that answers yes or no." />
+      <pre className="cd-code solo in" style={d(250)}>{`interface IAlucardCondition {
+  function isMet(address vault, uint256 orderId, bool upper)
+    external view returns (bool);
 }`}</pre>
-        <div className="cd-facts">
-          {facts.map(([h, t], k) => (
-            <div key={h} className="fact in" style={d(420 + k * 140)}>
-              <h3>{h}</h3>
-              <p>{t}</p>
-            </div>
-          ))}
-        </div>
-      </div>
+      <p className="s-lead in" style={{ ...d(500), marginTop: 48 }}>
+        Paste its address. It only decides <b>when</b>; it can’t touch your money.
+      </p>
     </>
   );
 }
@@ -756,31 +726,6 @@ function Built() {
   );
 }
 
-/* ------------------------------------------------------------------ 9 · now */
-
-function Now() {
-  const steps = [
-    ["Audit and mainnet", "An external audit, then Unichain and Ethereum mainnet"],
-    ["Bring your positions", "Move a v3 or v4 position you already hold into a strategy"],
-    ["A strategy gallery", "Share strategies and conditions, ranked by their replays in rising, falling and sideways markets"],
-    ["Moves with two swaps", "Between pools with no token in common, and into lending vaults"],
-  ];
-  return (
-    <>
-      <Head eyebrow="What’s next" title="More options, for every LP’s own strategy." />
-      <div className="steps">
-        <div className="steps-line" />
-        {steps.map(([h, s], k) => (
-          <div key={h} className="step in" style={d(300 + k * 200)}>
-            <p className="step-n num">{k + 1}</p>
-            <h3>{h}</h3>
-            <p>{s}</p>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
 
 /* ------------------------------------------------------------------ 11 · close */
 
@@ -809,7 +754,17 @@ function Close() {
 
 /* ------------------------------------------------------------------ the deck */
 
-export type Slide = { id: string; title: string; theme: "paper" | "enamel" | "night"; C: () => ReactNode; notes: string };
+export type Slide = {
+  id: string;
+  title: string;
+  theme: "paper" | "enamel" | "night";
+  C: (p: { step: number }) => ReactNode;
+  notes: string;
+  /** parts revealed one click at a time */
+  steps?: number;
+  /** after the close: for questions */
+  backup?: boolean;
+};
 
 export const SLIDES: Slide[] = [
   {
@@ -817,91 +772,65 @@ export const SLIDES: Slide[] = [
     title: "Alucard",
     theme: "enamel",
     C: Cover,
-    notes: "Hi, I’m Roshan. Alucard lets a liquidity provider put their own rules on a Uniswap v4 position: when to exit, when to move the range, when to compound. Those rules run on-chain without anyone watching. It’s live on Sepolia today.",
+    notes: "Hi, I’m Roshan. This is Alucard: your Uniswap position, with your own rules, running on-chain while you’re away.",
   },
   {
-    id: "idle",
+    id: "problem",
     title: "The problem",
-    theme: "paper",
-    C: Idle,
-    notes: "A 2026 Dune study looked at concentrated liquidity across seven chains. In a typical week only about 14% of it was used by trades. 57% sat in range but untouched, and close to a third was out of range, earning nothing. Almost half of the out-of-range money stayed untouched for 90 days, and most of it belongs to individual wallets, not managers. Those are the people Alucard is for.",
-  },
-  {
-    id: "trap",
-    title: "Why out of range hurts",
     theme: "night",
-    C: Trap,
-    notes: "Concentrated liquidity has a trap. Once the price leaves your range you earn nothing, but the pool has already converted your whole position into the token that fell, so you keep taking the full drop. Nothing gets you out unless you watch the price and act yourself, day and night. That’s the job Alucard does. Alucard does not pick a strategy, and it does not claim one beats holding.",
+    C: Problem,
+    notes: "When you provide liquidity on Uniswap, there is nothing to set. If the price leaves your range, you stop earning, and the pool has already turned your whole position into the token that fell. Nothing happens unless you are watching. And it is common: in the first half of 2026, about 30% of concentrated liquidity sat out of range, earning nothing.",
   },
   {
-    id: "uses",
-    title: "What you can tell it",
+    id: "idea",
+    title: "The idea",
     theme: "night",
-    C: Uses,
-    notes: "So what does a rule look like? In Uniswap today, once you add liquidity there is nothing to configure. With Alucard: if ETH falls out of my range, park the money in the USDT/USDC pool and bring it back when ETH recovers. If it leaves my range, re-range. Fee rates swing a lot, so you can make them a trigger: if the APR drops below 10%, take my liquidity out. Take profit in steps on the way up, a trailing stop on the way down, and ignore quick wicks with a hold. Other tools give you a few of these as fixed buttons; here you combine them however you want.",
-  },
-  {
-    id: "fixes",
-    title: "Every problem, fixed",
-    theme: "paper",
-    C: Fixes,
-    notes: "Here is what goes wrong for a liquidity provider today, and what Alucard does about each. Out of range, the position earns nothing: it leaves, re-ranges, or parks in another pool and comes back, by your rules. It ends up all in the token that fell: it can swap to a stablecoin or move into a stable pool the moment it leaves. Someone has to watch day and night: any keeper runs it on-chain, paid only the fee you set. Fee rates swing: a falling fee rate is a trigger. Tools give a few fixed buttons: here you set your own steps, and even paste your own condition contract. And you can replay it on real mainnet swaps before you commit; the replay matches the contract within 0.1%.",
+    C: Idea,
+    notes: "Alucard lets you tell your position what to do. If ETH falls out of my range, park it in the USDT/USDC pool and bring it back when ETH recovers. If fees earn less than 10% a year, take my liquidity out. Or plug in your own contract as the condition. Re-ranging, profit-taking, trailing stops, compounding: any mix.",
   },
   {
     id: "build",
-    title: "Build a strategy",
+    title: "Build it",
     theme: "enamel",
     C: Build,
-    notes: "This plays once, slowly. Pause with P, or the button, and scrub the line if you want to hold a step. Two sides, if it falls and if it rises. Each step offers only what fits, and the one that does not fit stays on screen with the reason. The sentence underneath is the strategy in plain words, the same one the contract runs.",
+    steps: 3,
+    notes: "Building one takes a minute. [click] If WETH falls out of the range, move into USDT/USDC, and come back when it is back. [click] If it rises, take 25% profit, up to four times. That is the whole strategy. You can also just type that sentence to the assistant.",
   },
   {
     id: "position",
-    title: "Your position at a glance",
+    title: "Your position",
     theme: "enamel",
     C: Position,
-    notes: "This is the position page, as it plays out. In range, earning fees, and it says what it is watching. The price falls out of the range: the side says it is ready, and a keeper runs it. Now it says the money moved into USDT/USDC and is earning fees there, and the way back says exactly how far WETH is from the range. When WETH comes back, it is back in the same range and ready for next time. If a step ever has to wait, it says why, in plain words. And before saving any of this, you replay it on real history.",
-  },
-  {
-    id: "how",
-    title: "How it works",
-    theme: "enamel",
-    C: How,
-    notes: "Every strategy has four parts. When: the conditions, two of them with and or or, and a hold so it has to stay true. Then: the steps, including a move to another pool that comes back by your own rule. Limits: slippage, the keeper fee, how many times it can run, when it expires, all checked by the contract. And the keeper: anyone can call execute once the condition holds, and is paid your fee, 0.1% by default and at most 1%. The money stays inside Uniswap v4 until you withdraw. The example on screen is one side, illustrative.",
+    steps: 4,
+    notes: "And you always know what it is doing. In range, earning. [click] The price falls out: the side is ready, and any keeper runs it. [click] Now the money is in USDT/USDC, earning there, and the way back tells you how far WETH is from coming home. [click] WETH recovers, and it is back in the same range, ready for next time.",
   },
   {
     id: "cards",
     title: "Your own condition",
     theme: "night",
     C: Cards,
-    notes: "The built-in conditions cover prices, ranges, time and fees. For anything else, anyone can write a contract with one function, isMet, that returns true or false, and paste its address into the builder. The builder checks it on the spot: is a contract there, does it answer, what does it say now, can it be upgraded. There is no registry: the order keeps that one address, only if it uses one, and clears it when it closes. It only decides when; the vault still does the what, with every guard. It is called read-only with a gas cap, and anything but a clean true means not now. An example is live on both testnets: a USDC depeg alarm.",
+    notes: "If the conditions we built aren’t enough, write your own: any contract with one function that answers yes or no. Paste its address into the builder. It only decides when; the vault still does everything else, with every guard.",
   },
   {
-    id: "attacks",
-    title: "Every attack, and what stops it",
+    id: "safe",
+    title: "Safe",
     theme: "paper",
-    C: Attacks,
-    notes: "We had the contracts attacked on paper by outside reviewers, and every attack became a test the attacker must lose. Pushing the pool to fire your stop does nothing: a pool's price counts only near Chainlink. Pushing it a little and then selling you cheap does not work: every swap must fill within your slippage of Chainlink, or the step simply waits. Your hold cannot be reset by a pushed price. A keeper cannot overcharge: the fee is yours, capped at 1%. The admin has no instant power: every change waits two days, and there are no upgrades and no pause. And nothing runs on an old price. It is not audited yet; that is the next step.",
+    C: Safe,
+    notes: "We had it attacked on paper, and every attack is now a test it passes. Pushing the pool to fire your stop does nothing: prices only count near Chainlink. Pushing it a little to sell you cheap does not work either: every swap fills within your slippage or waits. And nobody, including us, can act on the spot. It is not audited yet; that is next.",
   },
   {
-    id: "landscape",
-    title: "What exists today",
+    id: "proof",
+    title: "Built",
     theme: "paper",
-    C: Landscape,
-    notes: "Today’s tools give you a short menu: exit at a target price, move the range, compound fees. They watch the pool price, or an operator, and their own bot runs it. Alucard is the parts: conditions, steps, a move to another pool and back. Anyone can run a step and is paid the fee you set, a share of what the step moves, whatever the gas price. Before you commit, you replay that exact strategy on real history, with an engine we test against the contract run for run.",
+    C: Proof,
+    notes: "It is live on Ethereum Sepolia and Unichain Sepolia. The builder and the contract agree on every one of 48,181 strategy shapes. Replays on real mainnet swaps match the contract’s money within 0.1%. And 161 contract tests, attacks included.",
   },
   {
-    id: "built",
-    title: "Built and live",
-    theme: "paper",
-    C: Built,
-    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A pool’s price counts only near Chainlink, and no step sells into a push; a real move runs at once. You can also add a Chainlink price condition, or your own condition contract. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 48,181 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run at the same swaps and end within 0.1% of each other’s money on the strategies that test covers, 161 contract tests including the in-band pushes an outside review asked about. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
-  },
-  {
-    id: "now",
+    id: "next",
     title: "What’s next",
     theme: "enamel",
-    C: Now,
-    notes: "Next: an external audit, then Unichain and Ethereum mainnet. Bring a v3 or v4 position you already hold into a strategy, since that is where the idle money is. A gallery where people share strategies and condition contracts, ranked by their replays in rising, falling and sideways markets, not by votes. And moves between pools with no token in common, and into lending vaults while the money waits.",
+    C: Next,
+    notes: "Next: an audit and mainnet; bringing positions people already hold; and a gallery where strategies are ranked by how they replay, not by votes.",
   },
   {
     id: "close",
@@ -909,5 +838,69 @@ export const SLIDES: Slide[] = [
     theme: "enamel",
     C: Close,
     notes: "That’s Alucard: set your rules once, and put the position down. It’s live on Sepolia and Unichain Sepolia, the code is public, and I’m happy to show the app or the backtest live. Thank you.",
+  },
+  {
+    id: "fixes",
+    title: "Every problem, fixed",
+    theme: "paper",
+    C: Fixes,
+    backup: true,
+    notes: "Here is what goes wrong for a liquidity provider today, and what Alucard does about each. Out of range, the position earns nothing: it leaves, re-ranges, or parks in another pool and comes back, by your rules. It ends up all in the token that fell: it can swap to a stablecoin or move into a stable pool the moment it leaves. Someone has to watch day and night: any keeper runs it on-chain, paid only the fee you set. Fee rates swing: a falling fee rate is a trigger. Tools give a few fixed buttons: here you set your own steps, and even paste your own condition contract. And you can replay it on real mainnet swaps before you commit; the replay matches the contract within 0.1%.",
+  },
+  {
+    id: "attacks",
+    backup: true,
+    title: "Every attack, and what stops it",
+    theme: "paper",
+    C: Attacks,
+    notes: "We had the contracts attacked on paper by outside reviewers, and every attack became a test the attacker must lose. Pushing the pool to fire your stop does nothing: a pool's price counts only near Chainlink. Pushing it a little and then selling you cheap does not work: every swap must fill within your slippage of Chainlink, or the step simply waits. Your hold cannot be reset by a pushed price. A keeper cannot overcharge: the fee is yours, capped at 1%. The admin has no instant power: every change waits two days, and there are no upgrades and no pause. And nothing runs on an old price. It is not audited yet; that is the next step.",
+  },
+  {
+    id: "landscape",
+    backup: true,
+    title: "What exists today",
+    theme: "paper",
+    C: Landscape,
+    notes: "Today’s tools give you a short menu: exit at a target price, move the range, compound fees. They watch the pool price, or an operator, and their own bot runs it. Alucard is the parts: conditions, steps, a move to another pool and back. Anyone can run a step and is paid the fee you set, a share of what the step moves, whatever the gas price. Before you commit, you replay that exact strategy on real history, with an engine we test against the contract run for run.",
+  },
+  {
+    id: "how",
+    backup: true,
+    title: "How it works",
+    theme: "enamel",
+    C: How,
+    notes: "Every strategy has four parts. When: the conditions, two of them with and or or, and a hold so it has to stay true. Then: the steps, including a move to another pool that comes back by your own rule. Limits: slippage, the keeper fee, how many times it can run, when it expires, all checked by the contract. And the keeper: anyone can call execute once the condition holds, and is paid your fee, 0.1% by default and at most 1%. The money stays inside Uniswap v4 until you withdraw. The example on screen is one side, illustrative.",
+  },
+  {
+    id: "uses",
+    backup: true,
+    title: "What you can tell it",
+    theme: "night",
+    C: Uses,
+    notes: "So what does a rule look like? In Uniswap today, once you add liquidity there is nothing to configure. With Alucard: if ETH falls out of my range, park the money in the USDT/USDC pool and bring it back when ETH recovers. If it leaves my range, re-range. Fee rates swing a lot, so you can make them a trigger: if the APR drops below 10%, take my liquidity out. Take profit in steps on the way up, a trailing stop on the way down, and ignore quick wicks with a hold. Other tools give you a few of these as fixed buttons; here you combine them however you want.",
+  },
+  {
+    id: "idle",
+    backup: true,
+    title: "The problem",
+    theme: "paper",
+    C: Idle,
+    notes: "A 2026 Dune study looked at concentrated liquidity across seven chains. In a typical week only about 14% of it was used by trades. 57% sat in range but untouched, and close to a third was out of range, earning nothing. Almost half of the out-of-range money stayed untouched for 90 days, and most of it belongs to individual wallets, not managers. Those are the people Alucard is for.",
+  },
+  {
+    id: "trap",
+    backup: true,
+    title: "Why out of range hurts",
+    theme: "night",
+    C: Trap,
+    notes: "Concentrated liquidity has a trap. Once the price leaves your range you earn nothing, but the pool has already converted your whole position into the token that fell, so you keep taking the full drop. Nothing gets you out unless you watch the price and act yourself, day and night. That’s the job Alucard does. Alucard does not pick a strategy, and it does not claim one beats holding.",
+  },
+  {
+    id: "built",
+    backup: true,
+    title: "Built and live",
+    theme: "paper",
+    C: Built,
+    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A pool’s price counts only near Chainlink, and no step sells into a push; a real move runs at once. You can also add a Chainlink price condition, or your own condition contract. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 48,181 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run at the same swaps and end within 0.1% of each other’s money on the strategies that test covers, 161 contract tests including the in-band pushes an outside review asked about. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
   },
 ];

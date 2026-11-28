@@ -12,6 +12,7 @@ const H = 1080;
 export default function Deck() {
   const [mounted, setMounted] = useState(false);
   const [i, setI] = useState(0);
+  const [step, setStep] = useState(0); // a slide with `steps` reveals one more part per click
   const [scale, setScale] = useState(1);
   const [notes, setNotes] = useState(false);
   const [chrome, setChrome] = useState(true);
@@ -19,7 +20,18 @@ export default function Deck() {
   const idle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const n = SLIDES.length;
 
-  const go = useCallback((k: number) => setI(Math.max(0, Math.min(n - 1, k))), [n]);
+  const main = SLIDES.filter((s) => !s.backup).length; // the talk; backup slides follow it
+  const go = useCallback(
+    (k: number, atEnd = false) => {
+      const j = Math.max(0, Math.min(n - 1, k));
+      setI(j);
+      setStep(atEnd ? (SLIDES[j].steps ?? 1) - 1 : 0);
+    },
+    [n],
+  );
+  // forward: the next part of this slide, then the next slide; back: the reverse
+  const next = useCallback(() => (step < (SLIDES[i].steps ?? 1) - 1 ? setStep(step + 1) : go(i + 1)), [i, step, go]);
+  const prev = useCallback(() => (step > 0 ? setStep(step - 1) : go(i - 1, true)), [i, step, go]);
 
   // start on the slide named in the hash (#4), so a reload keeps your place
   useEffect(() => {
@@ -56,10 +68,10 @@ export default function Deck() {
       if (t.tagName === "INPUT" || t.tagName === "TEXTAREA") return;
       if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) {
         e.preventDefault();
-        go(i + 1);
+        next();
       } else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(e.key)) {
         e.preventDefault();
-        go(i - 1);
+        prev();
       } else if (e.key === "Home") go(0);
       else if (e.key === "End") go(n - 1);
       else if (e.key === "f" || e.key === "F") toggleFull();
@@ -68,7 +80,7 @@ export default function Deck() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [i, n, go, toggleFull]);
+  }, [i, n, go, next, prev, toggleFull]);
 
   // the controls fade away while presenting and come back when the mouse moves
   useEffect(() => {
@@ -101,7 +113,7 @@ export default function Deck() {
             transition={{ duration: 0.35 }}
             aria-label={`Slide ${i + 1} of ${n}`}
           >
-            <S.C />
+            <S.C step={step} />
           </motion.section>
         </AnimatePresence>
       </div>
@@ -120,17 +132,17 @@ export default function Deck() {
         </p>
         <div className="dk-ticks">
           {SLIDES.map((s, k) => (
-            <button key={s.id} className={`dk-tick ${k === i ? "on" : k < i ? "past" : ""}`} onClick={() => go(k)} aria-label={`Go to slide ${k + 1}: ${s.title}`} title={s.title} />
+            <button key={s.id} className={`dk-tick ${k === i ? "on" : k < i ? "past" : ""} ${s.backup ? "bk" : ""}`} onClick={() => go(k)} aria-label={`Go to slide ${k + 1}: ${s.title}`} title={s.title} />
           ))}
         </div>
         <div className="dk-ctl">
           <span className="dk-count">
-            {String(i + 1).padStart(2, "0")} / {String(n).padStart(2, "0")}
+            {SLIDES[i].backup ? "Backup" : `${String(i + 1).padStart(2, "0")} / ${String(main).padStart(2, "0")}`}
           </span>
-          <button onClick={() => go(i - 1)} disabled={i === 0} aria-label="Previous slide">
+          <button onClick={prev} disabled={i === 0 && step === 0} aria-label="Previous">
             <ChevronLeft size={18} />
           </button>
-          <button onClick={() => go(i + 1)} disabled={i === n - 1} aria-label="Next slide">
+          <button onClick={next} disabled={i === n - 1} aria-label="Next">
             <ChevronRight size={18} />
           </button>
           <button onClick={() => setNotes((v) => !v)} className={notes ? "on" : ""} aria-label="Speaker notes (N)" title="Speaker notes (N)">
