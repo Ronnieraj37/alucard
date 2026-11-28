@@ -76,6 +76,8 @@ contract PriceFeeds {
     /// SEQUENCER_GRACE after it comes back, no price is given: prices from before the outage are not acted on.
     address public sequencer;
     uint256 public constant SEQUENCER_GRACE = 1 hours;
+    /// @dev The queue slot of a sequencer change (no pair hashes to it).
+    bytes32 internal constant SEQUENCER_SLOT = keccak256("sequencer");
 
     event FeedSet(address indexed token, address indexed aggregator, uint32 maxAge);
     event FeedRemoved(address indexed token);
@@ -86,6 +88,7 @@ contract PriceFeeds {
     event BandQueued(bytes32 indexed pair, uint24 ticks, uint64 readyAt);
     event BandsLocked();
     event SequencerSet(address feed);
+    event SequencerQueued(address feed, uint64 readyAt);
     event OwnerChanged(address indexed owner);
 
     constructor(address _owner) {
@@ -177,11 +180,25 @@ contract PriceFeeds {
         emit BandQueued(id, ticks, readyAt);
     }
 
-    /// @notice Set the L2 sequencer uptime feed. Only before `lockBands` (while deploying).
+    /// @notice Set (or clear, with 0) the L2 sequencer uptime feed. Before `lockBands` at once; after, only a change
+    /// announced with `queueSequencer` FEED_DELAY earlier.
     function setSequencer(address feed) external onlyOwner {
-        if (bandsLocked) revert NotQueued();
+        if (bandsLocked) {
+            Queued memory q = queuedBand[SEQUENCER_SLOT];
+            if (q.readyAt == 0 || block.timestamp < q.readyAt || q.change != keccak256(abi.encode(feed))) {
+                revert NotQueued();
+            }
+            delete queuedBand[SEQUENCER_SLOT];
+        }
         sequencer = feed;
         emit SequencerSet(feed);
+    }
+
+    /// @notice Announce a sequencer feed change; `setSequencer` can apply it FEED_DELAY from now.
+    function queueSequencer(address feed) external onlyOwner {
+        uint64 readyAt = uint64(block.timestamp + FEED_DELAY);
+        queuedBand[SEQUENCER_SLOT] = Queued(keccak256(abi.encode(feed)), readyAt);
+        emit SequencerQueued(feed, readyAt);
     }
 
     /// @notice End deployment: from now on every band change waits FEED_DELAY. Cannot be undone.

@@ -1,10 +1,10 @@
 # Roadmap
 
 Done: strategies of the LP's own (conditions, steps, repeats, holds), moves into another pool and back, fee and fee-rate
-conditions, trailing stops, run limits, a Chainlink price guard (price conditions need Chainlink to agree; holds and
-trailing stops follow Chainlink; swaps anchored to Chainlink; a tighter band for stablecoin pairs; every admin change behind
+conditions, trailing stops, run limits, a Chainlink price guard (price conditions need Chainlink to agree; trailing
+stops follow Chainlink; swaps anchored to Chainlink; a tighter band for stablecoin pairs; every admin change behind
 a 2-day wait; an optional L2 sequencer check), every contract under 24 KB, the backtest on real mainnet swaps of the same
-pair (its steps fire at the same swaps as the contract, and the money matches within 0.1%), the AI assistant in the
+pair (its steps fire at the same swaps as the contract, and, on the strategies that test covers, the money matches within 0.1%), the AI assistant in the
 builder, and deployments on Ethereum Sepolia and Unichain Sepolia.
 
 Next, all about more options for LPs (Alucard runs the strategies people bring; it does not choose them):

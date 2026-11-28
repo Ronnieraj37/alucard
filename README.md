@@ -5,9 +5,9 @@
 **The problem in one paragraph.** When you add liquidity on Uniswap, there is nothing to configure: the money just sits
 in your range. If the price leaves the range you stop earning fees, and the pool has already swapped your whole position
 into the token that fell. It is common: about 4 in 10 positions in Uniswap v3's largest ETH/USDC pool were out of range
-when [CrocSwap counted](https://crocswap.medium.com/impermanent-loss-and-jit-liquidity-in-the-uniswap-eth-usdc-0-3-pool-8fc58c755d7),
+when [CrocSwap counted in 2022](https://crocswap.medium.com/impermanent-loss-and-jit-liquidity-in-the-uniswap-eth-usdc-0-3-pool-8fc58c755d7),
 and about 30% of concentrated-liquidity capital sat out of range over 26 weeks of 2026
-([Dune](https://dune.com/blog/capital-efficiency-decentralized-exchanges)). Some apps offer a stop-loss or auto-compounding
+([Dune, via The Block](https://www.theblock.co/news/defi/2026-07-16-dune-research-finds-85-of-concentrated-defi-liquidity-is-underutilized-with-150m-in-annual-fees-foregone-408591)). Some apps offer a stop-loss or auto-compounding
 button. Alucard lets you write any plan you want:
 
 - *If ETH is dumping out of my range,* park the money in the USDT/USDC pool and bring it back when ETH recovers.
@@ -31,8 +31,8 @@ it would have done, and runs it exactly as written.
 | **The problem** | Concentrated liquidity earns only in range. Out of range it earns nothing and sits in the falling token, and nothing changes unless the LP watches the price and acts, day and night. |
 | **What Alucard adds** | A **strategy attached to the position**: two sides ("if ETH falls", "if ETH rises"), each a short chain of steps. Steps include **moving the whole position into another pool and coming back by the LP's own rule**: a round trip between Uniswap pools that existing tools do not offer. |
 | **How you build it** | A flow of small step cards (When → Then → Come back when → Back into), or **say it to the assistant** (Gemini): it asks back when something is missing, then fills in the same cards. It cannot build anything the contract would refuse, and it never signs. |
-| **Why you can trust it** | **A price condition fires only when Chainlink agrees**: the pool's price and Chainlink's must both be past the level, with the pool near Chainlink. Pushing a pool, by 1.5% or 20%, fires nothing; holds and trailing stops follow Chainlink, and a step's swap never sells further than the owner's slippage below Chainlink. The owner can always cancel and withdraw. Keepers earn only the fee the owner set. The admin has no instant power: every feed or band change waits 2 days ([details](#safety-model-what-you-are-trusting)). |
-| **Proof it does what it says** | The backtest engine runs the **same order words** as the contract; on 2,000 random orders its steps fire at exactly the same swaps as the contract's, **and the owner ends with the same money (all within 0.1%, 1,989 within 0.01%)**. 145 contract tests, 35,126 editor-vs-contract cases, every template dry-run against both live deployments. |
+| **Why you can trust it** | **A price condition fires only when Chainlink agrees**: the pool's price and Chainlink's must both be past the level, with the pool near Chainlink. Pushing a pool, by 1.5% or 20%, fires nothing (at most it delays a step, which for an LP means staying in a range that may still earn); trailing stops follow Chainlink's best price, and a step's swap never sells further than the owner's slippage below Chainlink. The owner can always cancel and withdraw. Keepers earn only the fee the owner set. The admin has no instant power: every feed or band change waits 2 days ([details](#safety-model-what-you-are-trusting)). |
+| **Proof it does what it says** | The backtest engine runs the **same order words** as the contract; on 2,000 random orders its steps fire at exactly the same swaps as the contract's, **and the owner ends with the same money (all within 0.1%, 1,989 within 0.01%)** on the strategies that test covers (no swap-to-one-token steps, moves into other pools or fee conditions). 146 contract tests, 35,126 editor-vs-contract cases, every template dry-run against both live deployments. |
 
 ## What you can build
 
@@ -78,9 +78,9 @@ flowchart LR
 | Contract | Size | What it does |
 |---|---|---|
 | `ConditionalOrders` | 21.5 KB | Holds positions that have a strategy (owner = this contract, salt = order id) and the tokens of a move. Runs a step when `Rules` says its condition is true and the price is near Chainlink; pays the caller the owner's keeper fee. |
-| `Rules` | 18.6 KB | The pool table (any v4 pool of two listed tokens, hookless or ours) and the logic: is a condition true (`met`, `metOnChainlink`), is the price believable (`checkPrice`), is a strategy valid (`checkSide`, `checkLegs`), Chainlink-anchored swap limits, ranges. |
+| `Rules` | 18.3 KB | The pool table (any v4 pool of two listed tokens, hookless or ours) and the logic: is a condition true (`met`), is the price believable (`checkPrice`), is a strategy valid (`checkSide`, `checkLegs`), Chainlink-anchored swap limits, ranges. |
 | `RuleHook` | 16.4 KB | The v4 hook: limit orders filled inside the swap that crosses them (at most 3 per swap; a 0.1% reward for filling the rest). |
-| `PriceFeeds` | 7.8 KB | The token list: a Chainlink feed per token, how far a pool may be from Chainlink (200 ticks, ~2%; 50 ticks for two stablecoins), an optional L2 sequencer check. Every change waits 2 days. |
+| `PriceFeeds` | 8.3 KB | The token list: a Chainlink feed per token, how far a pool may be from Chainlink (200 ticks, ~2%; 50 ticks for two stablecoins), an optional L2 sequencer check. Every change waits 2 days. |
 
 **Why prices can be trusted.** A price condition is true only when the pool's price **and** the pair's Chainlink price
 are both past the level, and the pool is within the pair's band of Chainlink. Pushing a pool to fire someone's strategy
@@ -118,8 +118,10 @@ Guarantees, each with a test:
 
 - **A push fires nothing**, 1.5% (inside the band) or 7%, for a minute or for hours; a real move fires at once
   (`Manipulation.t.sol`: `test_aPushInsideTheBandDoesNotFire`, `test_aPushedPriceDoesNotFire`).
-- **Holds can't be skipped or reset by a push.** A hold starts when `poke` sees the pool and Chainlink agree, and is
-  forgotten only when Chainlink says the condition stopped (`test_aPushInsideTheBandCannotResetAHold`).
+- **Holds can't be skipped or started by a push.** A hold starts only when `poke` sees the pool and Chainlink agree.
+  A push near Chainlink can make a started hold start again: a later step, never an earlier one
+  (`test_aPushInsideTheBandOnlyDelaysAHold`). For an LP a late step is cheap (the position keeps earning while in
+  range); an early one is what must never happen.
 - **Trailing stops can't be raised by a push** (`test_aPushInsideTheBandCannotRaiseATrailingHigh`).
 - **A step never sells into a push**: its swap stops at the owner's slippage from Chainlink
   (`test_aStepDoesNotSellBelowChainlink`).
@@ -138,11 +140,11 @@ adopted yet.
 
 | Check | Result |
 |---|---|
-| `forge test` (fuzz included) | 145 passing |
+| `forge test` (fuzz included) | 146 passing |
 | Branch coverage of the four contracts and their libraries (`forge coverage --ir-minimum`) | 79% (lines 96%, functions 97%) |
 | Strategy shapes the editor builds vs what the contract accepts (`test/EditorParity.t.sol`) | 35,126 cases, 0 mismatches |
 | Backtest engine vs contract: when each step fires (holds and re-centring included) | 2,000 random orders, same swaps |
-| Backtest engine vs contract: what the owner ends with (value over just holding, at the last price) | all 2,000 within 0.1%; 1,989 within 0.01%; largest gap 0.028% |
+| Backtest engine vs contract: what the owner ends with (value over just holding, at the last price; strategies without swap-to-one-token steps, moves into other pools or fee conditions, on synthetic price paths) | all 2,000 within 0.1%; 1,989 within 0.01%; largest gap 0.028% |
 | Backtest engine tests (`frontend/api/test_chain_history.py`) | 10 passing |
 | Every template on every pool, dry-run against the live deployments (`frontend/scripts/check-rules.ts`) | 168 / 168 on Sepolia and on Unichain Sepolia |
 | End to end on the live chains: pools on Chainlink (`arb.ts`), strategies created, a keeper runs a real step | done on both chains |
@@ -151,7 +153,7 @@ adopted yet.
 Tests are written from what an LP should be able to expect (`test/Safety.t.sol`, `Feeds.t.sol`, `LimitSafety.t.sol`,
 `Manipulation.t.sol`, `Strategies.t.sol`, `KeeperFee.t.sol`, `Execution.t.sol`): owners kept apart in the same range,
 money back on cancel for any range and size, a push held for hours fires nothing while a real move fires at once, holds
-that a push outside the band cannot skip or reset, nobody can spend ETH held for another owner, no move into a pushed pool, value
+that a push cannot skip or start (only delay), nobody can spend ETH held for another owner, no move into a pushed pool, value
 kept through a move but for the swap fee and the keeper's fee, strategies on a hookless pool, re-ranging both ways.
 
 ## How it compares

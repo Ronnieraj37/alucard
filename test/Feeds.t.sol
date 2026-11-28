@@ -229,4 +229,20 @@ contract FeedsTest is Test {
         (ok,) = feeds.pairTick(address(0), address(usdcToken));
         assertTrue(ok);
     }
+
+    /// A sequencer feed can still be added once the bands are locked (a chain gets one later), behind the same wait.
+    function test_aSequencerFeedCanBeAddedLaterAfterTwoDays() public {
+        feeds.setMaxDeviationTicks(200);
+        feeds.lockBands();
+        MockAggregator seq = new MockAggregator(0, 0);
+        vm.expectRevert(PriceFeeds.NotQueued.selector);
+        feeds.setSequencer(address(seq));
+        feeds.queueSequencer(address(seq));
+        vm.warp(block.timestamp + 2 days - 1);
+        vm.expectRevert(PriceFeeds.NotQueued.selector);
+        feeds.setSequencer(address(seq));
+        vm.warp(block.timestamp + 1);
+        feeds.setSequencer(address(seq));
+        assertEq(feeds.sequencer(), address(seq));
+    }
 }

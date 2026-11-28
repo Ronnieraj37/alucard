@@ -492,7 +492,7 @@ function Guard() {
         <div className="gd-facts">
           {[
             ["Both must be past your level", "The pool’s price and Chainlink’s. A push of 1.5% or 20%, for a minute or for hours: nothing."],
-            ["Never sells below Chainlink", "A step’s swap stops at your slippage from Chainlink. Holds and trailing highs follow Chainlink too."],
+            ["Never sells below Chainlink", "A step’s swap stops at your slippage from Chainlink. Trailing highs follow Chainlink too."],
             ["No lag in a real crash", "Chainlink moves with the market and the step runs at once. No price history: swaps pay nothing extra."],
           ].map(([h, t], k) => (
             <div key={h} className="gd-fact in" style={d(400 + k * 140)}>
@@ -661,7 +661,7 @@ function Built() {
           </div>
           <div className="in" style={d(1100)}>
             <p className="num">
-              <Count to={145} delay={1100} duration={1800} />
+              <Count to={146} delay={1100} duration={1800} />
             </p>
             <p className="s-small">contract tests, attacks included</p>
           </div>
@@ -847,7 +847,7 @@ export const SLIDES: Slide[] = [
     title: "The price guard",
     theme: "paper",
     C: Guard,
-    notes: "Chainlink is not a condition you set. It is the check on every price. A step fires only when the pool’s price and Chainlink’s price are both past your level, and the pool is within about 2% of Chainlink. Push the pool below someone’s stop, by 1.5% or by 20%, and nothing happens, however long you hold it. The step’s own swap never sells further than your slippage below Chainlink, and holds and trailing stops follow Chainlink too. When the market itself moves, Chainlink moves too, and a keeper runs the step at once. No price history is stored, so swaps pay nothing for strategies, and any v4 pool of listed tokens works, with our hook or without one.",
+    notes: "Chainlink is not a condition you set. It is the check on every price. A step fires only when the pool’s price and Chainlink’s price are both past your level, and the pool is within about 2% of Chainlink. Push the pool below someone’s stop, by 1.5% or by 20%, and nothing happens, however long you hold it. The step’s own swap never sells further than your slippage below Chainlink, and trailing stops follow Chainlink’s best price. At worst a push delays a step, and for an LP a late step is cheap: the position keeps earning while it is in range. When the market itself moves, Chainlink moves too, and a keeper runs the step at once. No price history is stored, so swaps pay nothing for strategies, and any v4 pool of listed tokens works, with our hook or without one.",
   },
   {
     id: "landscape",
@@ -868,7 +868,7 @@ export const SLIDES: Slide[] = [
     title: "Built and live",
     theme: "paper",
     C: Built,
-    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A price counts only while Chainlink agrees; a push does nothing and a real move runs at once. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 35,126 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run at the same swaps and end within 0.1% of each other’s money, 145 contract tests including every attack we know of. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
+    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A price counts only while Chainlink agrees; a push does nothing and a real move runs at once. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 35,126 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run at the same swaps and end within 0.1% of each other’s money on the strategies that test covers, 146 contract tests including the in-band pushes an outside review asked about. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
   },
   {
     id: "now",

@@ -124,7 +124,7 @@ function Problem() {
           <div className="n-stat">
             <b>~4 in 10</b>
             <span>
-              positions in Uniswap v3’s largest ETH/USDC pool were out of range, earning no fees, when CrocSwap counted them.{" "}
+              positions in Uniswap v3’s largest ETH/USDC pool were out of range, earning no fees, when CrocSwap counted them in 2022.{" "}
               <a className="n-link" href="https://crocswap.medium.com/impermanent-loss-and-jit-liquidity-in-the-uniswap-eth-usdc-0-3-pool-8fc58c755d7" target="_blank" rel="noreferrer">
                 CrocSwap
               </a>
@@ -136,8 +136,8 @@ function Problem() {
             <b>~30%</b>
             <span>
               of the capital in concentrated-liquidity pools sat out of range, on average over 26 weeks of 2026.{" "}
-              <a className="n-link" href="https://dune.com/blog/capital-efficiency-decentralized-exchanges" target="_blank" rel="noreferrer">
-                Dune
+              <a className="n-link" href="https://www.theblock.co/news/defi/2026-07-16-dune-research-finds-85-of-concentrated-defi-liquidity-is-underutilized-with-150m-in-annual-fees-foregone-408591" target="_blank" rel="noreferrer">
+                Dune, via The Block
               </a>
             </span>
           </div>
@@ -423,7 +423,7 @@ function Guard() {
           <h2 className="n-h2">A push does nothing. Chainlink has to agree.</h2>
           <p className="n-p">
             A step fires only when the pool&apos;s price and Chainlink&apos;s price are both past your level, and the pool is near Chainlink. Pushing a pool, by
-            2% or by 20%, for a minute or for hours, fires nothing. A hold can&apos;t be reset by a push, a trailing stop remembers Chainlink&apos;s best price, and
+            2% or by 20%, for a minute or for hours, fires nothing; at most it delays a step. A trailing stop remembers Chainlink&apos;s best price, and
             the step&apos;s own swap never sells further than your slippage below Chainlink. When the market really moves, Chainlink moves too, and the step runs.
           </p>
         </Rise>
@@ -523,8 +523,8 @@ function Proof() {
   const rows: [number, string, string][] = [
     [35126, "", "strategy shapes where the editor and the contract agree"],
     [2000, "", "random orders where the backtest fires at the same swaps as the contract"],
-    [2000, "", "of them end within 0.1% of the contract’s money (1,989 within 0.01%)"],
-    [145, "", "contract tests, fuzz included, all passing"],
+    [2000, "", "of them end within 0.1% of the contract’s money (on the strategies that test covers)"],
+    [146, "", "contract tests, fuzz included, all passing"],
   ];
   return (
     <section className="n-sec">

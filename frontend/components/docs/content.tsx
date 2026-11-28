@@ -29,13 +29,13 @@ export const SECTIONS: DocSection[] = [
           On Uniswap you pick a price range and your money sits there. While the price is inside the range you earn fees. When it leaves the range, two
           things happen at once: you stop earning, and the pool has already swapped your whole position into the token that fell (below the range you hold
           only ETH, above it only USDC). Nothing changes until you notice and act yourself, at any hour. It is common: about 4 in 10 positions in Uniswap
-          v3&apos;s largest ETH/USDC pool were out of range when{" "}
+          v3&apos;s largest ETH/USDC pool were out of range in 2022, when{" "}
           <a href="https://crocswap.medium.com/impermanent-loss-and-jit-liquidity-in-the-uniswap-eth-usdc-0-3-pool-8fc58c755d7" target="_blank" rel="noreferrer">
             CrocSwap
           </a>{" "}
           counted them, and about 30% of concentrated-liquidity capital sat out of range over 26 weeks of 2026 (
-          <a href="https://dune.com/blog/capital-efficiency-decentralized-exchanges" target="_blank" rel="noreferrer">
-            Dune
+          <a href="https://www.theblock.co/news/defi/2026-07-16-dune-research-finds-85-of-concentrated-defi-liquidity-is-underutilized-with-150m-in-annual-fees-foregone-408591" target="_blank" rel="noreferrer">
+            Dune, via The Block
           </a>
           ).
         </p>
@@ -83,7 +83,7 @@ export const SECTIONS: DocSection[] = [
           <p>
             Four contracts. <code>RuleHook</code> is the Uniswap v4 hook (afterInitialize, beforeSwap, afterSwap): it fills limit orders inside swaps. <code>ConditionalOrders</code> holds positions that have a strategy, inside the PoolManager (owner = the contract, salt =
             order id). <code>Rules</code> holds the pool table (any pool of listed tokens) and does conditions, the Chainlink check, validation and price math. <code>PriceFeeds</code> is the Chainlink token list. Each stays
-            under the 24 KB size limit. Source: <code>src/</code>, tests: <code>test/</code> (145 Foundry tests).
+            under the 24 KB size limit. Source: <code>src/</code>, tests: <code>test/</code> (146 Foundry tests).
           </p>
         </Dev>
       </Section>
@@ -436,7 +436,8 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
         </ul>
         <Callout title="How we know it runs what the contract runs">
           On 2,000 random strategies replayed on both, the engine&apos;s steps fire at exactly the same swaps as the contract&apos;s, and what the owner
-          ends with matches too: all 2,000 within 0.1% of the contract&apos;s money, 1,989 within 0.01%, the largest gap 0.028% (
+          ends with matches too: all 2,000 within 0.1% of the contract&apos;s money, 1,989 within 0.01%, the largest gap 0.028%. That test covers
+          strategies without swap-to-one-token steps, moves into other pools or fee conditions, on synthetic price paths (
           <code>test/EditorParity.t.sol</code>, run on every change).
         </Callout>
         <Callout kind="warn" title="What a backtest cannot tell you">
@@ -481,7 +482,7 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
             <tr><td>Use a thin pool someone registered as the trigger</td><td>Same rule: a condition reading another pool still needs Chainlink to agree. A pool counts only if both tokens are listed and it has no hook or ours.</td></tr>
             <tr><td>Sandwich or flash-loan the step&apos;s own swap</td><td>Its price limit is the owner&apos;s slippage from the better of the pool&apos;s and Chainlink&apos;s price (<code>Rules.swapLimit</code>); a pool pushed past that leaves the tokens unsold. The price is checked against the band right before the step (<code>Rules.checkPrice</code>).</td></tr>
             <tr><td>Move the money into a pushed pool</td><td>The destination pool is checked the same way before anything is added, and its swap has the same Chainlink-anchored limit.</td></tr>
-            <tr><td>Start, skip or reset an “only if it lasts” hold</td><td>A hold starts when <code>poke</code> sees the pool and Chainlink agree, and is forgotten only when Chainlink says the condition stopped (<code>Rules.metOnChainlink</code>). Pushing the pool back cannot reset it.</td></tr>
+            <tr><td>Start or skip an “only if it lasts” hold</td><td>A hold starts only when <code>poke</code> sees the pool and Chainlink agree, and the step runs only once it has lasted and both still agree. A push near Chainlink can make a hold start again: that delays the step, never brings it forward (a late step is cheap for an LP, whose position keeps earning in range).</td></tr>
             <tr><td>Raise a trailing stop&apos;s best price with a push</td><td>The best price it remembers is Chainlink&apos;s, not the pool&apos;s.</td></tr>
             <tr><td>A keeper overcharging</td><td>The fee is the owner&apos;s: a share of what the step moves (at most 1%), whatever the gas price. A side runs at most once a minute.</td></tr>
             <tr><td>Spending ETH held for another owner</td><td>An order in an ETH pool must pay its own ETH (<code>msg.value</code>); held payouts are only withdrawable by their owner.</td></tr>
@@ -1041,7 +1042,7 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
     render: () => (
       <Section dev id="local-dev" title="Run it locally">
         <Code lang="bash">{`# contracts
-forge test                                   # 145 tests (EditorParity needs the app installed below)
+forge test                                   # 146 tests (EditorParity needs the app installed below)
 
 # app + backtest API
 cd frontend && npm install && npm run setup:api

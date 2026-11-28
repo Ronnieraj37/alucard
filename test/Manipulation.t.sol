@@ -199,24 +199,29 @@ contract ManipulationTest is RuleSetup {
         assertEq(orders.getOrder(id).owner, address(0));
     }
 
-    /// A hold that has started cannot be reset by pushing the pool back over the level inside the band: only
-    /// Chainlink saying the condition stopped forgets it.
-    function test_aPushInsideTheBandCannotResetAHold() public {
+    /// A push inside the band can make a started hold start again, which only delays the step (for an LP, a later
+    /// exit while the position may still earn). It can never make the step run before the condition has lasted, by
+    /// both prices, for the whole hold.
+    function test_aPushInsideTheBandOnlyDelaysAHold() public {
         OrderState.Side memory low = _exit(OrderState.CHECK_TICK, -300);
         low.holdMinutes = 30;
         uint256 id = _create(low, _off());
         _pushTo(-400);
         _market();
         orders.poke(id, false);
-        uint256 armed = orders.armedAt(id, false);
-        assertGt(armed, 0);
+        assertGt(orders.armedAt(id, false), 0);
         _wait(10 minutes);
         _pushTo(-250); // pool back above the level, 150 ticks from Chainlink
-        vm.expectRevert(ConditionalOrders.NothingToPoke.selector);
-        orders.poke(id, false);
-        assertEq(orders.armedAt(id, false), armed);
+        orders.poke(id, false); // the hold starts again
+        assertEq(orders.armedAt(id, false), 0);
         _pushTo(-400); // the push ends
-        _wait(20 minutes); // 30 minutes since it started
+        orders.poke(id, false);
+        uint256 restarted = orders.armedAt(id, false);
+        _wait(29 minutes); // 39 minutes since the first start, 29 since the restart
+        vm.expectRevert(ConditionalOrders.NotHeldLongEnough.selector);
+        _run(id, false);
+        _wait(1 minutes);
+        assertEq(orders.armedAt(id, false), restarted);
         _run(id, false);
         assertEq(orders.getOrder(id).owner, address(0));
     }

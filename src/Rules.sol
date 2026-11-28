@@ -24,8 +24,8 @@ import {ConditionalOrders} from "./ConditionalOrders.sol";
 ///
 /// Prices: a price condition is true only when the pool's price AND the pair's Chainlink price are both past the
 /// level, and the pool is within the pair's band of Chainlink (`PriceFeeds.bandOf`). Pushing a pool to fire someone's
-/// strategy therefore does nothing on its own: Chainlink has to agree. A hold ("only if it lasts") starts when both
-/// agree and is forgotten only when Chainlink says the condition is no longer true, so a push cannot reset it. A
+/// strategy therefore does nothing on its own: Chainlink has to agree. A hold ("only if it lasts") starts only when both
+/// agree, so a push cannot start one (a push near Chainlink can make one start again: later, never earlier). A
 /// trailing stop remembers Chainlink's best price, so a push cannot raise it. Swaps of a step stop at the owner's
 /// slippage from the better of the pool's and Chainlink's price, so a step never sells far below Chainlink.
 /// No price history is kept, so swaps pay nothing for strategies, and strategies work on any pool of listed tokens.
@@ -72,7 +72,6 @@ contract Rules {
         int24 upper;
         bool isUpper; // which side is checked
         uint32 feeClock; // when the position's fees were last collected
-        bool onChainlink; // judge price conditions by Chainlink alone (an unknown price counts as still true)
         OrderState.Side sd;
     }
 
@@ -155,31 +154,6 @@ contract Rules {
         view
         returns (bool)
     {
-        return _met(vault, orderId, poolIndex, lowerWord, upperWord, upper, false);
-    }
-
-    /// @notice The same condition judged by Chainlink's price alone, where a missing Chainlink price counts as "still
-    /// true". The vault forgets a hold only when this is false: a pushed pool price cannot reset a hold.
-    function metOnChainlink(
-        address vault,
-        uint256 orderId,
-        uint24 poolIndex,
-        uint256 lowerWord,
-        uint256 upperWord,
-        bool upper
-    ) external view returns (bool) {
-        return _met(vault, orderId, poolIndex, lowerWord, upperWord, upper, true);
-    }
-
-    function _met(
-        address vault,
-        uint256 orderId,
-        uint24 poolIndex,
-        uint256 lowerWord,
-        uint256 upperWord,
-        bool upper,
-        bool onChainlink
-    ) internal view returns (bool) {
         OrderState.Side memory lo = OrderState.decodeSide(lowerWord);
         OrderState.Side memory up = OrderState.decodeSide(upperWord);
         OrderState.Side memory sd = upper ? up : lo;
@@ -191,7 +165,6 @@ contract Rules {
             upper: up.edge,
             isUpper: upper,
             feeClock: lo.lastRun > up.lastRun ? lo.lastRun : up.lastRun,
-            onChainlink: onChainlink,
             sd: sd
         });
         bool a = _cond(c, sd.checker, sd.value, sd.checkPool);
@@ -279,10 +252,6 @@ contract Rules {
         // the price conditions: EDGE, TICK, TRAIL. True only when the pool is near Chainlink and both prices are past
         // the level (the pool's alone while the band is off, in tests).
         (bool near, int24 tick, bool linked, int24 link) = _prices(_pools[pool == 0 ? c.poolIndex : pool]);
-        if (c.onChainlink) {
-            if (linked) return _past(c, checker, value, link);
-            return near ? _past(c, checker, value, tick) : true; // no Chainlink price: it cannot be said false
-        }
         if (!near) return false;
         return _past(c, checker, value, tick) && (!linked || _past(c, checker, value, link));
     }
