@@ -44,6 +44,10 @@ strategy and next to just holding. 180 days of a million swaps replay in about 0
 
 ## How it works
 
+![Alucard architecture: people, the app, the Alucard contracts, Uniswap v4 and Chainlink](assets/architecture.png)
+
+<details><summary>The same as text (Mermaid)</summary>
+
 ```mermaid
 flowchart LR
   LP[LP] -- createOrder / updateOrder / cancel --> CO[ConditionalOrders<br/>holds the positions]
@@ -55,6 +59,8 @@ flowchart LR
   PM -- beforeSwap / afterSwap --> H[RuleHook<br/>limit orders]
   A[arb.ts] -- swaps pools onto Chainlink --> PM
 ```
+
+</details>
 
 | Contract | Size | What it does |
 |---|---|---|
