@@ -31,8 +31,8 @@ it would have done, and runs it exactly as written.
 | **The problem** | Concentrated liquidity earns only in range. Out of range it earns nothing and sits in the falling token, and nothing changes unless the LP watches the price and acts, day and night. |
 | **What Alucard adds** | A **strategy attached to the position**: two sides ("if ETH falls", "if ETH rises"), each a short chain of steps. Steps include **moving the whole position into another pool and coming back by the LP's own rule**: a round trip between Uniswap pools that existing tools do not offer. |
 | **How you build it** | A flow of small step cards (When → Then → Come back when → Back into), or **say it to the assistant** (Gemini): it asks back when something is missing, then fills in the same cards. It cannot build anything the contract would refuse, and it never signs. |
-| **Why you can trust it** | **A price condition fires only when Chainlink agrees**: the pool's price and Chainlink's must both be past the level, with the pool near Chainlink. Pushing a pool, by 1.5% or 20%, fires nothing (at most it delays a step, which for an LP means staying in a range that may still earn); trailing stops follow Chainlink's best price, and a step's swap never sells further than the owner's slippage below Chainlink. The owner can always cancel and withdraw. Keepers earn only the fee the owner set. The admin has no instant power: every feed or band change waits 2 days ([details](#safety-model-what-you-are-trusting)). |
-| **Proof it does what it says** | The backtest engine runs the **same order words** as the contract; on 2,000 random orders its steps fire at exactly the same swaps as the contract's, **and the owner ends with the same money (all within 0.1%, 1,989 within 0.01%)** on the strategies that test covers (no swap-to-one-token steps, moves into other pools or fee conditions). 146 contract tests, 35,126 editor-vs-contract cases, every template dry-run against both live deployments. |
+| **Why you can trust it** | **A pool's price counts only within ~2% of Chainlink's** (0.5% for two stablecoins), so a bigger push fires nothing, however long it is held. **No step sells into a push**: every swap must fill within the owner's slippage of Chainlink's price, or the step waits while the position keeps earning. Want Chainlink itself to confirm a level? Add the **Chainlink price** condition with "and". The owner can always cancel and withdraw. Keepers earn only the fee the owner set. The admin has no instant power: every feed or band change waits 2 days ([details](#safety-model-what-you-are-trusting)). |
+| **Proof it does what it says** | The backtest engine runs the **same order words** as the contract; on 2,000 random orders its steps fire at exactly the same swaps as the contract's, **and the owner ends with the same money (all within 0.1%, 1,987 within 0.01%)** on the strategies that test covers (no swap-to-one-token steps, moves into other pools or fee conditions). 154 contract tests, 43,554 editor-vs-contract cases, every template dry-run against both live deployments. |
 
 ## What you can build
 
@@ -82,12 +82,12 @@ flowchart LR
 | `RuleHook` | 16.4 KB | The v4 hook: limit orders filled inside the swap that crosses them (at most 3 per swap; a 0.1% reward for filling the rest). |
 | `PriceFeeds` | 8.3 KB | The token list: a Chainlink feed per token, how far a pool may be from Chainlink (200 ticks, ~2%; 50 ticks for two stablecoins), an optional L2 sequencer check. Every change waits 2 days. |
 
-**Why prices can be trusted.** A price condition is true only when the pool's price **and** the pair's Chainlink price
-are both past the level, and the pool is within the pair's band of Chainlink. Pushing a pool to fire someone's strategy
-moves only the pool, so it does nothing, however far and however long. A hold ("only if it lasts") starts when both
-agree and is forgotten only when Chainlink says the condition stopped; a trailing stop remembers Chainlink's best price;
-a step's swap stops at the owner's slippage from the better of the pool's and Chainlink's price, so a pool pushed against
-it leaves the tokens unsold rather than sold cheap. In a real move Chainlink moves too, and the step runs at once. No
+**Why prices can be trusted.** A pool's price counts only while it is within the pair's band of Chainlink (~2%; ~0.5%
+for two stablecoins). Pushing a pool further to fire someone's strategy does nothing, however long it is held, and a
+hold or a trailing high cannot be started, reset or raised by such a push. Inside the band a push can reach a pool-price
+level, but the step cannot sell into it: every swap must fill within the owner's slippage of the better of the pool's
+and Chainlink's price, or the whole step reverts and waits, and the position keeps earning. An owner who wants Chainlink
+to confirm a level adds the Chainlink price condition. In a real move Chainlink moves too, and the step runs at once. No
 price history is stored, so swaps pay nothing for strategies, and strategies work on deep
 existing pools. On a testnet nobody arbitrages the pools, so `frontend/scripts/arb.ts` does: it keeps every pool on
 Chainlink (run it on your machine, `--keep` also runs the keeper).
@@ -97,9 +97,9 @@ need decisions a swap cannot take (moving money between pools, waiting, coming b
 
 **A move, step by step** (a falling side set to "move into USDT/USDC, come back when WETH is back in my range"):
 
-1. WETH's price leaves the range below (Chainlink agrees). A keeper calls `execute`.
+1. WETH's price leaves the range below (the pool near Chainlink). A keeper calls `execute`.
 2. `Rules.met` confirms it (a price near Chainlink's); `Rules.checkPrice` confirms the pool is still near Chainlink.
-3. The vault removes the position, swaps the WETH to USDC (stopping at the slippage limit), checks the USDT/USDC pool's
+3. The vault removes the position, swaps the WETH to USDC (all of it, within the slippage limit, or the step waits), checks the USDT/USDC pool's
    price the same way, swaps part to USDT and adds a ±0.2% range there. The order now lives in that pool; its "come
    back" sides are live.
 4. When WETH is back in the original range, a keeper runs the way back: out of USDT/USDC, into USDC, swapped to
@@ -109,28 +109,29 @@ need decisions a swap cannot take (moving money between pools, waiting, coming b
 
 | You trust | What it can do | What it cannot do |
 |---|---|---|
-| **Chainlink** | Decide what a price is: a price condition needs Chainlink's price past the level too, and the pool within 200 ticks (~2%; 50 for two stablecoins) of it. A stale or missing feed (or an L2 sequencer outage, when its feed is set) makes every step wait. | Fire a step on its own: the pool's price must also be past your level. Lock your money: `cancel` never checks prices. |
-| **Keepers** (anyone) | Run a step once its condition is true, and pick the moment. | Take more than your keeper fee (0.1% default, at most 1% of what the step moves) as a fee. Run a step early, skip or reset a hold, or sell your tokens further than your slippage below Chainlink. |
+| **Chainlink** | Decide what a price is: a pool's price counts only within 200 ticks (~2%; 50 for two stablecoins) of the pair's Chainlink price, and a Chainlink price condition reads it directly. A stale or missing feed (or an L2 sequencer outage, when its feed is set) makes every step wait. | Fire a pool-price step on its own: the pool's price must be past your level. Lock your money: `cancel` never checks prices. |
+| **Keepers** (anyone) | Run a step once its condition is true, and pick the moment. | Take more than your keeper fee (0.1% default, at most 1% of what the step moves) as a fee. Skip a hold, or sell your tokens further than your slippage below Chainlink. |
 | **The admin** (the token list and bands) | List a token (at once: no order uses it yet); change or remove a feed, or change a band, **2 days after announcing it**. | Move or take anyone's money, upgrade anything, switch the band off, or pause anything on the spot: there is no upgrade, no pause and no fee switch. |
 | **The testnet** | On Sepolia nobody arbitrages, so `arb.ts` keeps the pools on Chainlink; the USDT "feed" is a mock we set to $1. | |
 
 Guarantees, each with a test:
 
-- **A push fires nothing**, 1.5% (inside the band) or 7%, for a minute or for hours; a real move fires at once
-  (`Manipulation.t.sol`: `test_aPushInsideTheBandDoesNotFire`, `test_aPushedPriceDoesNotFire`).
-- **Holds can't be skipped or started by a push.** A hold starts only when `poke` sees the pool and Chainlink agree.
-  A push near Chainlink can make a started hold start again: a later step, never an earlier one
-  (`test_aPushInsideTheBandOnlyDelaysAHold`). For an LP a late step is cheap (the position keeps earning while in
-  range); an early one is what must never happen.
-- **Trailing stops can't be raised by a push** (`test_aPushInsideTheBandCannotRaiseATrailingHigh`).
-- **A step never sells into a push**: its swap stops at the owner's slippage from Chainlink
-  (`test_aStepDoesNotSellBelowChainlink`).
+- **A push far from Chainlink fires nothing**, for a minute or for hours; a real move fires at once
+  (`Manipulation.t.sol`: `test_aPushedPriceDoesNotFire`, `test_aPushHeldForHoursDoesNotFire`).
+- **No step sells into a push**: a pool-price level a 1.5% push reaches still cannot sell below Chainlink; the step
+  waits and runs in full once the pool is back (`test_aPushCannotMakeAStepSellCheap`,
+  `test_aStepWaitsForAFairPriceThenSellsEverything`). With the Chainlink price condition added, the push does not even
+  fire it (`test_aChainlinkConditionIgnoresPushes`).
+- **Holds can't be skipped or started by a push**, in the order's pool or another pool it reads; a push near Chainlink
+  can only make a hold start again, a later step, never an earlier one (`test_aPushInsideTheBandOnlyDelaysAHold`,
+  `test_aPushOfTheOtherPoolCannotResetAHold`). For an LP a late step is cheap: the position keeps earning in range.
 - **Your money is yours.** The owner can cancel at any time, wherever the money is; after expiry anyone can close the
   position, and everything still goes to the owner. Payouts that fail (a wallet refusing ETH) are held for the owner,
   and nobody else's order can spend them (`KeeperFee.t.sol`).
 
-**Known limits.** Chainlink updates on about a 0.5% move or hourly, so after a real move a step can wait a little for
-the feed. A pool pushed against a step's swap makes it sell less (the rest comes back unsold) rather than sell cheap.
+**Known limits.** Inside the band a push can fire a pool-price level early (the step still cannot sell into it; add the
+Chainlink price condition to rule it out). A step whose own sale moves the pool more than the owner's slippage waits
+until the owner raises it (possible on an open position; the backtest shows such waits as refused steps).
 Keeper transactions are public, so others can trade around them within these limits. Limit-order buckets beyond the
 first three crossed by one swap wait for the next swap or anyone's `fillBucket`. Not audited. Only tokens with a Chainlink feed. A move into a pool with
 no token in common is not supported. A position must be created through Alucard; existing NFT positions can't be
@@ -140,11 +141,11 @@ adopted yet.
 
 | Check | Result |
 |---|---|
-| `forge test` (fuzz included) | 146 passing |
+| `forge test` (fuzz included) | 154 passing |
 | Branch coverage of the four contracts and their libraries (`forge coverage --ir-minimum`) | 79% (lines 96%, functions 97%) |
-| Strategy shapes the editor builds vs what the contract accepts (`test/EditorParity.t.sol`) | 35,126 cases, 0 mismatches |
+| Strategy shapes the editor builds vs what the contract accepts (`test/EditorParity.t.sol`) | 43,554 cases, 0 mismatches |
 | Backtest engine vs contract: when each step fires (holds and re-centring included) | 2,000 random orders, same swaps |
-| Backtest engine vs contract: what the owner ends with (value over just holding, at the last price; strategies without swap-to-one-token steps, moves into other pools or fee conditions, on synthetic price paths) | all 2,000 within 0.1%; 1,989 within 0.01%; largest gap 0.028% |
+| Backtest engine vs contract: what the owner ends with (value over just holding, at the last price; strategies without swap-to-one-token steps, moves into other pools or fee conditions, on synthetic price paths) | all 2,000 within 0.1%; 1,987 within 0.01%; largest gap 0.028% |
 | Backtest engine tests (`frontend/api/test_chain_history.py`) | 10 passing |
 | Every template on every pool, dry-run against the live deployments (`frontend/scripts/check-rules.ts`) | 168 / 168 on Sepolia and on Unichain Sepolia |
 | End to end on the live chains: pools on Chainlink (`arb.ts`), strategies created, a keeper runs a real step | done on both chains |
@@ -167,7 +168,7 @@ From each project's public docs (November 2026); a dash means we found no such f
 | **Move to another Uniswap pool and come back by your own rule** | — | — | — | idle liquidity into lending, decided by the hook | **yes** |
 | Replay on real history before committing | a static range ([backtester](https://docs.revert.finance/revert/technical-docs/backtester)) | — | — | — | **the whole strategy; its steps fire at the same swaps as the contract** |
 | Works on existing pools | yes (v3; v4 per secondary sources) | yes | own vaults | pools with the hook | **any v4 pool of listed tokens, hookless too** |
-| Push-resistant prices | TWAP check (auto-exit) | — | TWAP / deviation checks | — | **Chainlink must agree on every price condition; swaps anchored to Chainlink** |
+| Push-resistant prices | TWAP check (auto-exit) | — | TWAP / deviation checks | — | **Chainlink band on every price condition; swaps anchored to Chainlink; an optional Chainlink price condition** |
 | Audited, live on mainnet, TVL | yes | yes | yes | yes | **no: testnets, not audited** |
 
 ## For reviewers: where to check each claim
@@ -190,10 +191,10 @@ between them (and follows your wallet).
 
 | Contract | Ethereum Sepolia (11155111) | Unichain Sepolia (1301) |
 |---|---|---|
-| RuleHook | [`0x0482…50C0`](https://sepolia.etherscan.io/address/0x0482555fd63636Baa88bF1eA7d0e48e3F2Cb50C0) | [`0x8B7f…90C0`](https://sepolia.uniscan.xyz/address/0x8B7f7798eE5d9Af14529eB964A1e912b670890C0) |
-| ConditionalOrders | [`0xa653…Db3c`](https://sepolia.etherscan.io/address/0xa653D69C934B431431C11e55a59bbf69e524Db3c) | [`0xb190…3FBD`](https://sepolia.uniscan.xyz/address/0xb190f93B9511B40c12F068b9bdd2d392aBAC3FBD) |
-| Rules | [`0x59AC…996E`](https://sepolia.etherscan.io/address/0x59AC15D97080BF47be608750d82bB9528e57996E) | [`0x67CB…a947`](https://sepolia.uniscan.xyz/address/0x67CB05bb62b72DCbd359670acEb53E0159bda947) |
-| PriceFeeds | [`0xC539…2a1b`](https://sepolia.etherscan.io/address/0xC539EE58250B88F2ECAb86682c06ce4cD6592a1b) | [`0xA7dD…6C36`](https://sepolia.uniscan.xyz/address/0xA7dD5FCE507A4b6F0a24aBdCB169DaA023746C36) |
+| RuleHook | [`0x26Cc…90c0`](https://sepolia.etherscan.io/address/0x26Cc9Dff279Cb44193B9010fBFAcd998C1a090c0) | [`0xA8eb…90c0`](https://sepolia.uniscan.xyz/address/0xA8eb7A311dBA7358C5305D6baFfCe8d5d22A90c0) |
+| ConditionalOrders | [`0x9909…04B3`](https://sepolia.etherscan.io/address/0x9909261057eE2165aA9a2317b960Aa51812D04B3) | [`0x7182…1FD2`](https://sepolia.uniscan.xyz/address/0x718221B1f8433927b3aAF2BcC3c6Eb092a1a1FD2) |
+| Rules | [`0x36dD…7389`](https://sepolia.etherscan.io/address/0x36dD90fcB4c0208b20800CA53d6622293D4f7389) | [`0x5859…ae3e`](https://sepolia.uniscan.xyz/address/0x585906FF1FC8A14C62c77b72c24FcaDEcFc0ae3e) |
+| PriceFeeds | [`0x0e3f…F67a`](https://sepolia.etherscan.io/address/0x0e3f6F323727E8db4513cAC1667a659ED902F67a) | [`0x6B87…6e68`](https://sepolia.uniscan.xyz/address/0x6B870F34c6C6a6c94635604095c9f007Ca026e68) |
 
 On Unichain Sepolia every token but DAI has a real Chainlink feed (USDT too, which Sepolia lacks); DAI uses a fixed $1
 mock there. Full addresses, tokens, pools and faucets: [`deployments/README.md`](deployments/README.md).

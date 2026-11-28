@@ -22,13 +22,12 @@ import {ConditionalOrders} from "./ConditionalOrders.sol";
 /// swap limits, the range a leg enters, how much to swap before adding, and liquidity for amounts. The vault itself
 /// only moves tokens and keeps state.
 ///
-/// Prices: a price condition is true only when the pool's price AND the pair's Chainlink price are both past the
-/// level, and the pool is within the pair's band of Chainlink (`PriceFeeds.bandOf`). Pushing a pool to fire someone's
-/// strategy therefore does nothing on its own: Chainlink has to agree. A hold ("only if it lasts") starts only when both
-/// agree, so a push cannot start one (a push near Chainlink can make one start again: later, never earlier). A
-/// trailing stop remembers Chainlink's best price, so a push cannot raise it. Swaps of a step stop at the owner's
-/// slippage from the better of the pool's and Chainlink's price, so a step never sells far below Chainlink.
-/// No price history is kept, so swaps pay nothing for strategies, and strategies work on any pool of listed tokens.
+/// Prices: pool conditions read a pool's price of the moment, but only while it is within the pair's band of its
+/// Chainlink price (`PriceFeeds.bandOf`: ~2%, ~0.5% for two stablecoins). A price pushed further never makes a
+/// condition true and never lets a step run. An owner who wants Chainlink itself to confirm a level adds the Chainlink
+/// price condition (CHECK_LINK), alone or with "and". A step's swaps stop at the owner's slippage from the better of the
+/// pool's and Chainlink's price, and a step that cannot sell within it waits: it never sells into a push. No price
+/// history is kept, so swaps pay nothing for strategies, and strategies work on any pool of listed tokens.
 ///
 /// Pools: a 24-bit table (a side names the pools its conditions read in 24 bits). Anyone can add a pool whose two
 /// tokens are listed, hookless or using the limit-order hook (a pool with another hook could take a cut of swaps).
@@ -115,12 +114,6 @@ contract Rules {
         (ok, tick,,) = _prices(_pools[poolIndex]);
     }
 
-    /// @notice A pool's tick, and the pair's Chainlink price as a tick (`linked` false when the band is off, in tests,
-    /// or when Chainlink has no fresh price). `near`: the pool is within the band of Chainlink.
-    function pricesOf(uint24 poolIndex) external view returns (bool near, int24 tick, bool linked, int24 link) {
-        return _prices(_pools[poolIndex]);
-    }
-
     /// @notice Reverts (PriceMoved) unless `key`'s price is within the pair's band of its Chainlink price (no
     /// Chainlink price counts as too far). Runs swap and deposit at this price: this keeps them from running at a
     /// price someone pushed.
@@ -129,6 +122,8 @@ contract Rules {
         if (!near) revert PriceMoved();
     }
 
+    /// @dev A pool's tick; the pair's Chainlink tick (`linked` false when the band is off, in tests, or when Chainlink
+    /// has no fresh price); whether the pool is within the band of it.
     function _prices(PoolKey memory key) internal view returns (bool near, int24 tick, bool linked, int24 link) {
         (, tick,,) = poolManager.getSlot0(key.toId());
         address t0 = Currency.unwrap(key.currency0);
@@ -173,8 +168,8 @@ contract Rules {
         return a;
     }
 
-    /// @notice The price a side's trailing condition remembers: Chainlink's (the pool's while the band is off, in
-    /// tests). `trails` is false for a side without one; `ok` is false while that pool is too far from Chainlink.
+    /// @notice The price a side's trailing condition reads now. `trails` is false for a side without one; `ok` is
+    /// false while that pool's price is too far from Chainlink to be remembered.
     function trailTick(uint24 poolIndex, uint256 word) external view returns (bool trails, bool ok, int24 tick) {
         OrderState.Side memory sd = OrderState.decodeSide(word);
         uint24 pool;
@@ -183,12 +178,15 @@ contract Rules {
         } else if (sd.combine != OrderState.COMBINE_NONE && sd.checker2 == OrderState.CHECK_TRAIL) {
             (trails, pool) = (true, sd.checkPool2);
         }
-        if (trails) {
-            bool linked;
-            int24 link;
-            (ok, tick, linked, link) = _prices(_pools[pool == 0 ? poolIndex : pool]);
-            if (linked) tick = link;
-        }
+        if (trails) (ok, tick) = tickOf(pool == 0 ? poolIndex : pool);
+    }
+
+    /// @notice Whether every condition of a side can be judged now (see _judgeable). The vault forgets a hold only
+    /// then: a price pushed away from Chainlink, in any pool the side reads, says nothing about the condition.
+    function canJudge(uint24 poolIndex, uint256 word) external view returns (bool) {
+        OrderState.Side memory d = OrderState.decodeSide(word);
+        if (!_judgeable(d.checker, d.checkPool, poolIndex)) return false;
+        return d.combine == OrderState.COMBINE_NONE || _judgeable(d.checker2, d.checkPool2, poolIndex);
     }
 
     /// @notice Fees the order's position has earned since they were last collected, in bps of the position's value,
@@ -249,15 +247,15 @@ contract Rules {
                 elapsed >= MIN_APR_TIME
                     && FullMath.mulDiv(fees, BPS * 365 days, elapsed) < base * uint256(uint24(value));
         }
-        // the price conditions: EDGE, TICK, TRAIL. True only when the pool is near Chainlink and both prices are past
-        // the level (the pool's alone while the band is off, in tests).
-        (bool near, int24 tick, bool linked, int24 link) = _prices(_pools[pool == 0 ? c.poolIndex : pool]);
-        if (!near) return false;
-        return _past(c, checker, value, tick) && (!linked || _past(c, checker, value, link));
-    }
-
-    /// @dev Whether a price (as a tick) is past a price condition's level.
-    function _past(Ctx memory c, uint8 checker, int24 value, int24 tick) internal pure returns (bool) {
+        uint24 p = pool == 0 ? c.poolIndex : pool;
+        // the pair's Chainlink price against a level: no pool price involved
+        if (checker == OrderState.CHECK_LINK) {
+            (bool ok, int24 link) = _link(p);
+            return ok && (c.isUpper ? link >= value : link < value);
+        }
+        // the pool price conditions: EDGE, TICK, TRAIL. A price too far from Chainlink never makes them true.
+        (bool live, int24 tick) = tickOf(p);
+        if (!live) return false;
         int256 t = tick;
         if (checker == OrderState.CHECK_EDGE) {
             return c.isUpper ? t >= int256(c.upper) + value : t < int256(c.lower) - value;
@@ -607,7 +605,7 @@ contract Rules {
         internal
         view
     {
-        if (checker == OrderState.CHECK_OFF || checker > OrderState.CHECK_APR || checker == 5) revert InvalidSide(); // 5: retired
+        if (checker == OrderState.CHECK_OFF || checker > OrderState.CHECK_APR) revert InvalidSide();
         if (_isLevel(checker) && (value <= TickMath.MIN_TICK || value >= TickMath.MAX_TICK)) revert InvalidSide();
         if (checker == OrderState.CHECK_TIME && value <= 0) revert InvalidSide();
         // a trailing distance is a fall of less than 99.99% (or the same number of ticks up)
@@ -617,7 +615,7 @@ contract Rules {
         if (checker == OrderState.CHECK_FEES && (value <= 0 || uint24(value) > BPS || idle)) revert InvalidSide();
         if (checker == OrderState.CHECK_APR && (value <= 0 || idle || upper || !leaves)) revert InvalidSide();
 
-        if (checker == OrderState.CHECK_TICK || checker == OrderState.CHECK_TRAIL) {
+        if (_isLevel(checker) || checker == OrderState.CHECK_TRAIL) {
             // 0 = the leg's own pool; another pool is named by its index (never by the own pool's index)
             if (pool == own || (pool != 0 && !_known(pool))) revert InvalidSide();
         } else if (pool != 0) {
@@ -625,9 +623,25 @@ contract Rules {
         }
     }
 
-    /// @dev A price level: the pool's price against a fixed tick. A repeating level steps.
+    /// @dev A price level: the pool's or Chainlink's price against a fixed tick. A repeating level steps.
     function _isLevel(uint8 checker) internal pure returns (bool) {
-        return checker == OrderState.CHECK_TICK;
+        return checker == OrderState.CHECK_TICK || checker == OrderState.CHECK_LINK;
+    }
+
+    /// @dev The Chainlink price of a pool's pair, as a tick of that pool.
+    function _link(uint24 poolIndex) internal view returns (bool, int24) {
+        PoolKey memory k = _pools[poolIndex];
+        return feeds.pairTick(Currency.unwrap(k.currency0), Currency.unwrap(k.currency1));
+    }
+
+    /// @dev Whether one condition can be judged now: its price is one to believe (a pool near Chainlink, or a fresh
+    /// Chainlink price). Fees are valued at the own pool's price. A timer always can.
+    function _judgeable(uint8 checker, uint24 pool, uint24 own) internal view returns (bool ok) {
+        uint24 p = pool == 0 ? own : pool;
+        if (checker == OrderState.CHECK_LINK) (ok,) = _link(p);
+        else if (checker == OrderState.CHECK_TIME) ok = true;
+        else if (checker == OrderState.CHECK_FEES || checker == OrderState.CHECK_APR) (ok,) = tickOf(own);
+        else (ok,) = tickOf(p);
     }
 
     /// @dev A pool in the table.

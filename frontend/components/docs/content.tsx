@@ -83,7 +83,7 @@ export const SECTIONS: DocSection[] = [
           <p>
             Four contracts. <code>RuleHook</code> is the Uniswap v4 hook (afterInitialize, beforeSwap, afterSwap): it fills limit orders inside swaps. <code>ConditionalOrders</code> holds positions that have a strategy, inside the PoolManager (owner = the contract, salt =
             order id). <code>Rules</code> holds the pool table (any pool of listed tokens) and does conditions, the Chainlink check, validation and price math. <code>PriceFeeds</code> is the Chainlink token list. Each stays
-            under the 24 KB size limit. Source: <code>src/</code>, tests: <code>test/</code> (146 Foundry tests).
+            under the 24 KB size limit. Source: <code>src/</code>, tests: <code>test/</code> (154 Foundry tests).
           </p>
         </Dev>
       </Section>
@@ -241,6 +241,7 @@ export const SECTIONS: DocSection[] = [
             <tr><td>Reaches a price</td><td>The price drops below (falls side) or rises above (rises side) a price you choose.</td></tr>
             <tr><td>Turns from its best price</td><td>A trailing stop: the price falls x% from its highest (or rises x% from its lowest) since the side started.</td></tr>
             <tr><td>Price in another pool</td><td>The same, watching another Alucard pool’s price.</td></tr>
+            <tr><td>Chainlink price</td><td>Chainlink’s (the market’s) price drops below or rises above a level. A push of the pool cannot fire it; add it with “and” to a pool level to have Chainlink confirm it.</td></tr>
             <tr><td>On a timer</td><td>A set time has passed since the side last ran.</td></tr>
             <tr><td>Fees earned</td><td>The fees since they were last collected reach x% of the position.</td></tr>
             <tr><td>Fee rate falls</td><td>Those fees, as a yearly rate, are below x% (after at least an hour).</td></tr>
@@ -300,7 +301,7 @@ export const SECTIONS: DocSection[] = [
           <li><strong>Re-ranging moves the range itself</strong>, so a side that watches “leaves my range” follows the new range on the other side too (tested on the contract and on the backtest engine).</li>
         </ul>
         <h3>What is refused, and why</h3>
-        <p>The builder greys these out with the reason, and the contract refuses them too (the two are checked against each other on 35,126 strategy shapes):</p>
+        <p>The builder greys these out with the reason, and the contract refuses them too (the two are checked against each other on 43,554 strategy shapes):</p>
         <table>
           <thead>
             <tr>
@@ -436,7 +437,7 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
         </ul>
         <Callout title="How we know it runs what the contract runs">
           On 2,000 random strategies replayed on both, the engine&apos;s steps fire at exactly the same swaps as the contract&apos;s, and what the owner
-          ends with matches too: all 2,000 within 0.1% of the contract&apos;s money, 1,989 within 0.01%, the largest gap 0.028%. That test covers
+          ends with matches too: all 2,000 within 0.1% of the contract&apos;s money, 1,987 within 0.01%, the largest gap 0.028%. That test covers
           strategies without swap-to-one-token steps, moves into other pools or fee conditions, on synthetic price paths (
           <code>test/EditorParity.t.sol</code>, run on every change).
         </Callout>
@@ -463,8 +464,8 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
       <Section id="safety" title="Safety and limits" lead="What protects your position, how each attack is stopped, and what to be aware of.">
         <Cards
           items={[
-            { icon: ShieldCheck, title: "Chainlink has to agree", text: "A price condition is true only when the pool's price and Chainlink's are both past your level, and the pool is near Chainlink. A push alone fires nothing." },
-            { icon: ArrowLeftRight, title: "Nothing sells below Chainlink", text: "A step's swap stops at your slippage from the better of the pool's and Chainlink's price. A pushed pool leaves the tokens unsold." },
+            { icon: ShieldCheck, title: "Prices near Chainlink only", text: "A pool's price counts only within about 2% of Chainlink's (0.5% for two stablecoins). A push further away fires nothing, however long it is held." },
+            { icon: ArrowLeftRight, title: "Never sells into a push", text: "Every swap of a step must fill within your slippage of Chainlink's price, or the whole step waits and the position stays as it is." },
             { icon: Layers, title: "Payouts are never stuck", text: "A transfer that fails is held for you to withdraw to any address, and nobody else's order can spend it." },
             { icon: LineChart, title: "Always yours", text: "Cancel and withdraw at any time, wherever the money is. After expiry anyone can close it, and the tokens still go to you." },
           ]}
@@ -478,12 +479,13 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
             </tr>
           </thead>
           <tbody>
-            <tr><td>Push a pool&apos;s price to fire someone&apos;s stop (by any amount, for any time)</td><td>A price condition needs both the pool and Chainlink past the level (<code>Rules._cond</code>), and the pool within the pair&apos;s band of Chainlink. A push moves only the pool. A real move moves Chainlink too and runs at once.</td></tr>
-            <tr><td>Use a thin pool someone registered as the trigger</td><td>Same rule: a condition reading another pool still needs Chainlink to agree. A pool counts only if both tokens are listed and it has no hook or ours.</td></tr>
-            <tr><td>Sandwich or flash-loan the step&apos;s own swap</td><td>Its price limit is the owner&apos;s slippage from the better of the pool&apos;s and Chainlink&apos;s price (<code>Rules.swapLimit</code>); a pool pushed past that leaves the tokens unsold. The price is checked against the band right before the step (<code>Rules.checkPrice</code>).</td></tr>
-            <tr><td>Move the money into a pushed pool</td><td>The destination pool is checked the same way before anything is added, and its swap has the same Chainlink-anchored limit.</td></tr>
-            <tr><td>Start or skip an “only if it lasts” hold</td><td>A hold starts only when <code>poke</code> sees the pool and Chainlink agree, and the step runs only once it has lasted and both still agree. A push near Chainlink can make a hold start again: that delays the step, never brings it forward (a late step is cheap for an LP, whose position keeps earning in range).</td></tr>
-            <tr><td>Raise a trailing stop&apos;s best price with a push</td><td>The best price it remembers is Chainlink&apos;s, not the pool&apos;s.</td></tr>
+            <tr><td>Push a pool&apos;s price far to fire someone&apos;s stop</td><td>A pool&apos;s price counts only within the pair&apos;s band of Chainlink (<code>Rules.tickOf</code>); a push further away never makes a condition true, however long it is held. A real move moves Chainlink too and runs at once.</td></tr>
+            <tr><td>Push a pool a little (inside the band) to fire a price level</td><td>It can fire a pool-price level, but the step cannot sell into the push: every swap must fill within the owner&apos;s slippage of Chainlink&apos;s price, or the whole step reverts and waits (<code>SlippageLimit</code>), and the position keeps earning. An owner who wants Chainlink itself to confirm adds the <strong>Chainlink price</strong> condition with “and”.</td></tr>
+            <tr><td>Use a thin pool someone registered as the trigger</td><td>The same band applies to every pool a condition reads. A pool counts only if both tokens are listed and it has no hook or ours.</td></tr>
+            <tr><td>Sandwich or flash-loan the step&apos;s own swap</td><td>Its price limit is the owner&apos;s slippage from the better of the pool&apos;s and Chainlink&apos;s price (<code>Rules.swapLimit</code>); a swap cut short by it makes the step wait. The pool is checked against the band right before the step (<code>Rules.checkPrice</code>).</td></tr>
+            <tr><td>Move the money into a pushed pool</td><td>The destination pool is checked the same way before anything is added, and its swap has the same limit.</td></tr>
+            <tr><td>Start, skip or reset an “only if it lasts” hold</td><td>A hold starts when <code>poke</code> sees the condition true at a believable price and runs only once it has lasted. A price pushed away from Chainlink, in any pool the side reads, can neither start nor reset it (<code>Rules.canJudge</code>). A push inside the band can make it start again: a later step, never an earlier one.</td></tr>
+            <tr><td>Raise a trailing stop&apos;s best price with a push</td><td><code>poke</code> records a new best price only while the pool is near Chainlink.</td></tr>
             <tr><td>A keeper overcharging</td><td>The fee is the owner&apos;s: a share of what the step moves (at most 1%), whatever the gas price. A side runs at most once a minute.</td></tr>
             <tr><td>Spending ETH held for another owner</td><td>An order in an ETH pool must pay its own ETH (<code>msg.value</code>); held payouts are only withdrawable by their owner.</td></tr>
             <tr><td>Blocking a payout (a wallet that refuses or burns gas)</td><td>ETH is sent with a gas limit; a failed payout is kept as owed for the owner to withdraw anywhere, so the keeper&apos;s run still succeeds.</td></tr>
@@ -494,9 +496,10 @@ paid  : to msg.sender, in the pool's two tokens; everything else to the owner`}<
           </tbody>
         </table>
         <Callout kind="warn" title="Known limits">
-          Not audited; testnets only. Chainlink updates on about a 0.5% move or hourly, so a step can wait a little for the feed after a real move. A pool
-          pushed against a step&apos;s swap makes it sell less (the rest comes back unsold) rather than sell cheap. Keeper transactions are public: someone
-          can trade just before or after them, within these limits. Limit-order buckets crossed by one swap beyond the first three wait for the next swap or
+          Not audited; testnets only. Inside the band a push can fire a pool-price level early (add the Chainlink price condition to rule that out); the
+          step still cannot sell into it. A step whose own sale moves the pool more than your slippage waits until you raise the slippage (Settings, on an
+          open position too); the backtest shows such waits as refused steps. Keeper transactions are public: someone can trade just before or after
+          them, within these limits. Limit-order buckets crossed by one swap beyond the first three wait for the next swap or
           anyone&apos;s <code>fillBucket</code> call. The deployer controls the token list and bands, behind the two-day wait.
         </Callout>
         <Dev>
@@ -767,6 +770,13 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
               </td>
             </tr>
             <tr>
+              <td>Chainlink price reaches P</td>
+              <td>
+                <code>checker=5</code>, <code>value = tick(P)</code> of the pair&apos;s Chainlink price (<code>PriceFeeds.pairTick</code>),{" "}
+                <code>checkPool</code> = the pool whose pair it reads (0 = own)
+              </td>
+            </tr>
+            <tr>
               <td>Every h hours</td>
               <td>
                 <code>checker=3</code>, <code>value = h × 60</code>
@@ -836,14 +846,14 @@ tick(price) = log(t1per0 * 10^(dec1 - dec0)) / log(1.0001),  t1per0 = baseIs0 ? 
         <ul>
           <li>Actions must include remove, keep-fees or add; swap and add together are rejected.</li>
           <li>A side that removes everything and adds nothing cannot repeat: nothing would be left to run on.</li>
-          <li>TIME needs value &gt; 0; EDGE needs value ≥ 0; TICK and TRAIL may read any pool in the table. Checker 5 (the old Chainlink condition) is retired.</li>
+          <li>TIME needs value &gt; 0; EDGE needs value ≥ 0; TICK, LINK and TRAIL may read any pool in the table (LINK reads that pool's pair on Chainlink).</li>
           <li>A repeating TICK side without add needs a step; a re-centre needs remove 100% and both widths, and cannot repeat on a price level.</li>
           <li>Holds are at most a day. APR only on the lower side of a side that leaves.</li>
           <li>Moves need a second leg; a held-token leg only moves; a move into another pair must swap into the shared token; an edit keeps a way to the other leg.</li>
         </ul>
         <p>
           <code>scripts/check-rules.ts</code> encodes every template on every pool and dry-runs <code>createOrder</code> against the contract, and{" "}
-          <code>test/EditorParity.t.sol</code> checks that the editor accepts exactly what the contract accepts (35,126 cases) and that the backtest engine runs
+          <code>test/EditorParity.t.sol</code> checks that the editor accepts exactly what the contract accepts (43,554 cases) and that the backtest engine runs
           orders exactly where the contract does (2,000 orders).
         </p>
       </Section>
@@ -1042,7 +1052,7 @@ fee earned = L_position × overlap_fraction × Δ × fee / (1 − fee)
     render: () => (
       <Section dev id="local-dev" title="Run it locally">
         <Code lang="bash">{`# contracts
-forge test                                   # 146 tests (EditorParity needs the app installed below)
+forge test                                   # 154 tests (EditorParity needs the app installed below)
 
 # app + backtest API
 cd frontend && npm install && npm run setup:api

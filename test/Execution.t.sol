@@ -249,11 +249,40 @@ contract ExecutionTest is RuleSetup {
     }
 
     /// The Chainlink condition is retired: every pool condition is already checked against Chainlink.
-    function test_theRetiredChainlinkConditionIsRefused() public {
-        ConditionalOrders.CreateParams memory p = _params(_exit(5, -500), _off());
-        vm.prank(alice);
-        vm.expectRevert(Rules.InvalidSide.selector);
-        orders.createOrder(p);
+    /// The Chainlink price condition reads the pair's Chainlink price, not the pool's: it fires when Chainlink
+    /// passes the level, wherever the pool is, and not before.
+    function test_aChainlinkLevelReadsChainlinkNotThePool() public {
+        uint256 id = _create(_exit(OrderState.CHECK_LINK, -500), _off());
+        _wait(2 minutes);
+        assertFalse(rules.canExecute(orders, id, false));
+        _swap(true, 5e18); // the pool falls far past the level; Chainlink does not move
+        assertLt(_tick(), -500);
+        assertFalse(rules.canExecute(orders, id, false));
+        _swap(false, 5.05e18); // the pool back near 0
+        feed0.setAnswer(0.94e8); // Chainlink: token0 -6% (about -619 ticks)
+        assertTrue(rules.canExecute(orders, id, false));
+        _run(id, false);
+        assertEq(orders.getOrder(id).owner, address(0));
+    }
+
+    /// A Chainlink level on another pool's pair, and a repeating Chainlink level steps like a pool level.
+    function test_aRepeatingChainlinkLevelSteps() public {
+        OrderState.Side memory low = _side(OrderState.CHECK_LINK, -300, OrderState.ACT_REMOVE, 2_500);
+        low.repeat = true;
+        low.shape = 200;
+        uint256 id = _create(low, _off());
+        _wait(2 minutes);
+        feed0.setAnswer(0.965e8); // about -356 ticks
+        _run(id, false);
+        (OrderState.Side memory lo,) = _state(id);
+        assertEq(lo.value, -500);
+    }
+
+    /// Nothing reads a missing Chainlink price as a level: a broken feed never fires the condition.
+    function test_aChainlinkLevelNeverFiresWithoutAPrice() public {
+        uint256 id = _create(_exit(OrderState.CHECK_LINK, 500), _off());
+        feed0.setBroken(true);
+        assertFalse(rules.canExecute(orders, id, false));
     }
 
     // ---------------------------------------------------------------- general

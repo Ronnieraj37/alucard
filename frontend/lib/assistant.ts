@@ -32,7 +32,7 @@ export type AssistantReply =
   | { ok: true; kind: "ask"; question: string; options: string[] }
   | { ok: false; error: string };
 
-const TRIGGERS: TriggerKind[] = ["leave", "price", "otherPool", "timer", "trail", "fees", "apr"];
+const TRIGGERS: TriggerKind[] = ["leave", "price", "otherPool", "chainlink", "timer", "trail", "fees", "apr"];
 const ACTIONS: ActionKind[] = ["collect", "withdraw", "convert", "readd", "follow", "move"];
 
 const num = (x: unknown, lo: number, hi: number): number | undefined => {
@@ -63,6 +63,9 @@ function trigger(x: unknown, own: Pool): Trigger | null {
       t.price = num(o.price, 0, 1e12);
       break;
     }
+    case "chainlink":
+      t.price = num(o.price, 0, 1e12);
+      break;
     case "timer":
       t.hours = num(o.hours, 0.1, 24 * 365) ?? 24;
       break;
@@ -165,6 +168,9 @@ type Trigger =
   | { kind: "price"; price: number }                  // the base token's price (in quote) crosses this level
   | { kind: "price"; backIn: true; bufferPct?: number }  // ONLY inside plan.back: "the price is back in my range"
   | { kind: "otherPool"; poolIndex: number; price: number } // another pool's base price crosses a level
+  | { kind: "chainlink"; price: number }              // Chainlink's (the market's) base price crosses a level; use it when
+                                                      // the user says "Chainlink", "oracle" or "market price", often as
+                                                      // trigger2 with combine "and" to confirm a pool price level
   | { kind: "timer"; hours: number }                  // every N hours / after N hours
   | { kind: "trail"; trailPct: number }               // falls (down side) or rises (up side) this % from its best price
   | { kind: "fees"; feesPct: number }                 // fees earned reach this % of the position

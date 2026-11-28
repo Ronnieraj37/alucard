@@ -87,6 +87,8 @@ const HUMAN_ERRORS: Record<string, string> = {
   TooSoon: "This side ran (or started) less than a minute ago. A side runs at most once a minute: try again shortly.",
   NoPrice: "This pool's price is too far from Chainlink's right now to start a trailing stop from it. Try again shortly.",
   NothingToEnter: "The move could not put anything into the new range at today's price. It is tried again later.",
+  SlippageLimit:
+    "Its swap cannot sell everything within your slippage limit right now (the pool is away from Chainlink, or the sale is large next to the pool). It waits and is tried again; raise the slippage in Settings if it keeps waiting.",
   PriceMoved: "The pool's price is too far from Chainlink's (someone may have pushed it, or arbitrage has not caught up), so nothing runs at it. It runs once they agree again.",
   NothingToPoke: "Nothing to update: the remembered price is already the best one.",
   SideOff: "This side has no rule.",

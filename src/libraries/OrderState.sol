@@ -9,8 +9,8 @@ pragma solidity ^0.8.26;
 /// Side layout (bit offsets inside the side's word):
 ///   0-23     edge        int24  where this side of the position sits: tickLower (lower side) or tickUpper (upper
 ///                               side). Any sign. Moves only when the position is re-ranged.
-///   24-29    checker     condition A: 0 off, 1 EDGE, 2 TICK, 3 TIME, 4 TRAIL, 6 FEES, 7 APR (5 is retired)
-///   30-53    value       int24  condition A's number. EDGE: ticks past the edge; TICK: a price level (tick);
+///   24-29    checker     condition A: 0 off, 1 EDGE, 2 TICK, 3 TIME, 4 TRAIL, 5 LINK (Chainlink price), 6 FEES, 7 APR
+///   30-53    value       int24  condition A's number. EDGE: ticks past the edge; TICK, LINK: a price level (tick);
 ///                               TIME: minutes; TRAIL: ticks back from the best price seen; FEES: fees earned, in
 ///                               bps of the position; APR: fee rate per year, in bps
 ///   54-77    checkPool   uint24 pool condition A reads (TICK, TRAIL). 0 = the order's own pool
@@ -40,6 +40,7 @@ library OrderState {
     uint8 internal constant CHECK_TICK = 2;
     uint8 internal constant CHECK_TIME = 3;
     uint8 internal constant CHECK_TRAIL = 4;
+    uint8 internal constant CHECK_LINK = 5; // the pair's Chainlink price against a level (like TICK, without the pool)
     uint8 internal constant CHECK_FEES = 6; // fees the position has earned since it was last touched, in bps of it
     uint8 internal constant CHECK_APR = 7; // the same fees as a yearly rate (lower side only: "earns less than")
     uint8 internal constant MAX_CHECKER = 63;

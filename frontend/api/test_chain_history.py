@@ -118,7 +118,7 @@ def test_quote_usd_scales_values():
 
 def test_a_stop_loss_runs_once_on_a_crash():
     p = np.concatenate([np.full(50, 2000e-12) * np.exp(rng.normal(0, 0.001, 50)), np.linspace(2000e-12, 1500e-12, 200)])
-    s, _, ts = series(p)
+    s, _, ts = series(p, L=1e18)  # a pool deep enough that selling the whole position stays within 1%
     # 10% below the entry price, then sell everything into USDC (token1)
     stop = order(lower=e.Side(checker=e.CHECK_TICK, value=-1054, actions=e.ACT_REMOVE | e.ACT_KEEP_FEES | e.ACT_SWAP, remove_bps=e.BPS, swap_to_token1=True))
     r = e.run(req(start=float(ts[0]), days=30, order=stop), s)
@@ -126,11 +126,32 @@ def test_a_stop_loss_runs_once_on_a_crash():
     assert r["rules"]["final"] > r["noRules"]["final"]  # it left before the rest of the fall
 
 
+def test_a_sale_too_big_for_the_slippage_waits():
+    """As in the contract: when selling everything would move a thin pool more than the owner's slippage, the run
+    reverts and waits (it is counted as refused) instead of selling part of it."""
+    p = np.concatenate([np.full(50, 2000e-12) * np.exp(rng.normal(0, 0.001, 50)), np.linspace(2000e-12, 1500e-12, 200)])
+    s, _, ts = series(p, L=1e13)  # far thinner than the position
+    stop = order(lower=e.Side(checker=e.CHECK_TICK, value=-1054, actions=e.ACT_REMOVE | e.ACT_KEEP_FEES | e.ACT_SWAP, remove_bps=e.BPS, swap_to_token1=True))
+    r = e.run(req(start=float(ts[0]), days=30, order=stop), s)
+    assert r["rules"]["runs"] == 0 and r["rules"]["refused"] > 0 and not r["rules"]["closed"]
+
+
+def test_a_chainlink_level_runs_like_a_price_level_in_the_replay():
+    """Without Chainlink history the replay reads a Chainlink level on the pool's price (stated in the caveats)."""
+    p = np.concatenate([np.full(50, 2000e-12) * np.exp(rng.normal(0, 0.001, 50)), np.linspace(2000e-12, 1500e-12, 200)])
+    s, _, ts = series(p, L=1e18)
+    side = dict(actions=e.ACT_REMOVE | e.ACT_KEEP_FEES, remove_bps=e.BPS, value=-1054)
+    a = e.run(req(start=float(ts[0]), days=30, order=order(lower=e.Side(checker=e.CHECK_TICK, **side))), s)
+    b = e.run(req(start=float(ts[0]), days=30, order=order(lower=e.Side(checker=e.CHECK_LINK, **side))), s)
+    assert a["rules"]["runs"] == b["rules"]["runs"] == 1
+    assert math.isclose(a["rules"]["final"], b["rules"]["final"], rel_tol=1e-12)
+
+
 def test_a_stop_loss_runs_the_same_on_a_pool_quoted_the_other_way():
     """The app's words are made for its own pool (here WETH first); a recorded pool may list USDC first. The engine
     mirrors the words: the same stop on the same prices runs at the same swap and ends with the same value."""
     p = np.concatenate([np.full(50, 2000e-12) * np.exp(rng.normal(0, 0.001, 50)), np.linspace(2000e-12, 1500e-12, 200)])
-    s, _, ts = series(p)
+    s, _, ts = series(p, L=1e18)
     # the same pool with token0 and token1 swapped: price inverted (raw units), decimals swapped
     f = e.Series(key="test", dec0=6, dec1=18, fee=s.fee, spacing=s.spacing, token0="USDC", token1="WETH", ts=s.ts,
                  sp0=1 / s.sp0, sp1=1 / s.sp1, lpre=s.lpre, lpost=s.lpost, fee_raw=s.fee_raw, t0in=~s.t0in,

@@ -9,17 +9,17 @@ The app switches between them from the network menu in the header, and follows t
 
 | Contract | Address |
 |---|---|
-| ConditionalOrders (positions with a strategy) | [`0xa653D69C934B431431C11e55a59bbf69e524Db3c`](https://sepolia.etherscan.io/address/0xa653D69C934B431431C11e55a59bbf69e524Db3c) |
-| Rules (pool table, conditions, Chainlink check) | [`0x59AC15D97080BF47be608750d82bB9528e57996E`](https://sepolia.etherscan.io/address/0x59AC15D97080BF47be608750d82bB9528e57996E) |
-| RuleHook (hook: limit orders) | [`0x0482555fd63636Baa88bF1eA7d0e48e3F2Cb50C0`](https://sepolia.etherscan.io/address/0x0482555fd63636Baa88bF1eA7d0e48e3F2Cb50C0) |
-| PriceFeeds (token list, Chainlink USD feeds, 200-tick band) | [`0xC539EE58250B88F2ECAb86682c06ce4cD6592a1b`](https://sepolia.etherscan.io/address/0xC539EE58250B88F2ECAb86682c06ce4cD6592a1b) |
+| ConditionalOrders (positions with a strategy) | [`0x9909261057eE2165aA9a2317b960Aa51812D04B3`](https://sepolia.etherscan.io/address/0x9909261057eE2165aA9a2317b960Aa51812D04B3) |
+| Rules (pool table, conditions, Chainlink check) | [`0x36dD90fcB4c0208b20800CA53d6622293D4f7389`](https://sepolia.etherscan.io/address/0x36dD90fcB4c0208b20800CA53d6622293D4f7389) |
+| RuleHook (hook: limit orders) | [`0x26Cc9Dff279Cb44193B9010fBFAcd998C1a090c0`](https://sepolia.etherscan.io/address/0x26Cc9Dff279Cb44193B9010fBFAcd998C1a090c0) |
+| PriceFeeds (token list, Chainlink USD feeds, 200-tick band, 50 for stablecoin pairs) | [`0x0e3f6F323727E8db4513cAC1667a659ED902F67a`](https://sepolia.etherscan.io/address/0x0e3f6F323727E8db4513cAC1667a659ED902F67a) |
 | USDT mock feed ($1: no Chainlink USDT feed here) | [`0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4`](https://sepolia.etherscan.io/address/0x15C8A66A00421D24e7172bf8Cc8CA4E674b8d6E4) |
 | Uniswap v4 PoolManager | [`0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`](https://sepolia.etherscan.io/address/0xE03A1074c86CFeDd5C142C4F04F1a1536e203543) |
 | Uniswap v4 PositionManager | [`0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4`](https://sepolia.etherscan.io/address/0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4) |
 | Swap router (hookmate) | [`0xf13D190e9117920c703d79B5F33732e10049b115`](https://sepolia.etherscan.io/address/0xf13D190e9117920c703d79B5F33732e10049b115) |
 | Test faucet (`drip()`: every test token in one call) | [`0xE991cFD1A6EF2f42CdD2A1633a5605D5ea5d18fF`](https://sepolia.etherscan.io/address/0xE991cFD1A6EF2f42CdD2A1633a5605D5ea5d18fF) |
 
-Deployed from block 12218473. Test tokens (open mint, no value):
+Deployed from block 12230083. Test tokens (open mint, no value):
 
 | Token | Decimals | Address |
 |---|---|---|
@@ -45,17 +45,17 @@ Deployed from block 12218473. Test tokens (open mint, no value):
 
 | Contract | Address |
 |---|---|
-| ConditionalOrders (positions with a strategy) | [`0xb190f93B9511B40c12F068b9bdd2d392aBAC3FBD`](https://sepolia.uniscan.xyz/address/0xb190f93B9511B40c12F068b9bdd2d392aBAC3FBD) |
-| Rules (pool table, conditions, Chainlink check) | [`0x67CB05bb62b72DCbd359670acEb53E0159bda947`](https://sepolia.uniscan.xyz/address/0x67CB05bb62b72DCbd359670acEb53E0159bda947) |
-| RuleHook (hook: limit orders) | [`0x8B7f7798eE5d9Af14529eB964A1e912b670890C0`](https://sepolia.uniscan.xyz/address/0x8B7f7798eE5d9Af14529eB964A1e912b670890C0) |
-| PriceFeeds (token list, Chainlink USD feeds, 200-tick band) | [`0xA7dD5FCE507A4b6F0a24aBdCB169DaA023746C36`](https://sepolia.uniscan.xyz/address/0xA7dD5FCE507A4b6F0a24aBdCB169DaA023746C36) |
+| ConditionalOrders (positions with a strategy) | [`0x718221B1f8433927b3aAF2BcC3c6Eb092a1a1FD2`](https://sepolia.uniscan.xyz/address/0x718221B1f8433927b3aAF2BcC3c6Eb092a1a1FD2) |
+| Rules (pool table, conditions, Chainlink check) | [`0x585906FF1FC8A14C62c77b72c24FcaDEcFc0ae3e`](https://sepolia.uniscan.xyz/address/0x585906FF1FC8A14C62c77b72c24FcaDEcFc0ae3e) |
+| RuleHook (hook: limit orders) | [`0xA8eb7A311dBA7358C5305D6baFfCe8d5d22A90c0`](https://sepolia.uniscan.xyz/address/0xA8eb7A311dBA7358C5305D6baFfCe8d5d22A90c0) |
+| PriceFeeds (token list, Chainlink USD feeds, 200-tick band, 50 for stablecoin pairs) | [`0x6B870F34c6C6a6c94635604095c9f007Ca026e68`](https://sepolia.uniscan.xyz/address/0x6B870F34c6C6a6c94635604095c9f007Ca026e68) |
 | DAI mock feed ($1: no Chainlink DAI feed here) | [`0x95f9ACE4b9480B3712DF0A56013568693dDFe36E`](https://sepolia.uniscan.xyz/address/0x95f9ACE4b9480B3712DF0A56013568693dDFe36E) |
 | Uniswap v4 PoolManager | [`0x00B036B58a818B1BC34d502D3fE730Db729e62AC`](https://sepolia.uniscan.xyz/address/0x00B036B58a818B1BC34d502D3fE730Db729e62AC) |
 | Uniswap v4 PositionManager | [`0xf969Aee60879C54bAAed9F3eD26147Db216Fd664`](https://sepolia.uniscan.xyz/address/0xf969Aee60879C54bAAed9F3eD26147Db216Fd664) |
 | Swap router (hookmate) | [`0x9cD2b0a732dd5e023a5539921e0FD1c30E198Dba`](https://sepolia.uniscan.xyz/address/0x9cD2b0a732dd5e023a5539921e0FD1c30E198Dba) |
 | Test faucet (`drip()`: every test token in one call) | [`0x5BDF7BbA1EEb414A47761772c92F2c0F66F70746`](https://sepolia.uniscan.xyz/address/0x5BDF7BbA1EEb414A47761772c92F2c0F66F70746) |
 
-Deployed from block 68868194. Test tokens (open mint, no value):
+Deployed from block 69017079. Test tokens (open mint, no value):
 
 | Token | Decimals | Address |
 |---|---|---|
@@ -89,7 +89,7 @@ Chainlink feeds on Unichain Sepolia (24 h heartbeat): ETH / USD `0xd9c93081210dF
 The deployer key is read from `.env` (`PRIVATE_KEY`, never committed). Sepolia now charges far more gas for creating
 contracts and storage than Foundry's local simulation assumes, so every command adds `--gas-estimate-multiplier 1000`
 (gas is ~17 wei there, so this costs nothing). Without it, deployments run out of gas. Sepolia also caps one
-transaction at about 16.7M gas, so for calls with a large estimate (the trial's `keep` phase) use
+transaction at about 16.7M gas, so for calls with a large estimate use
 `--gas-estimate-multiplier 300` instead, or the transaction is refused before it is sent.
 
 ```bash
@@ -98,17 +98,13 @@ forge script script/sepolia/02_DeployCore.s.sol   --rpc-url $SEPOLIA_RPC --priva
 forge script script/sepolia/03_CreatePools.s.sol  --rpc-url $SEPOLIA_RPC --private-key $PRIVATE_KEY --broadcast --slow --gas-estimate-multiplier 1000
 ```
 
-Trial orders: `script/sepolia/04_Trial.s.sol` with `PHASE=orders`. Its `up` / `down` phases push the pools with swaps:
-since steps only run near Chainlink, that now shows that a push alone runs nothing (the arbitrage bot then takes the push
-back). Real runs come from real market moves.
-
 After a new deployment: `cd frontend && npm run sync`.
 
-## Live examples (2026-11-26)
+## Live examples (2026-11-28)
 
-`04_Trial PHASE=orders` (orders #1-#6: take profit, stop loss with swap, re-centre on leaving, compound every minute, a
-WBTC exit watching the hookless WETH/USDC pool, native ETH take profit; limit orders 1 and 2) and
-`frontend/scripts/demo-orders.ts` (#7 moves into USDT/USDC below the range and comes back 0.5% inside it, #8 holds USDC
-above the range and comes back centred on a 1% turn, #9 a stop loss confirmed for 15 minutes). Their ranges are tight, so
-real ETH moves trigger them while `npx tsx scripts/arb.ts --keep` runs.
+`frontend/scripts/demo-orders.ts` on both chains, from the deployer's wallet (the app's "See live example positions"):
+#1 moves into USDT/USDC below the range and comes back once WETH is back in it, #2 holds USDC above the range and comes
+back centred on a 1% turn, #3 a stop loss confirmed for 15 minutes, #4 sends the fees out every 2 minutes, 3 times. Their
+ranges are tight, so real ETH moves trigger them while the keeper runs (`npx tsx scripts/arb.ts --keep`, or the GitHub
+Actions keeper).
 

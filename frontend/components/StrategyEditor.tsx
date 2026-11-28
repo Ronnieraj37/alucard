@@ -6,6 +6,7 @@
 // slides in from the sides.
 
 import {
+  BadgeCheck,
   AlertTriangle,
   ArrowDownRight,
   ArrowLeft,
@@ -100,6 +101,7 @@ const ICONS: Record<string, LucideIcon> = {
   fees: Percent,
   apr: Coins,
   otherPool: Crosshair,
+  chainlink: BadgeCheck,
   withdraw: ArrowDownRight,
   convert: Shuffle,
   follow: MoveHorizontal,
@@ -114,6 +116,7 @@ const TITLES: Record<string, string> = {
   fees: "Fees earned",
   apr: "Fee rate falls",
   otherPool: "Price in another pool",
+  chainlink: "Chainlink price",
   withdraw: "Withdraw",
   convert: "Swap",
   follow: "Follow the price",
@@ -170,6 +173,13 @@ function triggerOptions(pool: Pool, lane: LaneId, price: number, range: [number,
     { id: "timer", label: "Every few hours or days", hint: "On a timer", icon: Clock, apply: set(t("timer")) },
     { id: "fees", label: "Fees reach a share of the position", hint: "When enough fees have built up", icon: Percent, apply: set(t("fees")) },
     { id: "otherPool", label: `${b} in another pool ${down ? "drops below" : "rises above"} a price`, hint: "Watch a bigger pool's price", icon: Crosshair, apply: set(t("otherPool")) },
+    {
+      id: "chainlink",
+      label: `Chainlink's ${b} price ${down ? "drops below" : "rises above"} a price`,
+      hint: "The market price, not this pool's: a push of the pool cannot fire it. Add it with “and” to confirm a level.",
+      icon: BadgeCheck,
+      apply: set(t("chainlink")),
+    },
   ];
   // "fee rate falls" uses the contract's lower slot: offer it in the lane that maps there
   if (contractSide(pool, lane) === "lower") list.push({ id: "apr", label: "Fees earn less than a yearly rate", hint: "Leave a pool that stopped paying", icon: Coins, apply: set(t("apr")) });
@@ -706,7 +716,7 @@ function Column(c: ColumnProps) {
     });
   }
   if (L.trigger && L.repeat && !move) {
-    const level = [L.trigger, L.trigger2].some((t) => t?.kind === "price" || t?.kind === "otherPool");
+    const level = [L.trigger, L.trigger2].some((t) => t?.kind === "price" || t?.kind === "otherPool" || t?.kind === "chainlink");
     cards.push({
       id: { lane, part: "repeat" },
       kicker: "Finally",
@@ -1150,8 +1160,15 @@ function TriggerFields({ pool, price, lane, t, onChange }: { pool: Pool; price: 
           </select>
         </Field>
       )}
-      {(t.kind === "price" || t.kind === "otherPool") && !t.backIn && (
-        <Field label={`${w.base.symbol} price`} hint={`Now ${fmt(wPrice)} ${w.quote.symbol}${t.kind === "otherPool" ? ` in ${w.label}` : ""}`}>
+      {(t.kind === "price" || t.kind === "otherPool" || t.kind === "chainlink") && !t.backIn && (
+        <Field
+          label={t.kind === "chainlink" ? `Chainlink's ${w.base.symbol} price` : `${w.base.symbol} price`}
+          hint={
+            t.kind === "chainlink"
+              ? `Now about ${fmt(wPrice)} ${w.quote.symbol} (the pool follows Chainlink). Chainlink updates on about a 0.5% move or hourly.`
+              : `Now ${fmt(wPrice)} ${w.quote.symbol}${t.kind === "otherPool" ? ` in ${w.label}` : ""}`
+          }
+        >
           <Suffix value={t.price === undefined ? undefined : round(t.price)} suffix={w.quote.symbol} onChange={(x) => onChange({ ...t, price: num(x) })} />
           <Chips values={[-10, -5, 5, 10]} current={undefined} label={(d) => `${d > 0 ? "+" : ""}${d}%`} onPick={(d) => onChange({ ...t, price: from * (1 + d / 100) })} />
         </Field>
@@ -1222,7 +1239,7 @@ function AdvancedFields({ value, onChange }: { value: Advanced; onChange: (a: Ad
         <Suffix value={value.expiryDays} suffix="days" onChange={(x) => onChange({ ...value, expiryDays: Math.max(1, Number(x)) })} />
       </Field>
       <p className="text-[12px] text-[var(--muted)]">
-        A step needs Chainlink to agree with the pool, so nobody can push a pool to fire it.{" "}
+        Prices count only near Chainlink, and no step sells into a push.{" "}
         <a className="underline decoration-[var(--line)] underline-offset-4 hover:text-[var(--ink)]" href="/docs#safety" target="_blank" rel="noreferrer">
           How it&apos;s protected
         </a>
@@ -1255,7 +1272,7 @@ function AdvancedBox({ value, onChange }: { value: Advanced; onChange: (a: Advan
               <Suffix value={value.expiryDays} suffix="days" onChange={(x) => onChange({ ...value, expiryDays: Math.max(1, Number(x)) })} />
             </Field>
             <p className="text-[12px] text-[var(--muted)]">
-              A step needs Chainlink to agree with the pool, so nobody can push a pool to fire it.{" "}
+              Prices count only near Chainlink, and no step sells into a push.{" "}
               <a className="underline decoration-[var(--line)] underline-offset-4 hover:text-[var(--ink)]" href="/docs#safety" target="_blank" rel="noreferrer">
                 How it&apos;s protected
               </a>

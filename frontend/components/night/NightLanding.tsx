@@ -420,19 +420,19 @@ function Guard() {
           <p className="n-kicker">
             <Eye className="h-4 w-4" /> Nobody can fire it for you
           </p>
-          <h2 className="n-h2">A push does nothing. Chainlink has to agree.</h2>
+          <h2 className="n-h2">A push can’t make your step sell cheap.</h2>
           <p className="n-p">
-            A step fires only when the pool&apos;s price and Chainlink&apos;s price are both past your level, and the pool is near Chainlink. Pushing a pool, by
-            2% or by 20%, for a minute or for hours, fires nothing; at most it delays a step. A trailing stop remembers Chainlink&apos;s best price, and
-            the step&apos;s own swap never sells further than your slippage below Chainlink. When the market really moves, Chainlink moves too, and the step runs.
+            A pool&apos;s price counts only while it is within about 2% of Chainlink&apos;s (0.5% for two stablecoins), so a bigger push fires nothing,
+            however long it is held. And every swap a step makes must fill within your slippage of Chainlink&apos;s price, or the step simply waits while
+            your position keeps earning. Want Chainlink itself to confirm a level? Add the Chainlink price condition with “and”.
           </p>
         </Rise>
         <Rise delay={0.15}>
           <div className="n-guard">
             {[
               ["Pool pushed 7% below the stop", "refused", "no"],
-              ["Pushed 1.5%, inside the band", "refused: Chainlink didn’t move", "no"],
-              ["Pushed to sell you cheap", "the swap stops at Chainlink − your slippage", "no"],
+              ["Pushed 1.5% to sell you cheap", "the step waits: no sale below Chainlink", "no"],
+              ["…with a Chainlink condition added", "it doesn’t fire at all", "no"],
               ["Chainlink falls with it", "the step runs", "go"],
             ].map(([a, b, c], i) => (
               <motion.div
@@ -461,7 +461,7 @@ function Trust() {
   const rows = [
     { i: KeyRound, h: "Only you can take the money out", b: "Positions are held by the contract per order; cancel at any time, wherever the money is. After expiry anyone can close it, and it still goes to you." },
     { i: Users, h: "Keepers: anyone, paid what you set", b: "Any address can run a step once its condition is true. It earns your keeper fee (0.1% by default, at most 1%) of what the step moves, nothing else." },
-    { i: Eye, h: "Chainlink decides what a price is", b: "A price condition needs Chainlink to agree. With no fresh Chainlink price (or an L2 sequencer that just restarted), nothing runs; cancelling always works." },
+    { i: Eye, h: "Chainlink decides what a price is", b: "A pool's price counts only near Chainlink's. With no fresh Chainlink price (or an L2 sequencer that just restarted), nothing runs; cancelling always works." },
     { i: ShieldCheck, h: "The admin can’t act on the spot", b: "The token list and the price bands are the only settings, and every change waits two days after it is announced. No upgrades, no pause, no fee switch." },
   ];
   return (
@@ -521,10 +521,10 @@ function Count({ to, suffix = "" }: { to: number; suffix?: string }) {
 
 function Proof() {
   const rows: [number, string, string][] = [
-    [35126, "", "strategy shapes where the editor and the contract agree"],
+    [43554, "", "strategy shapes where the editor and the contract agree"],
     [2000, "", "random orders where the backtest fires at the same swaps as the contract"],
     [2000, "", "of them end within 0.1% of the contract’s money (on the strategies that test covers)"],
-    [146, "", "contract tests, fuzz included, all passing"],
+    [154, "", "contract tests, fuzz included, all passing"],
   ];
   return (
     <section className="n-sec">

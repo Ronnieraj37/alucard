@@ -91,6 +91,8 @@ function triggersFor(lane: "down" | "up"): Trigger[] {
     { kind: "price", price: down ? 0.97 : 1.03 },
     { kind: "otherPool", poolIndex: 2, price: down ? 0.96 : 1.04 },
     { kind: "otherPool", poolIndex: 3, price: down ? 0.96 : 1.04 }, // a hookless pool: any pool can be watched
+    { kind: "chainlink", price: down ? 0.965 : 1.035 }, // the pair's Chainlink price
+    { kind: "chainlink", poolIndex: 2, price: down ? 0.955 : 1.045 }, // another pool's pair on Chainlink
     { kind: "timer", hours: 1 },
     { kind: "trail", trailPct: 3 },
     { kind: "fees", feesPct: 0.5 },
@@ -201,7 +203,7 @@ function condInDomain(checker: number, value: number, pool: number): boolean {
   if (checker === 2) return Math.abs(value) < 887_272; // any pool: the editor and the contract decide
   if (checker === 3) return value >= 1 && pool === 0;
   if (checker === 4) return value >= 1 && value <= 92_108;
-  // 5 (the retired Chainlink condition) is outside the domain: the contract refuses it, the editor never builds it
+  if (checker === 5) return Math.abs(value) < 887_272; // a Chainlink price level, like a pool's
   if (checker === 6) return value >= 1 && value <= 10_000 && pool === 0;
   if (checker === 7) return value >= 1 && pool === 0;
   return false;
@@ -407,7 +409,7 @@ function paths(): Path[] {
 function engineRules(): Rules[] {
   // everything the editor builds except swaps (the contract's own swap would move later prices, the replay's not),
   // other pools (the synthetic path has one pool) and fee conditions (the replay has no other traders paying fees)
-  const skip = (t?: Trigger | null) => t?.kind === "otherPool" || t?.kind === "fees" || t?.kind === "apr";
+  const skip = (t?: Trigger | null) => t?.kind === "otherPool" || (t?.kind === "chainlink" && !!t.poolIndex) || t?.kind === "fees" || t?.kind === "apr";
   const out: Rules[] = [];
   for (const lane of ["down", "up"] as const)
     for (const l of lanesFor(lane)) {

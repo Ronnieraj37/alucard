@@ -56,6 +56,7 @@ contract ConditionalOrders is IUnlockCallback {
     error BadMsgValue();
     error RefundFailed();
     error NothingOwed();
+    error SlippageLimit();
 
     uint256 internal constant BPS = 10_000;
     uint8 public constant MAX_KEEPER_FEE_BPS = 100;
@@ -319,11 +320,10 @@ contract ConditionalOrders is IUnlockCallback {
         if (sd.holdMinutes != 0) {
             bool isMet = rules.met(address(this), orderId, o.poolIndex, o.lowerState, o.upperState, upper);
             uint32 armed = armedAt(orderId, upper);
-            // a hold starts only when the pool and Chainlink both say the condition is true, so a push cannot start
-            // one. It is forgotten when the condition stops at a price near Chainlink: a push can at most make it
-            // start again (a step later, never earlier); a push far from Chainlink (or no Chainlink price) does nothing.
-            (bool near,) = rules.tickOf(o.poolIndex);
-            if (isMet == (armed == 0) && (isMet || near)) {
+            // a hold is forgotten only on prices that can be believed, in every pool the side reads: a push away
+            // from Chainlink (or no Chainlink price) says nothing about the condition, so it can neither start nor
+            // reset a hold. A push inside the band can make a hold start again: a step later, never earlier.
+            if (isMet == (armed == 0) && (isMet || rules.canJudge(o.poolIndex, word))) {
                 _setArmed(orderId, upper, isMet ? uint32(block.timestamp) : 0);
                 changed = true;
             }
@@ -583,8 +583,11 @@ contract ConditionalOrders is IUnlockCallback {
         (bool zeroForOne, uint256 amountIn, uint160 stopAt) = rules.mixFor(k, tickLower, tickUpper, h0, h1);
         if (amountIn == 0) return (h0, h1);
         uint160 limit = rules.swapLimit(k, zeroForOne, r.order.maxSlippage);
-        if (stopAt != 0 && (zeroForOne ? stopAt > limit : stopAt < limit)) limit = stopAt;
+        // the mix is reached before the slippage limit: stopping there is the plan. Otherwise all of it must sell.
+        bool toMix = stopAt != 0 && (zeroForOne ? stopAt > limit : stopAt < limit);
+        if (toMix) limit = stopAt;
         (uint256 spent, uint256 got) = _swap(k, zeroForOne, amountIn, limit);
+        if (!toMix && spent < amountIn) revert SlippageLimit();
         return zeroForOne ? (h0 - spent, h1 + got) : (h0 + got, h1 - spent);
     }
 
@@ -653,9 +656,9 @@ contract ConditionalOrders is IUnlockCallback {
         return d > 0 ? uint256(d) : 0;
     }
 
-    /// @dev Swap everything of one token into the other in the order's pool, stopping maxSlippage past the price
-    /// before it. Whatever that limit leaves unsold goes to the owner as it is. The keeper's fee for this run is then
-    /// taken from what the swap left: the bought amount, plus anything that stayed unsold.
+    /// @dev Swap everything of one token into the other in the order's pool. All of it must sell within maxSlippage of
+    /// the better of the pool's and Chainlink's price; if it cannot, the whole run reverts and waits (the position stays
+    /// as it was). The keeper's fee for this run is then taken from what the swap bought.
     function _instantSwap(Run memory r, OrderState.Side memory sd) internal {
         bool zeroForOne = sd.swapToToken1;
         uint256 amountIn = zeroForOne ? r.w0 : r.w1;
@@ -663,16 +666,10 @@ contract ConditionalOrders is IUnlockCallback {
 
         (uint256 spent, uint256 got) =
             _swap(r.key, zeroForOne, amountIn, rules.swapLimit(r.key, zeroForOne, r.order.maxSlippage));
-        uint256 fee = r.order.keeperFeeBps;
-        uint256 unsold = amountIn - spent;
-        uint256 bought = got - (got * fee) / BPS;
-        if (zeroForOne) {
-            (r.reserve0, r.reserve1) = ((unsold * fee) / BPS, r.reserve1 + (got * fee) / BPS);
-            (r.w0, r.w1) = (unsold - (unsold * fee) / BPS, r.w1 + bought);
-        } else {
-            (r.reserve1, r.reserve0) = ((unsold * fee) / BPS, r.reserve0 + (got * fee) / BPS);
-            (r.w1, r.w0) = (unsold - (unsold * fee) / BPS, r.w0 + bought);
-        }
+        if (spent < amountIn) revert SlippageLimit();
+        uint256 fee = (got * r.order.keeperFeeBps) / BPS;
+        if (zeroForOne) (r.w0, r.w1, r.reserve1) = (0, r.w1 + got - fee, r.reserve1 + fee);
+        else (r.w1, r.w0, r.reserve0) = (0, r.w0 + got - fee, r.reserve0 + fee);
     }
 
     /// @dev Exact-input swap that stops at `limit`. Skipped when the price is already past it.
@@ -863,7 +860,7 @@ contract ConditionalOrders is IUnlockCallback {
     }
 
     function _isLevel(uint8 checker) internal pure returns (bool) {
-        return checker == OrderState.CHECK_TICK;
+        return checker == OrderState.CHECK_TICK || checker == OrderState.CHECK_LINK;
     }
 
     function _positionLiquidity(PoolKey memory key, int24 tickLower, int24 tickUpper, bytes32 salt)

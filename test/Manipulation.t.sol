@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {Constants} from "@uniswap/v4-core/test/utils/Constants.sol";
 import {RuleSetup} from "./utils/RuleSetup.sol";
 import {Rules} from "../src/Rules.sol";
 import {ConditionalOrders} from "../src/ConditionalOrders.sol";
@@ -175,7 +178,8 @@ contract ManipulationTest is RuleSetup {
     }
 
     // ---------------------------------------------------------------- pushes INSIDE the band (an external review's
-    // "experiment 1": move the pool less than 2% from Chainlink and see what it can make a strategy do)
+    // "experiment 1": move the pool less than 2% from Chainlink and see what it can make a strategy do). A pool level
+    // may fire, but the step cannot sell into the push; an owner who wants Chainlink to confirm adds its condition.
 
     /// @dev Push the pool's price (not Chainlink's) down or up until it is past `target`, in small swaps.
     function _pushTo(int24 target) internal {
@@ -183,14 +187,18 @@ contract ManipulationTest is RuleSetup {
         for (uint256 i; i < 400 && (down ? _tick() > target : _tick() < target); ++i) _swap(down, 0.02e18);
     }
 
-    /// A price level 1% below: the pool is pushed past it (1.5%, inside the band). Chainlink does not agree, so the
-    /// condition is not true. A real move fires it.
-    function test_aPushInsideTheBandDoesNotFire() public {
-        uint256 id = _create(_exit(OrderState.CHECK_TICK, -100), _off());
+    /// "The pool below the level AND Chainlink below the level": a push of 1.5% (inside the band) moves only the pool,
+    /// so the side does not fire. A real move (Chainlink follows) fires it.
+    function test_aChainlinkConditionIgnoresPushes() public {
+        OrderState.Side memory low = _exit(OrderState.CHECK_TICK, -100);
+        low.combine = OrderState.COMBINE_AND;
+        low.checker2 = OrderState.CHECK_LINK;
+        low.value2 = -100;
+        uint256 id = _create(low, _off());
         _wait(2 minutes);
         _pushTo(-150);
         assertLt(_tick(), -100);
-        assertGt(_tick(), -200); // inside the band: the old guard alone would have let it fire
+        assertGt(_tick(), -200); // inside the band
         assertFalse(rules.canExecute(orders, id, false));
         vm.expectRevert(ConditionalOrders.ConditionNotMet.selector);
         _run(id, false);
@@ -199,9 +207,71 @@ contract ManipulationTest is RuleSetup {
         assertEq(orders.getOrder(id).owner, address(0));
     }
 
+    /// A pool level alone can be fired by a push inside the band, but a step that sells cannot sell into it: the
+    /// swap must fill within the owner's slippage of Chainlink, so the run reverts and the position stays as it was.
+    function test_aPushCannotMakeAStepSellCheap() public {
+        OrderState.Side memory low = _exit(OrderState.CHECK_TICK, -100);
+        low.actions |= OrderState.ACT_SWAP;
+        low.swapToToken1 = true;
+        ConditionalOrders.CreateParams memory p = _params(low, _off());
+        p.maxSlippage = 5; // 50 ticks, about 0.5%
+        uint256 id = _submit(alice, p);
+        _wait(2 minutes);
+        _pushTo(-150);
+        assertTrue(rules.canExecute(orders, id, false)); // the pool level is past
+        int24 pushed = _tick();
+        vm.expectRevert(ConditionalOrders.SlippageLimit.selector);
+        _run(id, false);
+        assertEq(_tick(), pushed); // nothing was sold into the push
+        assertEq(_liquidity(id), 10e18); // the position is untouched
+    }
+
+    /// A step waits while the pool is pushed against its swap, and runs in full once the pool is back on Chainlink.
+    function test_aStepWaitsForAFairPriceThenSellsEverything() public {
+        OrderState.Side memory low = _exit(OrderState.CHECK_TIME, 1);
+        low.actions |= OrderState.ACT_SWAP;
+        low.swapToToken1 = true;
+        ConditionalOrders.CreateParams memory p = _params(low, _off());
+        p.maxSlippage = 10; // 1%: the sale itself moves this pool about 0.6%
+        uint256 id = _submit(alice, p);
+        _wait(2 minutes);
+        _pushTo(-150);
+        vm.expectRevert(ConditionalOrders.SlippageLimit.selector);
+        _run(id, false);
+        _pushTo(0); // arbitrage brings the pool back
+        uint256 t0 = _bal(currency0, alice);
+        uint256 t1 = _bal(currency1, alice);
+        _run(id, false);
+        assertEq(_bal(currency0, alice), t0); // all of token0 was sold
+        assertGt(_bal(currency1, alice), t1);
+        assertEq(orders.getOrder(id).owner, address(0));
+    }
+
+    /// A sale too big for the owner's slippage (its own price impact is larger) waits rather than half-sell; the owner
+    /// can raise the slippage at any time (updateOrder) and the step then runs in full.
+    function test_aSaleTooBigForTheSlippageWaitsUntilTheOwnerRaisesIt() public {
+        OrderState.Side memory low = _exit(OrderState.CHECK_TIME, 1);
+        low.actions |= OrderState.ACT_SWAP;
+        low.swapToToken1 = true;
+        ConditionalOrders.CreateParams memory p = _params(low, _off());
+        p.maxSlippage = 3; // 0.3%: less than this sale's own impact
+        uint256 id = _submit(alice, p);
+        _wait(2 minutes);
+        vm.expectRevert(ConditionalOrders.SlippageLimit.selector);
+        _run(id, false);
+        assertEq(_liquidity(id), 10e18);
+        ConditionalOrders.UpdateParams memory u =
+            ConditionalOrders.UpdateParams({expiry: p.expiry, keeperFeeBps: p.keeperFeeBps, maxSlippage: 10, lower: p.lower, upper: p.upper});
+        vm.prank(alice);
+        orders.updateOrder(id, u);
+        _wait(2 minutes);
+        _run(id, false);
+        assertEq(orders.getOrder(id).owner, address(0));
+    }
+
     /// A push inside the band can make a started hold start again, which only delays the step (for an LP, a later
-    /// exit while the position may still earn). It can never make the step run before the condition has lasted, by
-    /// both prices, for the whole hold.
+    /// exit while the position may still earn). It can never make the step run before the condition has lasted for
+    /// the whole hold.
     function test_aPushInsideTheBandOnlyDelaysAHold() public {
         OrderState.Side memory low = _exit(OrderState.CHECK_TICK, -300);
         low.holdMinutes = 30;
@@ -226,37 +296,32 @@ contract ManipulationTest is RuleSetup {
         assertEq(orders.getOrder(id).owner, address(0));
     }
 
-    /// A trailing stop remembers Chainlink's best price, so pushing the pool up inside the band cannot raise it
-    /// (which would make the stop fire early on the way back).
-    function test_aPushInsideTheBandCannotRaiseATrailingHigh() public {
-        uint256 id = _create(_exit(OrderState.CHECK_TRAIL, 300), _off());
-        (OrderState.Side memory lo,) = _state(id);
-        int24 start = lo.best;
-        _pushTo(150);
+    /// A hold on a condition that reads ANOTHER pool: pushing that other pool far from Chainlink says nothing about
+    /// the condition, so it cannot reset the hold (the vault checks the pools the side reads, not only its own).
+    function test_aPushOfTheOtherPoolCannotResetAHold() public {
+        PoolKey memory other = PoolKey(currency0, currency1, 500, 10, IHooks(hook));
+        poolManager.initialize(other, Constants.SQRT_PRICE_1_1);
+        _addFullRange(other);
+        uint24 otherIndex = rules.registerPool(other);
+        OrderState.Side memory low = _exit(OrderState.CHECK_TICK, -300);
+        low.checkPool = otherIndex;
+        low.holdMinutes = 30;
+        uint256 id = _create(low, _off());
+        // a real move: both pools fall, Chainlink follows
+        _pushTo(-400);
+        for (uint256 i; i < 400 && _tickOf(otherIndex) > -400; ++i) _swapIn(other, true, 0.02e18);
+        _market();
+        orders.poke(id, false);
+        uint256 armed = orders.armedAt(id, false);
+        assertGt(armed, 0);
+        _swapIn(other, false, 9e18); // the other pool pushed far up, away from Chainlink
         vm.expectRevert(ConditionalOrders.NothingToPoke.selector);
         orders.poke(id, false);
-        _market(); // a real rise is remembered
-        orders.poke(id, false);
-        (lo,) = _state(id);
-        assertGt(lo.best, start + 100);
+        assertEq(orders.armedAt(id, false), armed);
     }
 
-    /// The step's own swap is anchored to Chainlink: with the pool pushed 1.5% down (inside the band) and a 0.5%
-    /// slippage limit, the step does not sell at the pushed price. The token comes back unsold.
-    function test_aStepDoesNotSellBelowChainlink() public {
-        OrderState.Side memory low = _exit(OrderState.CHECK_TIME, 1);
-        low.actions |= OrderState.ACT_SWAP;
-        low.swapToToken1 = true;
-        ConditionalOrders.CreateParams memory p = _params(low, _off());
-        p.maxSlippage = 5; // 50 ticks, about 0.5%
-        uint256 id = _submit(alice, p);
-        _wait(2 minutes);
-        _pushTo(-150);
-        int24 pushed = _tick();
-        uint256 t0 = _bal(currency0, alice);
-        _run(id, false);
-        assertEq(_tick(), pushed); // nothing was sold into the push
-        assertGt(_bal(currency0, alice), t0); // token0 came back as it was
+    function _tickOf(uint24 index) internal view returns (int24 t) {
+        (, t,) = rules.poolState(index);
     }
 
     // ---------------------------------------------------------------- ladders after a gap

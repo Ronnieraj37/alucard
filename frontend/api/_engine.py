@@ -3,9 +3,9 @@
 It runs the exact order the app's editor sends to the contract (the packed words of lib/rules.ts encodeRules), the way
 src/ConditionalOrders.sol and src/Rules.sol run it:
   * every pool condition reads the pool's price after each swap. The contract also requires that price to be near
-    Chainlink and Chainlink's own price to be past the level too; recorded pools are arbitraged to the market, so here
-    Chainlink is taken to be the pool's price (the real feed updates on a ~0.5% move or hourly, so on chain a condition
-    can be true a little later than here)
+    Chainlink; recorded pools are arbitraged to the market, so here that check always passes. A Chainlink price level
+    (LINK) is replayed on the pool's price too: no Chainlink history is loaded
+  * a swap of a step sells everything within the owner's slippage or the run reverts and waits (counted as refused)
   * a hold ("only if it lasts") needs the condition true for the whole time, from the first swap it was true at
     (a keeper pokes it there) to the run
   * TIME counts from the side's last run; FEES and APR from the fees the position earned since they were collected
@@ -39,7 +39,8 @@ LN = math.log(1.0001)
 MIN_TICK, MAX_TICK = -887272, 887272
 BPS = 10_000
 CHECK_OFF, CHECK_EDGE, CHECK_TICK, CHECK_TIME, CHECK_TRAIL = 0, 1, 2, 3, 4
-LEVELS = (CHECK_TICK,)  # a price level: a repeating one steps
+CHECK_LINK = 5  # the pair's Chainlink price against a level (replayed on the pool's price: see the caveats)
+LEVELS = (CHECK_TICK, CHECK_LINK)  # a price level: a repeating one steps
 COMBINE_NONE, COMBINE_AND, COMBINE_OR = 0, 1, 2
 BASE_TIME = 1_767_225_600  # OrderState.BASE_TIME: stored times round up to the minute after this
 ACT_KEEP_FEES, ACT_REMOVE, ACT_SWAP, ACT_ADD = 1, 2, 4, 8
@@ -564,7 +565,7 @@ class Sim:
         ok, t = self.px(self._pool_of(st, pool), i, j)
         if checker == CHECK_EDGE:
             return ok & ((t >= st.tu + value) if slot == "upper" else (t < st.tl - value))
-        if checker == CHECK_TICK:
+        if checker in (CHECK_TICK, CHECK_LINK):
             return ok & ((t >= value) if slot == "upper" else (t < value))
         if checker == CHECK_TRAIL:
             b = best if best is not None else np.full(j - i, d.best)
@@ -684,8 +685,9 @@ class Sim:
 
     # ---- swaps
     def swap(self, w0: float, w1: float, zero_for_one: bool, k: int, stop: float | None = None):
-        """Sell all of one token at the pool's liquidity at that moment, stopping maxSlippage past the price before it
-        (or earlier at `stop`, a sqrt price)."""
+        """Sell all of one token at the pool's liquidity at that moment, within maxSlippage of the price before it, or
+        stop earlier at `stop` (a sqrt price: the mix a range needs). As in the contract, a swap the slippage limit would
+        cut short makes the whole run revert and wait: None."""
         s, p = self.s, self.p
         amount_in = w0 if zero_for_one else w1
         if amount_in <= 0:
@@ -693,22 +695,22 @@ class Sim:
         ref = int(s.tick[k])
         slip = p.slippage_steps * 10
         sl = sqrt_at(max(MIN_TICK + 1, min(MAX_TICK - 1, ref - slip if zero_for_one else ref + slip)))
-        if stop is not None:
-            sl = max(sl, stop) if zero_for_one else min(sl, stop)
+        to_mix = stop is not None and (stop > sl if zero_for_one else stop < sl)
+        if to_mix:
+            sl = stop
         sp = float(s.sp1[k])
         if (zero_for_one and sl >= sp) or (not zero_for_one and sl <= sp):
-            return w0, w1, "convert skipped: price already past the limit"
+            return (w0, w1, "") if to_mix else None
         L = float(s.lpost[k])
         net = amount_in * (1 - s.fee)
+        used = min(net, L * (1 / sl - 1 / sp)) if zero_for_one else min(net, L * (sl - sp))
+        if used < net and not to_mix:
+            return None  # SlippageLimit: the run waits
         if zero_for_one:  # token0 in, price falls
-            used = min(net, L * (1 / sl - 1 / sp))
             sp_new = L * sp / (L + used * sp)
-            out = L * (sp - sp_new)
-            return w0 - used / (1 - s.fee), w1 + out, ("converted" if used == net else "partly converted (limit)")
-        used = min(net, L * (sl - sp))
+            return w0 - used / (1 - s.fee), w1 + L * (sp - sp_new), "converted"
         sp_new = sp + used / L
-        out = L * (1 / sp - 1 / sp_new)
-        return w0 + out, w1 - used / (1 - s.fee), ("converted" if used == net else "partly converted (limit)")
+        return w0 + L * (1 / sp - 1 / sp_new), w1 - used / (1 - s.fee), "converted"
 
     def zap(self, w0: float, w1: float, tl: int, tu: int, k: int):
         """Rules.mixFor + the vault's swap: sell towards the range's mix, stopping where what is left fits it."""
@@ -1216,9 +1218,10 @@ def run_series(s: Series, other: Series | None, req: dict) -> dict:
         ] if s.quote_usd is not None else []) + [
             "Real swaps from the recorded window; past results do not predict future ones." if s.source == "recorded"
             else "Past results do not predict future ones.",
-            "Conditions read the pool's price after each swap. On chain Chainlink must agree (its price past the level too, and "
-            "the pool near it); the replay takes Chainlink to be the pool's price, so a step that waits for the feed to update "
-            "(it updates on about a 0.5% move or hourly) runs a little later on chain than here.",
+            "Conditions read the pool's price after each swap. On chain a step also needs that price within about 2% of Chainlink; "
+            "the replay assumes it is (arbitrage keeps deep pools there).",
+            "A step whose swap cannot sell everything within your slippage waits and is tried again (shown as refused): "
+            "if that happens often, your position is large next to the pool, so raise the slippage.",
             "Your own swaps do not move later prices in the replay, and they use the pool's liquidity at that moment.",
             "Fees assume your position is small next to the pool.",
             "A keeper runs each rule a fixed delay after its condition is met; price manipulation and MEV are not modelled.",

@@ -15,12 +15,12 @@ export type { Side } from "./side";
 
 export type LaneId = "down" | "up"; // base price falls / rises
 
-export type TriggerKind = "leave" | "price" | "otherPool" | "timer" | "trail" | "fees" | "apr";
+export type TriggerKind = "leave" | "price" | "otherPool" | "chainlink" | "timer" | "trail" | "fees" | "apr";
 export type Trigger = {
   kind: TriggerKind;
   bufferPct?: number; // leave: how far past the range edge
-  price?: number; // price, otherPool: base price in quote
-  poolIndex?: number; // otherPool; trail: the pool it follows (unset = this one)
+  price?: number; // price, otherPool, chainlink: base price in quote
+  poolIndex?: number; // otherPool; trail, chainlink: the pool whose price it reads (unset = this one)
   hours?: number; // timer
   trailPct?: number; // trail: how far the price turns back from its best
   feesPct?: number; // fees: fees earned, in % of the position
@@ -122,7 +122,7 @@ export function markBackIn(p: Pool, r: Rules, range: [number, number]): Rules {
 }
 
 /** A price level: a pool's price against a fixed tick. A repeating level steps. */
-const isLevel = (checker: number) => checker === CHECK.TICK;
+const isLevel = (checker: number) => checker === CHECK.TICK || checker === CHECK.LINK;
 export const MAX_RUNS = 127;
 /** Rules.MAX_HOLD_MINUTES: a day. */
 export const MAX_HOLD_MINUTES = 1440;
@@ -131,7 +131,8 @@ export const MAX_TRAIL_TICKS = 92_108;
 const MAX_TICK = 887_272;
 const BPS = 10_000;
 
-const isPrice = (t?: Trigger | null) => t?.kind === "price" || t?.kind === "otherPool";
+/** A price level (the pool's price, or Chainlink's): a fixed number the price crosses; a repeating one steps. */
+const isPrice = (t?: Trigger | null) => t?.kind === "price" || t?.kind === "otherPool" || t?.kind === "chainlink";
 const isApr = (l: Lane) => l.trigger?.kind === "apr" || l.trigger2?.kind === "apr";
 const live = (l: Lane) => !!l.trigger && l.actions.length > 0;
 
@@ -140,10 +141,10 @@ export const contractSide = (p: Pool, lane: LaneId): "lower" | "upper" => ((lane
 
 /** The pool one trigger reads: another pool for "price in another pool", else `watch` (the leg's own price source). */
 export const watchedBy = (p: Pool, t?: Trigger | null, watch: Pool = p): Pool =>
-  (t?.kind === "otherPool" || t?.kind === "trail") && t.poolIndex ? poolByIndex(t.poolIndex) ?? watch : watch;
+  (t?.kind === "otherPool" || t?.kind === "trail" || t?.kind === "chainlink") && t.poolIndex ? poolByIndex(t.poolIndex) ?? watch : watch;
 
-/** Conditions that read a pool's price (the decoder's TICK and TRAIL). */
-const readsPrice = (t?: Trigger | null) => t?.kind === "price" || t?.kind === "otherPool" || t?.kind === "trail";
+/** Conditions that read a price (the decoder's TICK, TRAIL and LINK). */
+const readsPrice = (t?: Trigger | null) => isPrice(t) || t?.kind === "trail";
 
 /** The pool whose price direction decides a lane's contract side: the first condition that reads a pool's price. */
 export const watched = (p: Pool, lane: Lane, watch: Pool = p): Pool =>
@@ -239,7 +240,11 @@ function encodeTrigger(c: Ctx, laneId: LaneId, t: Trigger): Cond {
     const w = watchedBy(c.own, t, c.watch);
     return { checker: CHECK.TICK, value: Math.round(tickAtPrice(w, t.price ?? 0)), checkPool: pool(w) };
   }
-  // the pair's Chainlink price, as a tick of this pool: the same number a pool price level would use
+  // the pair's Chainlink price, as a tick of that pool: the same number a pool price level would use
+  if (t.kind === "chainlink") {
+    const w = watchedBy(c.own, t, c.watch);
+    return { checker: CHECK.LINK, value: Math.round(tickAtPrice(w, t.price ?? 0)), checkPool: pool(w) };
+  }
   if (t.kind === "trail") return { checker: CHECK.TRAIL, value: ticksForMove(t.trailPct ?? 5, laneId === "up"), checkPool: pool(watchedBy(c.own, t, c.watch)) };
   if (t.kind === "fees") return { checker: CHECK.FEES, value: Math.round((t.feesPct ?? 1) * 100), checkPool: 0 };
   if (t.kind === "apr") return { checker: CHECK.APR, value: Math.round((t.aprPct ?? 5) * 100), checkPool: 0 };
@@ -410,6 +415,12 @@ function decodeTrigger(c: Ctx, laneId: LaneId, checker: number, value: number, c
     if (w.index === c.watch.index) return { kind: "price", price: priceAtTick(w, value) };
     return { kind: "otherPool", price: priceAtTick(w, value), poolIndex: w.index };
   }
+  if (checker === CHECK.LINK) {
+    const w = checkPool ? poolByIndex(checkPool) ?? c.watch : c.own;
+    const t: Trigger = { kind: "chainlink", price: priceAtTick(w, value) };
+    if (w.index !== c.watch.index) t.poolIndex = w.index;
+    return t;
+  }
   if (checker === CHECK.TRAIL) {
     const t: Trigger = { kind: "trail", trailPct: round2(pctForMove(value, laneId === "up")) };
     const w = checkPool ? poolByIndex(checkPool) : c.own;
@@ -475,7 +486,7 @@ function decodeLanes(c: Ctx, lower: Side, upper: Side): { down: Lane; up: Lane }
     if (s.checker === CHECK.OFF) return null;
     if (s.checker === CHECK.APR || (s.combine && s.checker2 === CHECK.APR)) return contractSide(c.watch, "down") === "lower" ? "down" : "up";
     // the first condition that reads a pool's price decides the direction: that pool's (0 = the leg's own pool)
-    const reads = (checker: number) => checker === CHECK.TICK || checker === CHECK.TRAIL;
+    const reads = (checker: number) => checker === CHECK.TICK || checker === CHECK.TRAIL || checker === CHECK.LINK;
     const dir = (checker: number) => reads(checker) || checker === CHECK.EDGE;
     if (!dir(s.checker) && !(s.combine && dir(s.checker2))) return null;
     const first = reads(s.checker) ? s.checkPool : s.combine && reads(s.checker2) ? s.checkPool2 : null;
@@ -540,6 +551,7 @@ function triggerErrors(c: Ctx, laneId: LaneId, t: Trigger, which: string): strin
     if (!(t.price! > 0)) e.push(`Set the trigger price${which}.`);
     else if (Math.abs(Math.round(tickAtPrice(watchedBy(c.own, t, c.watch), t.price!))) >= MAX_TICK) e.push(`The trigger price${which} is outside what Uniswap can price.`);
   }
+  if (t.kind === "chainlink" && t.poolIndex && !poolByIndex(t.poolIndex)) e.push(`Choose the pool whose Chainlink price to read${which}.`);
   if (t.kind === "otherPool" || (t.kind === "trail" && t.poolIndex)) {
     const w = t.poolIndex ? poolByIndex(t.poolIndex) : undefined;
     // the position's own pool is "price reaches a level"; a parked leg may still watch the pool it is parked in
@@ -705,6 +717,11 @@ export function describeTrigger(p: Pool, id: LaneId, t: Trigger): string {
       const other = t.poolIndex ? poolByIndex(t.poolIndex) : undefined;
       const w = other ?? p;
       return `${w.base.symbol} ${id === "down" ? "drops below" : "rises above"} ${fmt(t.price ?? 0)} ${w.quote.symbol} in ${other?.label ?? "another pool"}`;
+    }
+    case "chainlink": {
+      const other = t.poolIndex ? poolByIndex(t.poolIndex) : undefined;
+      const w = other ?? p;
+      return `Chainlink's ${w.base.symbol} price ${id === "down" ? "drops below" : "rises above"} ${fmt(t.price ?? 0)} ${w.quote.symbol}`;
     }
     case "trail": {
       const other = t.poolIndex ? poolByIndex(t.poolIndex) : undefined;
@@ -919,6 +936,8 @@ export function defaultTrigger(kind: TriggerKind, p: Pool, lane: LaneId, price: 
       return { kind, price: outside(p, price, range, lane, 5) };
     case "otherPool":
       return { kind, price: lane === "down" ? price * 0.95 : price * 1.05, poolIndex: otherPools[0]?.index ?? p.index };
+    case "chainlink":
+      return { kind, price: outside(p, price, range, lane, 5) };
     case "trail":
       return { kind, trailPct: 5 };
     case "fees":

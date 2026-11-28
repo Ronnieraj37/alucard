@@ -64,8 +64,8 @@ in tight ranges, so real ETH moves trigger them while the bot runs.
 ```bash
 set -a; source .env; set +a
 PM=0xE03A1074c86CFeDd5C142C4F04F1a1536e203543
-FEEDS=0xC539EE58250B88F2ECAb86682c06ce4cD6592a1b; HOOK=0x0482555fd63636Baa88bF1eA7d0e48e3F2Cb50C0
-RULES=0x59AC15D97080BF47be608750d82bB9528e57996E; ORDERS=0xa653D69C934B431431C11e55a59bbf69e524Db3c
+FEEDS=0x0e3f6F323727E8db4513cAC1667a659ED902F67a; HOOK=0x26Cc9Dff279Cb44193B9010fBFAcd998C1a090c0
+RULES=0x36dD90fcB4c0208b20800CA53d6622293D4f7389; ORDERS=0x9909261057eE2165aA9a2317b960Aa51812D04B3
 forge verify-contract --chain sepolia --watch $FEEDS src/PriceFeeds.sol:PriceFeeds \
   --constructor-args $(cast abi-encode "constructor(address)" $(cast wallet address --private-key $PRIVATE_KEY))
 forge verify-contract --chain sepolia --watch $HOOK src/RuleHook.sol:RuleHook \
@@ -159,9 +159,12 @@ default the app uses the Sepolia Alchemy URL with the network swapped (allow bot
 
 Admin calls on `PriceFeeds` (owner only): `setFeed(token, aggregator, maxAge)` lists a new token at once; changing or
 removing a listed one is announced with `queueFeed(token, aggregator, maxAge)` (aggregator 0 removes) and applied with
-`setFeed` two days later. `setMaxDeviationTicks(ticks)` sets how far a pool's price may be from Chainlink for steps to run
-(200 ≈ 2%; 0 turns the check off and is for tests only); `transferOwnership` then `acceptOwnership` hands the list over.
+`setFeed` two days later. The band (how far a pool's price may be from Chainlink: `setMaxDeviationTicks`, 200 ≈ 2%, and
+`setPairBand` for a tighter pair, 50 for two stablecoins) and the optional L2 sequencer feed (`setSequencer`) are set by
+`02_DeployCore`, which then calls `lockBands`: from then on every change is announced with `queueBand` / `queueSequencer`
+and applied two days later. `transferOwnership` then `acceptOwnership` hands the list over.
 
-Earlier deployments, still on Sepolia (their orders can be cancelled there): ConditionalOrders
-`0x6CD66E4c91635E2C7705fa2CE61Ac6df24cb12d3` (before the 2026-11-27 review fixes), `0xfCde70E4Ec35C79CD025306ff26AE1dEfFe72408` (average-price version), `0x05c6f35e2F12eFc54F26b26CE16A6226Ac74B6bC`; v1
+Earlier deployments (their orders can be cancelled there): before the 2026-11-28 guard update, ConditionalOrders
+`0xa653D69C934B431431C11e55a59bbf69e524Db3c` on Sepolia and `0xb190f93B9511B40c12F068b9bdd2d392aBAC3FBD` on Unichain
+Sepolia; on Sepolia also `0x6CD66E4c91635E2C7705fa2CE61Ac6df24cb12d3` (before the 2026-11-27 review fixes), `0xfCde70E4Ec35C79CD025306ff26AE1dEfFe72408` (average-price version), `0x05c6f35e2F12eFc54F26b26CE16A6226Ac74B6bC`; v1
 ConditionalOrders `0x4F2B3Af637Bd20D56D4238033f23a4c1CE381D63` (RuleHook `0x9D4E651bb9a27a9b1406151b3f12Bb1a61B090c0`).

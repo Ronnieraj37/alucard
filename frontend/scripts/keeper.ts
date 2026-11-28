@@ -71,7 +71,9 @@ export async function keep(rpc = RPC, key = KEY, dry = DRY, log = console.log) {
       log(`${label}: ${receipt.status} ${hash}`);
       return receipt;
     } catch (e) {
-      log(`${label}: skipped (${(e as Error).message.split("\n")[0]})`);
+      // name the contract's reason when there is one (SlippageLimit: the step waits for a fair price)
+      const reason = (e as Error).message.match(/Error: (\w+)\(/)?.[1] ?? (e as Error).message.split("\n")[0];
+      log(`${label}: waits (${reason})`);
       return null;
     }
   };

@@ -449,7 +449,7 @@ function Guard() {
   const below = q < GD_STOP;
   const ran = p >= 0.82;
   const status = ran
-    ? { t: "The market really fell: Chainlink agrees, the keeper runs the step", cls: "go" }
+    ? { t: "The market really fell: Chainlink follows, the keeper runs the step", cls: "go" }
     : below && out
       ? { t: "Pushed below the stop, Chainlink didn’t move: it does not count", cls: "no" }
       : p >= 0.5 && p < 0.62
@@ -468,7 +468,7 @@ function Guard() {
   })();
   return (
     <>
-      <Head eyebrow="Why nobody can fire your strategy" title="A push does nothing. Chainlink has to agree." />
+      <Head eyebrow="Why a push can’t hurt you" title="A push does nothing. A real move runs at once." />
       <div className="gd">
         <div className="gd-chart in" style={d(250)}>
           <svg width={GD_W} height={GD_H} viewBox={`0 0 ${GD_W} ${GD_H}`} aria-label="A pool's price pushed below a stop does not fire it; when Chainlink moves, it runs">
@@ -491,8 +491,8 @@ function Guard() {
         </div>
         <div className="gd-facts">
           {[
-            ["Both must be past your level", "The pool’s price and Chainlink’s. A push of 1.5% or 20%, for a minute or for hours: nothing."],
-            ["Never sells below Chainlink", "A step’s swap stops at your slippage from Chainlink. Trailing highs follow Chainlink too."],
+            ["±2% of Chainlink", "A pool’s price counts only inside the band (±0.5% for stablecoins). Held for hours, a push still fires nothing."],
+            ["Never sells into a push", "Every swap fills within your slippage of Chainlink, or the step waits. Add a Chainlink condition to confirm a level."],
             ["No lag in a real crash", "Chainlink moves with the market and the step runs at once. No price history: swaps pay nothing extra."],
           ].map(([h, t], k) => (
             <div key={h} className="gd-fact in" style={d(400 + k * 140)}>
@@ -620,7 +620,7 @@ function Built() {
   const facts = [
     ["Your strategy, card by card", "Two conditions, and / or, holds, repeats, run limits"],
     ["Move to any pool and back", "Into any pool sharing a token, or hold one; back by your own rule"],
-    ["Chainlink has to agree", "A push does nothing; a real move runs at once. Swaps anchored to Chainlink"],
+    ["Prices near Chainlink", "A push does nothing; a real move runs at once. No step sells into a push"],
     ["Any v4 pool", "Hookless or ours, as long as both tokens have a Chainlink feed"],
     ["A fee you set", "Keepers are paid your fee per step, whatever the gas price"],
     ["Limit orders in the swap", "The hook fills them while trades happen, no bot needed"],
@@ -649,7 +649,7 @@ function Built() {
         <div className="proof">
           <div className="in" style={d(900)}>
             <p className="num ruby">
-              <Count to={35126} delay={900} duration={1800} />
+              <Count to={43554} delay={900} duration={1800} />
             </p>
             <p className="s-small">strategy shapes, editor = contract</p>
           </div>
@@ -661,7 +661,7 @@ function Built() {
           </div>
           <div className="in" style={d(1100)}>
             <p className="num">
-              <Count to={146} delay={1100} duration={1800} />
+              <Count to={154} delay={1100} duration={1800} />
             </p>
             <p className="s-small">contract tests, attacks included</p>
           </div>
@@ -847,7 +847,7 @@ export const SLIDES: Slide[] = [
     title: "The price guard",
     theme: "paper",
     C: Guard,
-    notes: "Chainlink is not a condition you set. It is the check on every price. A step fires only when the pool’s price and Chainlink’s price are both past your level, and the pool is within about 2% of Chainlink. Push the pool below someone’s stop, by 1.5% or by 20%, and nothing happens, however long you hold it. The step’s own swap never sells further than your slippage below Chainlink, and trailing stops follow Chainlink’s best price. At worst a push delays a step, and for an LP a late step is cheap: the position keeps earning while it is in range. When the market itself moves, Chainlink moves too, and a keeper runs the step at once. No price history is stored, so swaps pay nothing for strategies, and any v4 pool of listed tokens works, with our hook or without one.",
+    notes: "Every price a strategy reads is checked against Chainlink. A pool’s price counts only while it is within about 2% of Chainlink, half a percent for two stablecoins, so pushing the pool past someone’s stop does nothing, however long you hold it. Inside that band a push can reach a level, but the step still cannot sell into it: every swap must fill within your slippage of Chainlink, or the step waits while the position keeps earning. If you want Chainlink itself to confirm a level, add the Chainlink price condition. When the market really moves, Chainlink moves too, and a keeper runs the step at once.",
   },
   {
     id: "landscape",
@@ -868,7 +868,7 @@ export const SLIDES: Slide[] = [
     title: "Built and live",
     theme: "paper",
     C: Built,
-    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A price counts only while Chainlink agrees; a push does nothing and a real move runs at once. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 35,126 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run at the same swaps and end within 0.1% of each other’s money on the strategies that test covers, 146 contract tests including the in-band pushes an outside review asked about. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
+    notes: "What’s live on Sepolia and Unichain Sepolia. Two conditions, and or or, holds, repeats and run limits. Move into any pool that shares a token, or hold one token, and come back by your own rule. A pool’s price counts only near Chainlink, and no step sells into a push; a real move runs at once. You can also add a Chainlink price condition. Keepers are paid the fee you set, whatever the gas. The hook fills limit orders inside swaps. The checks: 43,554 strategy shapes where the editor and the contract agree, 2,000 orders where the backtest and the contract run at the same swaps and end within 0.1% of each other’s money on the strategies that test covers, 154 contract tests including the in-band pushes an outside review asked about. You can also just say the strategy to the assistant: it asks back, then fills in the same steps.",
   },
   {
     id: "now",

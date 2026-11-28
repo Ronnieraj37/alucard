@@ -19,3 +19,12 @@ node_modules/
 .env.*
 !.env.example
 deployments/fork/
+
+# Foundry keeps every broadcast; only run-latest.json is the record of a deployment
+/broadcast/**/run-[0-9]*.json
+/broadcast/ForkMarket.s.sol/
+
+# Local tool state
+.impeccable/
+.solidity-auditor/
+.audit-*/
